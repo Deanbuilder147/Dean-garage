@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>机甲战棋游戏 - UI样式对照指南</title>
+    <style>
+        /* === CSS变量系统（来自DESIGN.md） === */
+        :root {
+            /* 核心色彩 */
+            --primary: #00FF41;
+            --primary-dim: #00ec3b;
+            --primary-container: #00fc40;
+            --primary-fixed: #00fc40;
+            --primary-fixed-dim: #00ec3b;
+            
+            --secondary: #ff6e81;
+            --secondary-dim: #e7004c;
+            --secondary-container: #be003d;
+            --secondary-fixed: #ffc2c6;
+            --secondary-fixed-dim: #ffaeb5;
+            
+            --tertiary: #81ecff;
+            --tertiary-dim: #00d4ec;
+            --tertiary-container: #00e3fd;
+            --tertiary-fixed: #00e3fd;
+            --tertiary-fixed-dim: #00d4ec;
+            
+            --error: #ff7351;
+            --error-dim: #d53d18;
+            --error-container: #b92902;
+            
+            /* 表面层级 */
+            --surface: #0a0a0a;
+            --surface-dim: #0a0a0a;
+            --surface-container: #0d0d0d;
+            --surface-container-low: #121212;
+            --surface-container-lowest: #000000;
+            --surface-container-high: #161616;
+            --surface-container-highest: #1a1a1a;
+            --surface-variant: #20262f;
+            --surface-bright: #262c36;
+            --surface-tint: #9cff93;
+            
+            /* 文字颜色 */
+            --on-surface: #f1f3fc;
+            --on-background: #f1f3fc;
+            --on-primary: #000000;
+            --on-secondary: #490012;
+            --on-tertiary: #005762;
+            --on-error: #450900;
+            --on-primary-container: #005a10;
+            --on-secondary-container: #fff6f5;
+            --on-tertiary-container: #004d57;
+            --on-error-container: #ffd2c8;
+            --on-surface-variant: #a8abb3;
+            --on-primary-fixed: #00440a;
+            --on-secondary-fixed: #6f0020;
+            --on-tertiary-fixed: #003840;
+            --on-primary-fixed-variant: #006513;
+            --on-secondary-fixed-variant: #a40033;
+            --on-tertiary-fixed-variant: #005762;
+            
+            /* 边框颜色 */
+            --outline: #72757d;
+            --outline-variant: #44484f;
+            
+            /* 字体 */
+            --font-headline: 'Space Grotesk', 'Courier New', monospace;
+            --font-body: 'Space Grotesk', 'Courier New', monospace;
+            --font-mono: 'Space Mono', 'Courier New', monospace;
+        }
+        
+        /* === 基础样式 === */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            background: var(--surface);
+            color: var(--on-surface);
+            font-family: var(--font-body);
+            padding: 40px;
+            line-height: 1.6;
+        }
+        
+        /* === CRT扫描线效果 === */
+        .scanline-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.05), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.05));
+            background-size: 100% 4px, 4px 100%;
+            pointer-events: none;
+            z-index: 1000;
+            animation: flicker 0.1s infinite;
+        }
+        
+        @keyframes flicker {
+            0% { opacity: 0.98; }
+            3% { opacity: 0.92; }
+            6% { opacity: 0.99; }
+            9% { opacity: 0.88; }
+            12% { opacity: 0.99; }
+            100% { opacity: 1; }
+        }
+        
+        /* === 抖动效果 === */
+        .dither-pattern {
+            background-image: radial-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 0);
+            background-size: 3px 3px;
+        }
+        
+        /* === 像素边框 === */
+        .pixel-border-primary {
+            box-shadow: 
+                0 -3px 0 0 var(--primary),
+                0 3px 0 0 var(--primary),
+                -3px 0 0 0 var(--primary),
+                3px 0 0 0 var(--primary);
+        }
+        
+        .pixel-border-secondary {
+            box-shadow: 
+                0 -3px 0 0 var(--secondary),
+                0 3px 0 0 var(--secondary),
+                -3px 0 0 0 var(--secondary),
+                3px 0 0 0 var(--secondary);
+        }
+        
+        .pixel-border-tertiary {
+            box-shadow: 
+                0 -3px 0 0 var(--tertiary),
+                0 3px 0 0 var(--tertiary),
+                -3px 0 0 0 var(--tertiary),
+                3px 0 0 0 var(--tertiary);
+        }
+        
+        /* === 注释标签（Annotation Tag） === */
+        .annotation-tag {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 4px;
+            background: var(--surface-container-high);
+            color: var(--outline);
+            border: 1px solid var(--outline-variant);
+            width: fit-content;
+            display: inline-block;
+        }
+        
+        /* === 按钮样式 === */
+        .tactical-btn {
+            font-family: var(--font-headline);
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 16px 24px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.1s steps(4), box-shadow 0.1s steps(4);
+            clip-path: polygon(
+                0 2px, 2px 2px, 2px 0,
+                calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px,
+                100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px),
+                calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px),
+                0 calc(100% - 2px)
+            );
+        }
+        
+        .tactical-btn-primary {
+            background: var(--primary);
+            color: var(--on-primary);
+            pixel-border-primary;
+        }
+        
+        .tactical-btn-primary:hover {
+            transform: translateY(2px);
+            box-shadow: 
+                0 -3px 0 0 var(--primary),
+                0 3px 0 0 var(--primary),
+                -3px 0 0 0 var(--primary),
+                3px 0 0 0 var(--primary),
+                0 0 20px rgba(0, 255, 65, 0.3);
+        }
+        
+        .tactical-btn-primary:active {
+            transform: translateY(4px);
+            box-shadow: 
+                0 -2px 0 0 var(--primary),
+                0 2px 0 0 var(--primary),
+                -2px 0 0 0 var(--primary),
+                2px 0 0 0 var(--primary);
+        }
+        
+        .tactical-btn-secondary {
+            background: transparent;
+            color: var(--secondary);
+            border: 3px solid var(--secondary);
+            opacity: 0.2;
+        }
+        
+        .tactical-btn-secondary:hover {
+            background: var(--secondary);
+            color: var(--on-secondary);
+            opacity: 1;
+        }
+        
+        .tactical-btn-tertiary {
+            background: transparent;
+            color: var(--tertiary);
+            border: 3px solid var(--tertiary);
+            opacity: 0.2;
+        }
+        
+        .tactical-btn-tertiary:hover {
+            background: var(--tertiary);
+            color: var(--on-tertiary);
+            opacity: 1;
+        }
+        
+        .tactical-btn-disabled {
+            background: var(--surface-container-highest);
+            color: var(--outline);
+            opacity: 0.5;
+            cursor: not-allowed;
+            border: 3px solid var(--outline-variant);
+        }
+        
+        /* === 卡片样式 === */
+        .tactical-card {
+            background: var(--surface-container);
+            border: 3px solid var(--outline-variant);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .tactical-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(
+                90deg,
+                transparent 0%,
+                var(--surface-container-high) 20%,
+                var(--surface-container-highest) 50%,
+                var(--surface-container-high) 80%,
+                transparent 100%
+            );
+        }
+        
+        .tactical-card-header {
+            padding: 16px;
+            background: var(--surface-container-high);
+            border-bottom: 1px solid var(--outline-variant);
+        }
+        
+        .tactical-card-title {
+            font-family: var(--font-headline);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--on-surface);
+        }
+        
+        .tactical-card-body {
+            padding: 16px;
+        }
+        
+        /* === 标签样式 === */
+        .tactical-label {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.25em;
+            padding: 4px 8px;
+            background: var(--surface-container-high);
+            color: var(--on-surface-variant);
+            border: 1px solid var(--outline-variant);
+            display: inline-block;
+        }
+        
+        .tactical-label-primary {
+            background: var(--primary);
+            color: var(--on-primary);
+            border: none;
+        }
+        
+        .tactical-label-secondary {
+            background: var(--secondary);
+            color: var(--on-secondary);
+            border: none;
+        }
+        
+        .tactical-label-tertiary {
+            background: var(--tertiary);
+            color: var(--on-tertiary);
+            border: none;
+        }
+        
+        /* === 进度条样式 === */
+        .progress-bar {
+            height: 24px;
+            width: 100%;
+            background: var(--surface-container-lowest);
+            border: 3px solid var(--outline-variant);
+            padding: 3px;
+            position: relative;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.5);
+            transition: width 0.3s steps(4);
+        }
+        
+        /* === 分段进度条 === */
+        .segmented-progress-bar {
+            height: 24px;
+            width: 100%;
+            background: var(--surface-container-lowest);
+            border: 3px solid var(--outline-variant);
+            padding: 3px;
+            display: flex;
+            gap: 3px;
+        }
+        
+        .segment {
+            flex-grow: 1;
+            background: var(--tertiary);
+            transition: opacity 0.2s steps(4);
+        }
+        
+        .segment.inactive {
+            opacity: 0.2;
+        }
+        
+        /* === 统计卡片 === */
+        .stat-card {
+            background: var(--surface-container-high);
+            padding: 24px;
+            border-left: 6px solid var(--primary);
+            position: relative;
+        }
+        
+        .stat-card-label {
+            font-family: var(--font-mono);
+            font-size: 9px;
+            color: var(--outline);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 8px;
+        }
+        
+        .stat-card-value {
+            font-family: var(--font-headline);
+            font-size: 24px;
+            font-weight: 900;
+            color: var(--on-surface);
+            text-transform: uppercase;
+            font-style: italic;
+        }
+        
+        /* === 容器样式 === */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .section {
+            margin-bottom: 60px;
+            padding: 24px;
+            background: var(--surface-container);
+            border: 3px solid var(--outline-variant);
+            position: relative;
+        }
+        
+        .section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(
+                90deg,
+                transparent 0%,
+                var(--surface-container-high) 20%,
+                var(--surface-container-highest) 50%,
+                var(--surface-container-high) 80%,
+                transparent 100%
+            );
+        }
+        
+        .section-title {
+            font-family: var(--font-headline);
+            font-size: 32px;
+            font-weight: 900;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 24px;
+            font-style: italic;
+        }
+        
+        .subsection {
+            margin-bottom: 40px;
+        }
+        
+        .subsection-title {
+            font-family: var(--font-headline);
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 16px;
+        }
+        
+        /* === 网格布局 === */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+        }
+        
+        /* === 示例元素 === */
+        .example-box {
+            padding: 20px;
+            background: var(--surface-container-low);
+            border: 1px solid var(--outline-variant);
+            margin-bottom: 16px;
+        }
+        
+        .color-swatch {
+            width: 60px;
+            height: 60px;
+            border: 2px solid var(--outline-variant);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            margin-bottom: 12px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--on-surface);
+        }
+        
+        /* === 标题样式 === */
+        h1 {
+            font-family: var(--font-headline);
+            font-size: 48px;
+            font-weight: 900;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 40px;
+            font-style: italic;
+            text-align: center;
+        }
+        
+        h2 {
+            font-family: var(--font-headline);
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--on-surface);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 20px;
+        }
+        
+        h3 {
+            font-family: var(--font-headline);
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+        
+        p {
+            margin-bottom: 16px;
+            color: var(--on-surface-variant);
+        }
+        
+        /* === 代码块 === */
+        .code-block {
+            background: var(--surface-container-lowest);
+            border: 1px solid var(--outline-variant);
+            padding: 16px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--primary);
+            overflow-x: auto;
+            margin-bottom: 16px;
+        }
+        
+        /* === 表格样式 === */
+        .tactical-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--surface-container);
+        }
+        
+        .tactical-table th,
+        .tactical-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--outline-variant);
+        }
+        
+        .tactical-table th {
+            background: var(--surface-container-high);
+            color: var(--tertiary);
+            font-family: var(--font-headline);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.1em;
+        }
+        
+        .tactical-table tr:hover {
+            background: var(--surface-container-low);
+        }
+        
+        /* === 响应式 === */
+        @media (max-width: 768px) {
+            body {
+                padding: 20px;
+            }
+            
+            .grid-2,
+            .grid-3,
+            .grid-4 {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 32px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="scanline-overlay"></div>
+    <div class="container">
+        <h1>机甲战棋游戏 UI样式对照指南</h1>
+        
+        <!-- 色彩系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: COLOR_SYSTEM]</div>
+            <h2 class="section-title">色彩系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">核心色彩</h3>
+                <div class="grid-3">
+                    <div class="color-swatch" style="background: var(--primary);">Primary<br/>#00FF41</div>
+                    <div class="color-swatch" style="background: var(--secondary);">Secondary<br/>#ff6e81</div>
+                    <div class="color-swatch" style="background: var(--tertiary);">Tertiary<br/>#81ecff</div>
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">错误状态</h3>
+                <div class="color-swatch" style="background: var(--error);">Error<br/>#ff7351</div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">表面层级</h3>
+                <div class="grid-4">
+                    <div class="color-swatch" style="background: var(--surface);">Surface<br/>#0a0a0a</div>
+                    <div class="color-swatch" style="background: var(--surface-container);">Container<br/>#0d0d0d</div>
+                    <div class="color-swatch" style="background: var(--surface-container-low);">Low<br/>#121212</div>
+                    <div class="color-swatch" style="background: var(--surface-container-high);">High<br/>#161616</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 字体系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: TYPOGRAPHY]</div>
+            <h2 class="section-title">字体系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Space Grotesk (Headline & Body)</h3>
+                <div class="example-box">
+                    <p style="font-family: var(--font-headline); font-size: 32px; font-weight: 900; color: var(--primary); font-style: italic; text-transform: uppercase;">VANGUARD UNIT_01</p>
+                    <p style="font-family: var(--font-body); font-size: 16px; margin-top: 16px;">The tactical interface utilizes high-contrast tonal stepping to ensure pilot readability under combat conditions.</p>
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Space Mono (Labels & Monospace)</h3>
+                <div class="example-box">
+                    <p style="font-family: var(--font-mono); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.25em;">SYSTEM_READY_0x00</p>
+                    <p style="font-family: var(--font-mono); font-size: 12px; color: var(--secondary); text-transform: uppercase; letter-spacing: 0.25em; margin-top: 8px;">CONNECTION_ERR_0x0F</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 按钮系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: BUTTONS]</div>
+            <h2 class="section-title">按钮系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Primary Button</h3>
+                <div class="example-box">
+                    <button class="tactical-btn tactical-btn-primary pixel-border-primary">EXECUTE_COMMAND</button>
+                    <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .tactical-btn-primary]</p>
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Secondary Button</h3>
+                <div class="example-box">
+                    <button class="tactical-btn tactical-btn-secondary">ABORT_SEQUENCE</button>
+                    <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .tactical-btn-secondary]</p>
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Tertiary Button</h3>
+                <div class="example-box">
+                    <button class="tactical-btn tactical-btn-tertiary">SYNC_PACKETS</button>
+                    <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .tactical-btn-tertiary]</p>
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Disabled Button</h3>
+                <div class="example-box">
+                    <button class="tactical-btn tactical-btn-disabled">LOCKED_MODULE</button>
+                    <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .tactical-btn-disabled]</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 卡片系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: CARDS]</div>
+            <h2 class="section-title">卡片系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Basic Card</h3>
+                <div class="tactical-card">
+                    <div class="tactical-card-header">
+                        <div class="tactical-card-title">UNIT_DIAGNOSTICS</div>
+                    </div>
+                    <div class="tactical-card-body">
+                        <p>System integrity check complete. All operational systems nominal.</p>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .tactical-card]</p>
+            </div>
+        </div>
+        
+        <!-- 标签系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: LABELS]</div>
+            <h2 class="section-title">标签系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Annotation Tags</h3>
+                <div class="example-box">
+                    <span class="annotation-tag">[ID: MAN_REV_01]</span>
+                    <span class="annotation-tag">[STAT: UPLINK_ACTIVE]</span>
+                    <span class="annotation-tag">[MODULE: ACTION_BTN]</span>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .annotation-tag]</p>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Tactical Labels</h3>
+                <div class="example-box">
+                    <span class="tactical-label">SYSTEM_READY</span>
+                    <span class="tactical-label-primary">ACTIVE</span>
+                    <span class="tactical-label-secondary">WARNING</span>
+                    <span class="tactical-label-tertiary">SYNCING</span>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASSES: .tactical-label, .tactical-label-primary, .tactical-label-secondary, .tactical-label-tertiary]</p>
+            </div>
+        </div>
+        
+        <!-- 进度条系统 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: PROGRESS_BARS]</div>
+            <h2 class="section-title">进度条系统</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Basic Progress Bar</h3>
+                <div class="example-box">
+                    <div style="display: flex; justify-between; font-family: var(--font-mono); font-size: 10px; color: var(--primary); margin-bottom: 8px;">
+                        <span>[INTEGRITY_INDEX]</span>
+                        <span>88%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" style="width: 88%;"></div>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .progress-bar]</p>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Segmented Progress Bar</h3>
+                <div class="example-box">
+                    <div style="display: flex; justify-between; font-family: var(--font-mono); font-size: 10px; color: var(--tertiary); margin-bottom: 8px;">
+                        <span>[RESERVE_CAPACITY]</span>
+                        <span>42/100</span>
+                    </div>
+                    <div class="segmented-progress-bar">
+                        <div class="segment"></div>
+                        <div class="segment"></div>
+                        <div class="segment"></div>
+                        <div class="segment"></div>
+                        <div class="segment inactive"></div>
+                        <div class="segment inactive"></div>
+                        <div class="segment inactive"></div>
+                        <div class="segment inactive"></div>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .segmented-progress-bar]</p>
+            </div>
+        </div>
+        
+        <!-- 统计卡片 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: STAT_CARDS]</div>
+            <h2 class="section-title">统计卡片</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Stats Matrix</h3>
+                <div class="grid-4">
+                    <div class="stat-card" style="border-left-color: var(--primary);">
+                        <div class="stat-card-label">ARMOR_CLASS</div>
+                        <div class="stat-card-value">HEAVY_MK2</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color: var(--tertiary);">
+                        <div class="stat-card-label">SCAN_RANGE</div>
+                        <div class="stat-card-value">2400_KM</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color: var(--secondary);">
+                        <div class="stat-card-label">PILOT_STATUS</div>
+                        <div class="stat-card-value">COMMANDER</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color: var(--primary-dim);">
+                        <div class="stat-card-label">LOG_ENTRIES</div>
+                        <div class="stat-card-value">1,024_REC</div>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .stat-card]</p>
+            </div>
+        </div>
+        
+        <!-- 特殊效果 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: SPECIAL_EFFECTS]</div>
+            <h2 class="section-title">特殊效果</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Scanline Overlay</h3>
+                <div class="example-box">
+                    <div class="scanline-overlay" style="position: relative; background: var(--surface-container); height: 80px; display: flex; align-items: center; justify-content: center;">
+                        <div style="font-family: var(--font-headline); font-size: 20px; font-weight: 900; color: var(--primary); text-transform: uppercase; animation: flicker 0.1s infinite;">
+                            SCANLINE_ACTIVE
+                        </div>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .scanline-overlay]</p>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Dither Pattern</h3>
+                <div class="example-box">
+                    <div style="background: var(--surface-container); padding: 20px; position: relative;">
+                        <div class="dither-pattern" style="position: absolute; inset: 0; opacity: 0.3;"></div>
+                        <p style="position: relative; z-index: 1; color: var(--on-surface);">Dither pattern overlay</p>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASS: .dither-pattern]</p>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">Pixel Borders</h3>
+                <div class="example-box">
+                    <div style="display: flex; gap: 20px;">
+                        <div style="padding: 16px; background: var(--surface-container); width: 150px;" class="pixel-border-primary">
+                            <span class="tactical-label">PRIMARY</span>
+                        </div>
+                        <div style="padding: 16px; background: var(--surface-container); width: 150px;" class="pixel-border-secondary">
+                            <span class="tactical-label">SECONDARY</span>
+                        </div>
+                        <div style="padding: 16px; background: var(--surface-container); width: 150px;" class="pixel-border-tertiary">
+                            <span class="tactical-label">TERTIARY</span>
+                        </div>
+                    </div>
+                </div>
+                <p style="margin-top: 12px; font-family: var(--font-mono); font-size: 11px;">[CLASSES: .pixel-border-primary, .pixel-border-secondary, .pixel-border-tertiary]</p>
+            </div>
+        </div>
+        
+        <!-- 设计规范 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: DESIGN_RULES]</div>
+            <h2 class="section-title">设计规范</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">核心原则</h3>
+                <table class="tactical-table">
+                    <thead>
+                        <tr>
+                            <th>规则</th>
+                            <th>说明</th>
+                            <th>实现</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="tactical-label-primary">NO-LINE</span></td>
+                            <td>禁止1px solid边框，使用色调层级区分</td>
+                            <td>使用 `::before` 伪元素渐变</td>
+                        </tr>
+                        <tr>
+                            <td><span class="tactical-label-secondary">0PX_RADIUS</span></td>
+                            <td>所有组件必须直角</td>
+                            <td>`border-radius: 0px`</td>
+                        </tr>
+                        <tr>
+                            <td><span class="tactical-label-tertiary">SPACE_GROTESK</span></td>
+                            <td>标题和主要文本使用Space Grotesk</td>
+                            <td>`font-family: var(--font-headline)`</td>
+                        </tr>
+                        <tr>
+                            <td><span class="tactical-label">STEPS_ANIM</span></td>
+                            <td>使用 `steps(4)` 模拟低帧率</td>
+                            <td>`transition: steps(4)`</td>
+                        </tr>
+                        <tr>
+                            <td><span class="tactical-label">CRT_SCAN</span></td>
+                            <td>所有主表面叠加CRT scanlines</td>
+                            <td>`.scanline-overlay`</td>
+                        </tr>
+                        <tr>
+                            <td><span class="tactical-label">PIXEL_BORDER</span></td>
+                            <td>3px粗边框 + 多重阴影</td>
+                            <td>`.pixel-border-primary`</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- 使用示例 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: USAGE_EXAMPLES]</div>
+            <h2 class="section-title">使用示例</h2>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">完整卡片组件</h3>
+                <div class="code-block">
+&lt;div class="tactical-card"&gt;
+  &lt;div class="tactical-card-header"&gt;
+    &lt;div class="tactical-card-title"&gt;UNIT_DIAGNOSTICS&lt;/div&gt;
+    &lt;span class="annotation-tag"&gt;[ID: UNIT_01]&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;div class="tactical-card-body"&gt;
+    &lt;div class="grid-2"&gt;
+      &lt;div&gt;
+        &lt;div class="stat-card-label"&gt;ARMOR_CLASS&lt;/div&gt;
+        &lt;div class="stat-card-value"&gt;HEAVY_MK2&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;div&gt;
+        &lt;div class="stat-card-label"&gt;PILOT_STATUS&lt;/div&gt;
+        &lt;div class="stat-card-value"&gt;ACTIVE&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div style="margin-top: 16px;"&gt;
+      &lt;div class="progress-bar"&gt;
+        &lt;div class="progress-bar-fill" style="width: 88%;"&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+                </div>
+            </div>
+            
+            <div class="subsection">
+                <h3 class="subsection-title">按钮组</h3>
+                <div class="code-block">
+&lt;div class="grid-3"&gt;
+  &lt;button class="tactical-btn tactical-btn-primary pixel-border-primary"&gt;
+    EXECUTE
+  &lt;/button&gt;
+  &lt;button class="tactical-btn tactical-btn-secondary"&gt;
+    ABORT
+  &lt;/button&gt;
+  &lt;button class="tactical-btn tactical-btn-tertiary"&gt;
+    SYNC
+  &lt;/button&gt;
+&lt;/div&gt;
+                </div>
+            </div>
+        </div>
+        
+        <!-- CSS变量速查 -->
+        <div class="section">
+            <div class="annotation-tag" style="position: absolute; top: -12px; left: 12px;">[SECTION: CSS_VARIABLES]</div>
+            <h2 class="section-title">CSS变量速查</h2>
+            
+            <table class="tactical-table">
+                <thead>
+                    <tr>
+                        <th>变量名</th>
+                        <th>值</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code style="color: var(--primary);">--primary</code></td>
+                        <td>#00FF41</td>
+                        <td>主要交互元素、CTA按钮</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--secondary);">--secondary</code></td>
+                        <td>#ff6e81</td>
+                        <td>次要操作、警告状态</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--tertiary);">--tertiary</code></td>
+                        <td>#81ecff</td>
+                        <td>信息状态、补充交互</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--error);">--error</code></td>
+                        <td>#ff7351</td>
+                        <td>错误状态、危险操作</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--on-surface);">--surface</code></td>
+                        <td>#0a0a0a</td>
+                        <td>基础背景色</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--on-surface);">--surface-container</code></td>
+                        <td>#0d0d0d</td>
+                        <td>主面板背景</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--on-surface);">--on-surface</code></td>
+                        <td>#f1f3fc</td>
+                        <td>主要文本颜色</td>
+                    </tr>
+                    <tr>
+                        <td><code style="color: var(--outline);">--outline</code></td>
+                        <td>#72757d</td>
+                        <td>次要文本、分割线</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

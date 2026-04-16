@@ -1,0 +1,17 @@
+{
+  "name": "mecha-battle-map-service",
+  "version": "1.0.0",
+  "description": "Map Service for Mecha Battle - Battlefield & Terrain Management",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.0",
+    "jsonwebtoken": "^9.0.0",
+    "sql.js": "^1.10.0"
+  }
+}

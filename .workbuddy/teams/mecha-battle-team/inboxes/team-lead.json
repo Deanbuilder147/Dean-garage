@@ -1,0 +1,56 @@
+[
+  {
+    "id": "msg-1776179878541-wj3s2o",
+    "from": "hangar-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## 格纳库服务(hangar-service)检查报告\n\n### 检查结果\n\n**已修复的问题：**\n\n1. **端口配置** ✅\n   - 原配置：`3001`\n   - 已修复为：`3002`（符合规范）\n\n2. **CORS配置** ✅\n   - 原配置：`app.use(cors())` - 允许所有来源\n   - 已修复为：限制只允许 `http://localhost:8081` 和 `http://localhost:8080`\n\n3. **数据库路径** ✅\n   - 路径：`./data/hangar.db`（正确）\n   - 使用 sql.js，数据存储在 `src/data/hangar.db`\n\n### 当前配置确认\n\n| 项目 | 配置值 |\n|------|--------|\n| 服务端口 | 3002 |\n| API前缀 | /api/hangar |\n| CORS允许来源 | http://localhost:8081, http://localhost:8080 |\n| 数据库路径 | ./data/hangar.db |\n| 静态文件 | /api/hangar/units/uploads |\n\n格纳库服务已按规范修复完成。",
+    "timestamp": "2026-04-14T15:17:58.541Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776179884389-3rtpup",
+    "from": "auth-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## 认证服务 (auth-service) 检查报告\n\n### 检查项目\n\n| 检查项 | 状态 | 说明 |\n|--------|------|------|\n| 端口配置 | ✅ 已修复 | 原为 3005，已修改为 3001 |\n| API前缀 | ✅ 正确 | `/api/auth` |\n| 数据库路径 | ✅ 正确 | `./data/auth.db` |\n| JWT配置 | ✅ 正确 | Secret + 7天过期时间 |\n| 注册接口 | ✅ 正常 | POST /api/auth/register |\n| 登录接口 | ✅ 正常 | POST /api/auth/login |\n| 用户信息 | ✅ 正常 | GET /api/auth/me |\n| Token验证 | ✅ 正常 | GET /api/auth/verify |\n\n### 修复内容\n- **config/index.js**: 默认端口从 `3005` 改为 `3001`\n\n### 服务状态\n认证服务代码结构完整，所有API功能正常，已符合团队端口规范。",
+    "timestamp": "2026-04-14T15:18:04.389Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776179905737-iqk37w",
+    "from": "comm-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## Comm-Service 检查报告\n\n### 检查结果 ✅\n\n**端口配置**: 已修正\n- 原端口: 使用 `process.env.PORT || 3005`\n- 修正后: 固定端口 `3005`（符合PORT_CONFIG.md规范）\n\n**API路径**: \n- `/api/comm/health` - 健康检查\n- `/api/comm/stats/rooms` - 房间统计\n\n**房间管理功能**: ✅ 正常\n- `join-room` - 加入房间\n- `leave-room` - 离开房间\n- 房间状态内存管理 (Map)\n- 房间空时自动清理\n\n**消息系统功能**: ✅ 正常\n- `chat-message` - 聊天消息\n- `system-message` - 系统消息\n- `move-unit` - 单位移动广播\n- `attack` / `attack-result` - 攻击事件\n- `surprise-attack` / `surprise-choice` - 奇袭系统\n- `end-turn` / `phase-change` - 回合管理\n- 玩家状态同步 (ready, config)\n- 断线清理处理\n\n**WebSocket配置**: \n- Socket.io 认证中间件 (JWT)\n- CORS配置正确 (前端端口8081)\n- 支持 websocket + polling\n\n**已修复内容**:\n1. `index.js` 第3行: 注释端口 3004 → 3005\n2. `index.js` 第66行: `process.env.PORT || 3005` → `3005` (固定端口)\n\nComm-Service 代码完整，端口已统一，所有功能正常。",
+    "timestamp": "2026-04-14T15:18:25.737Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776179917737-kbr0cx",
+    "from": "combat-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## 战斗服务(combat-service)检查结果\n\n### 1. 端口配置检查\n\n| 项目 | 当前值 | 期望值 | 状态 |\n|------|--------|--------|------|\n| HTTP端口 | 3003 | 3004 | ⚠️ **需要修复** |\n| API前缀 | /api/combat | /api/combat | ✅ 正确 |\n| WebSocket | 与HTTP共用 | 与HTTP共用 | ✅ 正确 |\n\n**问题发现**: \n- `.env` 文件中 `PORT=3003` 需要改为 `PORT=3004`\n- `src/index.js` 中默认端口 fallback 也需要更新\n\n### 2. WebSocket配置检查\n\n✅ **状态**: 正确\n- WebSocketServer 使用 `server` 参数与HTTP共用端口\n- socketService.js 实现了完整的WebSocket管理:\n  - 连接认证(Token验证)\n  - 战斗房间管理 (join_battle/leave_battle)\n  - 实时消息广播 (unit_moved, unit_attacked, turn_ended)\n  - 心跳检测 (ping/pong)\n\n### 3. 阵营技能API检查\n\n| 技能 | API端点 | 状态 | 备注 |\n|------|---------|------|------|\n| **奇袭系统** | POST `/:id/attack` (自动触发) | ✅ 正常 | 马克西翁特有，50%几率触发 |\n| **奇袭处理** | POST `/:id/surprise-choice` | ✅ 正常 | 支持replace/counter/giveup |\n| **火力覆盖** | POST `/:id/artillery` | ✅ 正常 | 地球联合阵营技能，范围15伤害 |\n| **迷雾系统** | POST `/:id/fog-system` | ✅ 正常 | 马克西翁阵营技能，骰子随机效果 |\n| **增援系统** | POST `/:id/attack` (自动触发) | ✅ 正常 | 拜隆阵营被动技能 |\n\n**战斗结算系统(combatResolver.js)**:\n- `resolveAttack()` - 基础攻击结算\n- `checkSurpriseAttack()` - 奇袭触发检查\n- `resolveSurpriseAttack()` - 奇袭攻击结算\n- `resolveEarthArtillery()` - 地球联合火力覆盖\n- `resolveFogSystem()` - 马克西翁迷雾系统\n- `getSupportUnits()` / `resolveSupport()` - 拜隆增援系统\n\n**回合管理系统(turnManager.js)**:\n- 完整支持6个阶段: spawn_selection → spawn_deployment → tactical → move → action → end\n- 阵营轮次: earth → balon → maxion\n- 回合开始时自动应用阵营效果\n\n### 总结\n\n战斗服务代码质量良好，**阵营技能全部已实现**。唯一需要修复的是端口配置从3003改为3004，需要在以下文件修改:\n\n1. `services/combat-service/.env` - 修改 PORT=3004\n2. `services/combat-service/src/index.js` - 修改默认 fallback 端口",
+    "timestamp": "2026-04-14T15:18:37.737Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776179931699-i57eoh",
+    "from": "map-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## Map-Service 检查报告\n\n### ✅ 修改完成\n\n1. **端口修正**: 3002 → 3003\n   - 文件: `src/config/index.js`\n\n2. **API前缀修正**: `/api/battlefields` → `/api/map/battlefields`\n   - 文件: `src/index.js`\n   - 同时更新了API文档说明\n\n### ✅ 代码状态\n\n- 六角格计算工具 (`src/utils/hexUtils.js`): ✅ 完整实现\n  - hexToPixel / pixelToHex 坐标转换\n  - hexDistance 距离计算\n  - getNeighbors 相邻格子\n  - getHexesInRange 范围查询\n  - A*寻路算法 (findPath)\n\n- 地形API (`src/routes/battlefields.js`): ✅ 正常\n  - GET /api/map/battlefields - 战场列表\n  - GET /api/map/battlefields/:id - 战场详情\n  - POST /api/map/battlefields - 创建战场\n  - PUT /api/map/battlefields/:id - 更新战场\n  - DELETE /api/map/battlefields/:id - 删除战场\n  - GET /api/map/battlefields/:id/spawn-points - 出生点\n  - POST /api/map/battlefields/:id/terrain - 批量更新地形\n  - DELETE /api/map/battlefields/:id/terrain - 清除地形\n  - GET /api/map/battlefields/terrain/types - 地形类型\n  - POST /api/map/battlefields/utils/path - A*寻路\n  - POST /api/map/battlefields/utils/range - 范围查询\n\n- 数据库 (`src/database/db.js`): ✅ 正常\n  - SQLite (sql.js)\n  - battlefields 表\n  - terrain_types 表\n  - 默认地形数据已初始化\n\n### ✅ 语法检查\n- 无Lint错误\n\n服务已符合端口3003和API前缀/api/map的配置规范。",
+    "timestamp": "2026-04-14T15:18:51.699Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776179950167-mmfyom",
+    "from": "frontend-agent",
+    "to": "team-lead",
+    "type": "message",
+    "content": "## 前端 Vue 文件端口配置检查报告\n\n### 检查结果\n\n发现 **2 个文件** 存在硬编码的 `localhost:3000` 端口问题，需要修复。\n\n### 需要修复的文件\n\n1. **BattlefieldSelector.vue** (第 126 行和第 169 行)\n   - `fetch('http://localhost:3000/api/battlefields')`\n   - `fetch('http://localhost:3000/api/rooms', {...})`\n   - 影响：战场列表加载和房间创建\n\n2. **BattlefieldView.vue** (多个位置)\n   - 第 863 行: `fetch('http://localhost:3000/api/battlefields')`\n   - 第 889 行: `fetch('http://localhost:3000/api/battlefields', {...})`\n   - 第 928 行: `fetch(`http://localhost:3000/api/battlefields/${bf.id}`)`\n   - 第 975 行: `fetch(`http://localhost:3000/api/battlefields/${currentBattlefield.value.id}`, {...})`\n   - 第 1016 行: `fetch(`http://localhost:3000/api/battlefields/${id}`, {...})`\n   - 第 1028 行: `fetch('http://localhost:3000/api/battles', {...})`\n   - 影响：战场编辑器的所有 API 调用\n\n3. **PreparationRoom.vue** (多个位置)\n   - 第 386 行: `fetch(`http://localhost:3000/api/rooms/${roomId.value}`, {...})`\n   - 第 435 行: `fetch('http://localhost:3000/api/units', {...})`\n   - 第 460 行: `fetch(`http://localhost:3000/api/rooms/${roomId.value}/join`, {...})`\n   - 第 512 行: `fetch(`http://localhost:3000/api/rooms/${roomId.value}/ready`, {...})`\n   - 第 548 行: `fetch(`http://localhost:3000/api/rooms/${roomId.value}/start`, {...})`\n   - 第 581 行: `fetch(`http://localhost:3000/api/rooms/${roomId.value}/leave`, {...})`\n   - 影响：整备室的所有 API 调用\n\n### 正确的配置\n\n根据 `frontend/src/config/ports.js` 文件：\n- API 基础路径: `/api`\n- 通过 Vite 代理转发到后端服务\n\n### 修复建议\n\n将所有 `http://localhost:3000/api` 替换为 `/api`。\n\n例如：\n- `fetch('http://localhost:3000/api/battlefields')` → `fetch('/api/battlefields')`\n- `fetch('http://localhost:3000/api/rooms')` → `fetch('/api/rooms')`\n\n### 检查通过的文件\n\n以下文件已正确使用统一配置，无需修改：\n- ✅ LoginView.vue - 使用 `/api/auth/login`\n- ✅ RegisterView.vue - 使用 `/api/auth/register`\n- ✅ BattleView.vue - 使用 `/api/battles/*`\n- ✅ UnitEditorView.vue - 使用 `/api/hangar/*`\n- ✅ HomeView.vue - 纯 UI 组件，无 API 调用",
+    "timestamp": "2026-04-14T15:19:10.167Z",
+    "read": true
+  }
+]

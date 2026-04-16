@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg-1776174132754-an69fa",
+    "from": "frontend-agent",
+    "to": "comm-agent",
+    "type": "message",
+    "content": "前端服务已配置完成。请确认你的 Comm 服务运行在 3005 端口，API 路径前缀为 `/api/comm`。\n\n前端准备房间路由: `/preparation/:roomId`",
+    "timestamp": "2026-04-14T13:42:12.754Z",
+    "read": true
+  }
+]

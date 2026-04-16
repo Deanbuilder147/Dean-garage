@@ -1,0 +1,403 @@
+/* ===== 按钮系统 ===== */
+.tactical-btn {
+  background: var(--primary);
+  color: var(--on-primary);
+  padding: 16px 32px;
+  font-family: 'Space Grotesk', monospace, sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 14px;
+  border: 3px solid var(--primary);
+  border-radius: 0;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.1s steps(4);
+  box-shadow: 
+    0 -3px 0 0 var(--primary),
+    0 3px 0 0 var(--primary),
+    -3px 0 0 0 var(--primary),
+    3px 0 0 0 var(--primary);
+}
+
+.tactical-btn:hover {
+  transform: translateY(2px);
+  box-shadow: 
+    0 -2px 0 0 var(--primary),
+    0 2px 0 0 var(--primary),
+    -2px 0 0 0 var(--primary),
+    2px 0 0 0 var(--primary);
+}
+
+.tactical-btn:active {
+  transform: translateY(4px);
+  animation: jitter 0.1s steps(4);
+}
+
+.tactical-btn:disabled {
+  background: var(--surface-container-low);
+  color: var(--outline);
+  border-color: var(--outline-variant);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 主要按钮（绿色渐变） */
+.tactical-btn-primary {
+  background: linear-gradient(180deg, var(--primary) 0%, var(--primary-container) 100%);
+  border: 3px solid var(--primary);
+  backdrop-filter: blur(8px);
+}
+
+/* 次要按钮（红色幽灵边框） */
+.tactical-btn-secondary {
+  background: transparent;
+  color: var(--secondary);
+  border: 3px solid rgba(255, 110, 129, 0.2);
+  box-shadow: none;
+}
+
+.tactical-btn-secondary:hover {
+  background: rgba(255, 110, 129, 0.1);
+  border-color: var(--secondary);
+  box-shadow: 
+    0 -3px 0 0 var(--secondary-dim),
+    0 3px 0 0 var(--secondary-dim),
+    -3px 0 0 0 var(--secondary-dim),
+    3px 0 0 0 var(--secondary-dim);
+}
+
+/* 信息按钮（蓝色） */
+.tactical-btn-tertiary {
+  background: transparent;
+  color: var(--tertiary);
+  border: 3px solid rgba(129, 236, 255, 0.2);
+  box-shadow: none;
+}
+
+.tactical-btn-tertiary:hover {
+  background: rgba(129, 236, 255, 0.1);
+  border-color: var(--tertiary);
+}
+
+/* 危险按钮（红色） */
+.tactical-btn-danger {
+  background: var(--error);
+  color: var(--on-primary);
+  border: 3px solid var(--error);
+}
+
+.tactical-btn-danger:hover {
+  transform: translateY(2px);
+  background: #ff9800;
+  border-color: #ff9800;
+}
+
+/* 小按钮 */
+.tactical-btn-sm {
+  padding: 10px 20px;
+  font-size: 12px;
+}
+
+/* ===== 卡片系统 ===== */
+.tactical-card {
+  background: var(--surface-container);
+  padding: 24px;
+  border-radius: 0;
+  position: relative;
+  overflow: hidden;
+  color: var(--on-surface);
+}
+
+/* 使用色调层级代替边框 */
+.tactical-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg, 
+    transparent, 
+    var(--outline-variant) 20%, 
+    var(--outline-variant) 80%, 
+    transparent
+  );
+  opacity: 0.5;
+}
+
+.tactical-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg, 
+    transparent, 
+    var(--surface-container-high) 20%, 
+    var(--surface-container-high) 80%, 
+    transparent
+  );
+}
+
+/* 标题栏 */
+.tactical-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--surface-container-highest);
+}
+
+.tactical-card-title {
+  font-family: 'Space Grotesk', monospace, sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+}
+
+/* ===== 标签（全大写Monospace） ===== */
+.tactical-label {
+  font-family: 'Space Grotesk', monospace, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--outline);
+  padding: 2px 8px;
+  background: var(--surface-container-highest);
+  border: none;
+  border-radius: 0;
+}
+
+/* 阵营徽章 */
+.faction-badge {
+  padding: 4px 12px;
+  background: var(--surface-container-highest);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 0;
+  color: var(--on-surface);
+}
+
+.faction-earth {
+  color: var(--faction-earth);
+  border-left: 2px solid var(--faction-earth);
+}
+
+.faction-balon {
+  color: var(--faction-balon);
+  border-left: 2px solid var(--faction-balon);
+}
+
+.faction-maxion {
+  color: var(--faction-maxion);
+  border-left: 2px solid var(--faction-maxion);
+}
+
+/* ===== 输入框 ===== */
+.tactical-input {
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  padding: 16px;
+  font-family: 'Space Mono', monospace, sans-serif;
+  font-size: 14px;
+  border: 1px solid var(--surface-container-highest);
+  border-radius: 0;
+  caret-color: var(--primary);
+  width: 100%;
+  transition: all 0.2s steps(4);
+}
+
+.tactical-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 
+    0 0 0 2px rgba(0, 255, 65, 0.1),
+    0 0 8px rgba(0, 255, 65, 0.2);
+}
+
+.tactical-input::placeholder {
+  color: var(--outline-variant);
+}
+
+/* 选择框 */
+.tactical-select {
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  padding: 16px;
+  font-family: 'Space Mono', monospace, sans-serif;
+  font-size: 14px;
+  border: 1px solid var(--surface-container-highest);
+  border-radius: 0;
+  cursor: pointer;
+  appearance: none;
+  width: 100%;
+}
+
+.tactical-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* ===== 进度条（Sync-Bar） ===== */
+.sync-bar {
+  height: 24px;
+  background: var(--surface-container-lowest);
+  position: relative;
+  overflow: hidden;
+  border-radius: 0;
+}
+
+.sync-bar-fill {
+  height: 100%;
+  background: var(--secondary);
+  /* 抖动图案 */
+  background-image: 
+    linear-gradient(45deg, transparent 25%, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.1) 50%, transparent 50%, transparent 75%, rgba(255,255,255,0.1) 75%);
+  background-size: 8px 8px;
+  box-shadow: 0 0 20px rgba(255, 110, 129, 0.5);
+  transition: width 0.3s steps(4);
+}
+
+/* ===== 列表项 ===== */
+.tactical-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-container-highest);
+  border-radius: 0;
+  cursor: pointer;
+  transition: all 0.2s steps(4);
+  position: relative;
+}
+
+.tactical-list-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--outline-variant);
+  transition: all 0.2s steps(4);
+}
+
+.tactical-list-item:hover {
+  background: var(--surface-container);
+  transform: translateX(4px);
+}
+
+.tactical-list-item:hover::before {
+  background: var(--primary);
+  width: 4px;
+}
+
+.tactical-list-item.active {
+  background: rgba(0, 255, 65, 0.05);
+}
+
+.tactical-list-item.active::before {
+  background: var(--primary);
+  width: 4px;
+}
+
+/* ===== 模态框 ===== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-overlay .tactical-modal {
+  background: var(--surface-container);
+  padding: 32px;
+  border-radius: 0;
+  max-width: 400px;
+  width: 90%;
+  position: relative;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+}
+
+.modal-overlay .tactical-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--primary), var(--tertiary), var(--primary));
+  background-size: 200% 100%;
+  animation: gradient-slide 3s linear infinite;
+}
+
+@keyframes gradient-slide {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+/* ===== 提示信息 ===== */
+.hint-text {
+  font-size: 12px;
+  color: var(--outline);
+  margin-top: 8px;
+  font-family: 'Space Mono', monospace, sans-serif;
+}
+
+.hint-text.warning {
+  color: #ff9800;
+}
+
+.hint-text.info {
+  color: var(--tertiary);
+}
+
+/* ===== 状态指示器 ===== */
+.status-badge {
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 0;
+}
+
+.status-badge.active {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--primary);
+}
+
+.status-badge.pending {
+  background: rgba(255, 152, 0, 0.1);
+  color: #ff9800;
+}
+
+.status-badge.done {
+  background: rgba(129, 236, 255, 0.1);
+  color: var(--tertiary);
+}
+
+/* ===== 分隔条 ===== */
+.tactical-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--outline-variant) 20%, var(--outline-variant) 80%, transparent);
+  margin: 16px 0;
+}

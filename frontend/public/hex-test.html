@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>六角格排列测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: monospace;
+      background: #1a1a2e;
+      color: #fff;
+    }
+    canvas {
+      border: 2px solid #444;
+      background: #0f0f1a;
+    }
+    .controls {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #252545;
+      border-radius: 8px;
+    }
+    .controls h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      color: #aaa;
+    }
+    .control-group {
+      margin-bottom: 10px;
+    }
+    .control-group label {
+      display: inline-block;
+      width: 80px;
+      color: #888;
+    }
+    button {
+      padding: 8px 16px;
+      margin-right: 5px;
+      cursor: pointer;
+      background: #4a6fa5;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+    button:hover {
+      background: #5a7fb5;
+    }
+    button.active {
+      background: #2e7d32;
+    }
+    .value-display {
+      display: inline-block;
+      width: 60px;
+      text-align: center;
+      color: #fff;
+      font-weight: bold;
+    }
+    .info {
+      margin-top: 10px;
+      color: #888;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h2>六角格排列测试 - 手动调整间距</h2>
+  
+  <div class="controls">
+    <h3>排列方案</h3>
+    <div class="control-group">
+      <button onclick="setMode('odd-r')">奇数列偏移</button>
+      <button onclick="setMode('odd-q')" class="active" id="btn-odd-q">奇数行偏移</button>
+      <button onclick="setMode('even-r')">偶数列偏移</button>
+      <button onclick="setMode('even-q')">偶数行偏移</button>
+    </div>
+    
+    <h3>间距调整 (百分比)</h3>
+    <div class="control-group">
+      <label>水平间距:</label>
+      <button onclick="adjustSpacing('h', -5)">-5%</button>
+      <button onclick="adjustSpacing('h', -1)">-1%</button>
+      <span class="value-display" id="h-spacing">75%</span>
+      <button onclick="adjustSpacing('h', 1)">+1%</button>
+      <button onclick="adjustSpacing('h', 5)">+5%</button>
+    </div>
+    <div class="control-group">
+      <label>垂直间距:</label>
+      <button onclick="adjustSpacing('v', -5)">-5%</button>
+      <button onclick="adjustSpacing('v', -1)">-1%</button>
+      <span class="value-display" id="v-spacing">50%</span>
+      <button onclick="adjustSpacing('v', 1)">+1%</button>
+      <button onclick="adjustSpacing('v', 5)">+5%</button>
+    </div>
+    <div class="control-group">
+      <label>行偏移量:</label>
+      <button onclick="adjustSpacing('o', -5)">-5%</button>
+      <button onclick="adjustSpacing('o', -1)">-1%</button>
+      <span class="value-display" id="o-spacing">37%</span>
+      <button onclick="adjustSpacing('o', 1)">+1%</button>
+      <button onclick="adjustSpacing('o', 5)">+5%</button>
+    </div>
+    
+    <div class="info" id="info">当前: 奇数行偏移 (odd-q) - 水平间距75% 垂直间距50% 行偏移37%</div>
+  </div>
+  
+  <canvas id="canvas" width="900" height="650"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // 六角格尺寸
+    const HEX_SIZE = 40;  // 外接圆半径
+    const HEX_WIDTH = HEX_SIZE * 2;  // 格子宽度
+    const HEX_HEIGHT = Math.sqrt(3) * HEX_SIZE;  // 格子高度
+    
+    let mode = 'odd-q';  // 默认: 奇数行偏移
+    
+    // 间距参数 (百分比，0-150)
+    let spacingH = 75;   // 水平间距
+    let spacingV = 50;   // 垂直间距
+    let spacingO = 37;   // 行/列偏移量
+    
+    // 坐标转换: 轴向坐标 -> 像素坐标
+    function hexToPixel(q, r) {
+      const hFactor = spacingH / 100;
+      const vFactor = spacingV / 100;
+      const oFactor = spacingO / 100;
+      
+      switch(mode) {
+        case 'odd-r':  // 奇数列向下偏移
+          const x1 = q * HEX_WIDTH * hFactor;
+          const y1 = r * HEX_HEIGHT * vFactor + (q % 2 === 1 ? HEX_HEIGHT * oFactor : 0);
+          return { x: x1 + 50, y: y1 + 50 };
+          
+        case 'odd-q':  // 奇数行向右偏移
+          const x2 = q * HEX_WIDTH * hFactor + (r % 2 === 1 ? HEX_WIDTH * oFactor : 0);
+          const y2 = r * HEX_HEIGHT * vFactor;
+          return { x: x2 + 50, y: y2 + 50 };
+          
+        case 'even-r':  // 偶数列向下偏移
+          const x3 = q * HEX_WIDTH * hFactor;
+          const y3 = r * HEX_HEIGHT * vFactor + (q % 2 === 0 ? HEX_HEIGHT * oFactor : 0);
+          return { x: x3 + 50, y: y3 + 50 };
+          
+        case 'even-q':  // 偶数行向右偏移
+          const x4 = q * HEX_WIDTH * hFactor + (r % 2 === 0 ? HEX_WIDTH * oFactor : 0);
+          const y4 = r * HEX_HEIGHT * vFactor;
+          return { x: x4 + 50, y: y4 + 50 };
+      }
+    }
+    
+    // 绘制六角格
+    function drawHex(q, r, highlight = false) {
+      const { x, y } = hexToPixel(q, r);
+      const cx = x + HEX_SIZE;
+      const cy = y + HEX_HEIGHT / 2;
+      
+      // 绘制六边形
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const hx = cx + HEX_SIZE * Math.cos(angle);
+        const hy = cy + HEX_SIZE * Math.sin(angle);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+      
+      ctx.fillStyle = highlight ? '#4a6fa5' : '#2a2a3e';
+      ctx.fill();
+      ctx.strokeStyle = highlight ? '#fff' : '#555';
+      ctx.lineWidth = highlight ? 2 : 1;
+      ctx.stroke();
+      
+      // 绘制坐标文字
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${q},${r}`, cx, cy);
+    }
+    
+    // 绘制坐标轴
+    function drawAxes() {
+      ctx.strokeStyle = '#f44336';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(40, 40);
+      ctx.lineTo(850, 40);
+      ctx.stroke();
+      ctx.fillStyle = '#f44336';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('X →', 855, 45);
+      
+      ctx.beginPath();
+      ctx.moveTo(40, 40);
+      ctx.lineTo(40, 600);
+      ctx.stroke();
+      ctx.fillText('Y ↓', 35, 615);
+    }
+    
+    // 绘制所有格子
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawAxes();
+      
+      for (let r = 0; r < 8; r++) {
+        for (let q = 0; q < 12; q++) {
+          const highlight = (q >= 3 && q <= 8 && r >= 2 && r <= 5);
+          drawHex(q, r, highlight);
+        }
+      }
+      
+      // 更新显示
+      document.getElementById('h-spacing').textContent = spacingH + '%';
+      document.getElementById('v-spacing').textContent = spacingV + '%';
+      document.getElementById('o-spacing').textContent = spacingO + '%';
+      document.getElementById('info').textContent = 
+        `当前: ${getModeName(mode)} - 水平间距${spacingH}% 垂直间距${spacingV}% 偏移${spacingO}%`;
+    }
+    
+    function getModeName(m) {
+      const names = { 'odd-r': '奇数列偏移', 'odd-q': '奇数行偏移', 'even-r': '偶数列偏移', 'even-q': '偶数行偏移' };
+      return names[m] || m;
+    }
+    
+    function setMode(newMode) {
+      mode = newMode;
+      document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      document.getElementById('btn-' + newMode)?.classList.add('active');
+      draw();
+    }
+    
+    function adjustSpacing(type, delta) {
+      if (type === 'h') spacingH = Math.max(10, Math.min(150, spacingH + delta));
+      if (type === 'v') spacingV = Math.max(10, Math.min(150, spacingV + delta));
+      if (type === 'o') spacingO = Math.max(0, Math.min(100, spacingO + delta));
+      draw();
+    }
+    
+    // 初始绘制
+    draw();
+  </script>
+</body>
+</html>

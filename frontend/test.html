@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vue 测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #0a0e14;
+      color: #00FF41;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Vue 测试页面</h1>
+  <p>如果你能看到这行文字，说明 HTML 正常加载。</p>
+  
+  <div id="app">
+    <p v-if="!mounted">Vue 正在加载...</p>
+    <p v-else>✅ Vue 已成功加载！</p>
+  </div>
+
+  <script type="module">
+    console.log('=== 开始测试 ===');
+    console.log('1. HTML 已加载');
+    
+    try {
+      console.log('2. 尝试加载 Vue...');
+      const { createApp } = await import('/node_modules/.vite/deps/vue.js?v=66f21afe');
+      console.log('✅ Vue 加载成功');
+      
+      console.log('3. 创建 Vue 应用...');
+      const app = createApp({
+        data() {
+          return {
+            mounted: true
+          };
+        }
+      });
+      console.log('✅ Vue 应用创建成功');
+      
+      console.log('4. 挂载到 #app...');
+      app.mount('#app');
+      console.log('✅ Vue 应用挂载成功');
+      
+      document.body.innerHTML += '<p style="color: #00ff66;">🎉 Vue 测试通过！</p>';
+    } catch (error) {
+      console.error('❌ Vue 测试失败:', error);
+      document.body.innerHTML += `<p style="color: #ff0000;">❌ Vue 测试失败: ${error.message}</p>`;
+    }
+  </script>
+</body>
+</html>

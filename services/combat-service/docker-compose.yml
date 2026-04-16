@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  combat-service:
+    build: .
+    container_name: mecha-battle-combat
+    ports:
+      - "3004:3004"  # HTTP API和WebSocket共用端口
+    environment:
+      - NODE_ENV=production
+      - PORT=3004
+      - JWT_SECRET=${JWT_SECRET:-mecha-battle-combat-secret-prod}
+      - DB_PATH=/app/data/combat.db
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - MAP_SERVICE_URL=http://map-service:3003
+      - HANGAR_SERVICE_URL=http://hangar-service:3002
+      - COMM_SERVICE_URL=http://comm-service:3005
+    volumes:
+      - combat-data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - mecha-battle-network
+
+  # 开发模式包含的依赖服务
+  postgres:
+    image: postgres:15-alpine
+    container_name: mecha-battle-postgres
+    environment:
+      - POSTGRES_USER=mecha
+      - POSTGRES_PASSWORD=battle
+      - POSTGRES_DB=mecha_battle
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - mecha-battle-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: mecha-battle-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - mecha-battle-network
+
+volumes:
+  combat-data:
+  postgres-data:
+  redis-data:
+
+networks:
+  mecha-battle-network:
+    driver: bridge

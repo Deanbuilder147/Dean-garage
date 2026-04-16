@@ -1,0 +1,50 @@
+{
+  "name": "mecha-battle-dev",
+  "leadAgentId": "165d3302ba6e4a5cad8779679091fb94",
+  "workspacePath": "/Users/dingxuyang/WorkBuddy/20260414174321",
+  "createdAt": "2026-04-14T13:38:11.732Z",
+  "options": {
+    "workspacePath": "/Users/dingxuyang/WorkBuddy/20260414174321",
+    "isAutoTeam": false
+  },
+  "members": [
+    {
+      "memberId": "team-lead@mecha-battle-dev",
+      "name": "team-lead",
+      "role": "Team Lead - coordinates the team and interacts with the user"
+    },
+    {
+      "memberId": "auth-agent@mecha-battle-dev",
+      "name": "auth-agent",
+      "role": "部署Auth服务Agent"
+    },
+    {
+      "memberId": "hangar-agent@mecha-battle-dev",
+      "name": "hangar-agent",
+      "role": "部署Hangar服务Agent"
+    }
+  ],
+  "isAutoTeam": false
+}p-agent@mecha-battle-dev",
+      "name": "map-agent",
+      "role": "部署Map服务Agent"
+    },
+    {
+      "memberId": "combat-agent@mecha-battle-dev",
+      "name": "combat-agent",
+      "role": "部署Combat服务Agent"
+    },
+    {
+      "memberId": "comm-agent@mecha-battle-dev",
+      "name": "comm-agent",
+      "role": "部署Comm服务Agent"
+    }
+  ],
+  "isAutoTeam": false
+}ontend-agent@mecha-battle-dev",
+      "name": "frontend-agent",
+      "role": "部署Frontend服务Agent"
+    }
+  ],
+  "isAutoTeam": false
+}

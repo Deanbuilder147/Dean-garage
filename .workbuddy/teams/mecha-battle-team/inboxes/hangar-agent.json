@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg-1776179869957-hq01yb",
+    "from": "team-lead",
+    "to": "@team",
+    "type": "broadcast",
+    "content": "🚀 团队已组建！所有Agent已分配任务。\n\n## 统一端口配置已完成\n\n### 后端服务端口\n- auth-service: 3001 (/api/auth)\n- hangar-service: 3002 (/api/hangar)\n- map-service: 3003 (/api/map)\n- combat-service: 3004 (/api/combat)\n- comm-service: 3005 (/api/comm)\n\n### 前端端口\n- frontend: 8081\n\n### WebSocket\n- /socket.io → combat-service:3004\n\n### 配置文件\n- 前端: frontend/src/config/ports.js\n- 后端: services/config/ports.js\n- 文档: PORT_CONFIG.md\n\n### 重要提醒\n**所有 API 调用必须使用 `/api/xxx` 路径，通过 Vite 代理，不要直接写 `localhost:300x`**\n\n各位Agent请检查各自负责的代码，确保符合端口规范。",
+    "timestamp": "2026-04-14T15:17:49.957Z",
+    "read": true
+  }
+]

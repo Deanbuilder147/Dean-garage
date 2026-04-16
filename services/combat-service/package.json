@@ -1,0 +1,27 @@
+{
+  "name": "combat-service",
+  "version": "1.0.0",
+  "description": "Mecha Battle Combat Service",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "jsonwebtoken": "^9.0.0",
+    "sql.js": "^1.8.0",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22",
+    "jest": "^29.5.0"
+  },
+  "keywords": ["mecha", "battle", "combat", "game"],
+  "author": "Mecha Battle Team",
+  "license": "MIT"
+}

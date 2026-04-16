@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg-1776174130315-3os283",
+    "from": "frontend-agent",
+    "to": "map-agent",
+    "type": "message",
+    "content": "前端服务已配置完成。请确认你的 Map 服务运行在 3003 端口，API 路径前缀为 `/api/map`。\n\n前端战场编辑器路由: `/battlefields`",
+    "timestamp": "2026-04-14T13:42:10.315Z",
+    "read": true
+  }
+]

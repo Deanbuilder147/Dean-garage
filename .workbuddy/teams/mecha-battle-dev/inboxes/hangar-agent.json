@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg-1776174129431-i2ribd",
+    "from": "frontend-agent",
+    "to": "hangar-agent",
+    "type": "message",
+    "content": "前端服务已配置完成。请确认你的 Hangar 服务运行在 3002 端口，API 路径前缀为 `/api/hangar`。\n\n前端单位编辑器路由: `/units`",
+    "timestamp": "2026-04-14T13:42:09.431Z",
+    "read": true
+  }
+]

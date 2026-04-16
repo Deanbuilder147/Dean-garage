@@ -1,0 +1,142 @@
+:root {
+  /* ===== 核心色彩 ===== */
+  --primary: #00FF41;
+  --primary-container: #00fc40;
+  --primary-dim: #00ec3b;
+  --primary-fixed: #00fc40;
+  --primary-fixed-dim: #00ec3b;
+  --secondary: #ff6e81;
+  --secondary-dim: #e7004c;
+  --secondary-fixed: #ffc2c6;
+  --secondary-fixed-dim: #ffaeb5;
+  --secondary-container: #be003d;
+  --tertiary: #81ecff;
+  --tertiary-dim: #00d4ec;
+  --tertiary-fixed: #00e3fd;
+  --tertiary-fixed-dim: #00d4ec;
+  --tertiary-container: #00e3fd;
+  --error: #ff7351;
+  --error-dim: #d53d18;
+  --error-container: #b92902;
+  
+  /* ===== 表面层级 ===== */
+  --surface: #0a0a0a;
+  --surface-base: #0a0a0a;
+  --surface-container: #0d0d0d;
+  --surface-container-highest: #1a1a1a;
+  --surface-container-low: #121212;
+  --surface-container-high: #161616;
+  --surface-container-lowest: #000000;
+  --primary-panel: #0d0d0d;
+  --data-inlay: #20262f;
+  --surface-variant: #20262f;
+  
+  /* ===== 文字颜色 ===== */
+  --on-primary: #000000;
+  --on-primary-container: #005a10;
+  --on-primary-fixed: #00440a;
+  --on-primary-fixed-variant: #006513;
+  --on-secondary: #490012;
+  --on-secondary-container: #fff6f5;
+  --on-secondary-fixed: #6f0020;
+  --on-secondary-fixed-variant: #a40033;
+  --on-tertiary: #005762;
+  --on-tertiary-container: #004d57;
+  --on-tertiary-fixed: #003840;
+  --on-tertiary-fixed-variant: #005762;
+  --on-surface: #f1f3fc;
+  --on-background: #f1f3fc;
+  --on-surface-variant: #a8abb3;
+  --on-error: #450900;
+  --on-error-container: #ffd2c8;
+  --text-primary: #e6e8eb;
+  --text-secondary: #9aa0a6;
+  --text-muted: var(--text-secondary);
+  --outline: #72757d;
+  --outline-variant: #44484f;
+  
+  /* ===== 边框 ===== */
+  --border-weak: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --border-medium: rgba(255, 255, 255, 0.15);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  
+  /* ===== 阴影 ===== */
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.5);
+  
+  /* ===== 字体大小 ===== */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  
+  /* ===== 字体粗细 ===== */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* ===== 字体家族 ===== */
+  --font-space: 'Space Grotesk', 'Courier New', monospace;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  
+  /* ===== 字母间距 ===== */
+  --tracking-tight: -0.025em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
+  
+  /* ===== 间距 ===== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  
+  /* ===== 圆角 ===== */
+  --radius-none: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  
+  /* ===== 过渡 ===== */
+  --transition-fast: 150ms;
+  --transition-normal: 250ms;
+  --transition-slow: 350ms;
+  
+  /* ===== 特殊效果 ===== */
+  --shadow-tint: rgba(156, 255, 147, 0.05);
+  --surface-tint: #9cff93;
+  --glass-bg: rgba(32, 38, 47, 0.8);
+  --scanline-color: rgba(0, 0, 0, 0.4);
+  
+  /* ===== Z-index ===== */
+  --z-modal: 1000;
+  
+  /* ===== 强调色 ===== */
+  --accent-blue: #4facfe;
+  --accent-green: #00f260;
+  --accent-yellow: #f7d794;
+  --accent-purple: #e056fd;
+  --accent-orange: #ff9800;
+  --accent-blue-hover: #72b4ff;
+  --accent-green-hover: #00ff66;
+  --accent-red-hover: #ff6b6b;
+  
+  /* ===== 阵营颜色 ===== */
+  --faction-earth: #1976d2;
+  --faction-balon: #d32f2f;
+  --faction-maxion: #7b1fa2;
+}
+
+/* 暗色模式（项目默认） */
+html.dark {
+  color-scheme: dark;
+}

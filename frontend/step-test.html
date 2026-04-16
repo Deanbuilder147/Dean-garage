@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>逐步测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #000000;
+      color: #00FF00;
+      font-family: monospace;
+    }
+    .step {
+      margin: 10px 0;
+      padding: 10px;
+      border: 1px solid #00FF00;
+    }
+    .error {
+      color: #FF0000;
+    }
+    .success {
+      color: #00FF00;
+    }
+  </style>
+</head>
+<body>
+  <h1>逐步测试页面</h1>
+  <div id="results"></div>
+
+  <script>
+    const results = document.getElementById('results');
+    
+    function log(message, isError = false) {
+      const div = document.createElement('div');
+      div.className = isError ? 'step error' : 'step success';
+      div.textContent = message;
+      results.appendChild(div);
+      console.log(message);
+    }
+
+    log('✅ 步骤 1: 基础 JavaScript 正常运行');
+
+    // 测试简单的 DOM 操作
+    try {
+      document.body.style.backgroundColor = '#0a0e14';
+      log('✅ 步骤 2: DOM 操作正常');
+    } catch (error) {
+      log('❌ 步骤 2: DOM 操作失败 - ' + error.message, true);
+    }
+
+    // 测试 ES6 模块
+    try {
+      log('🔄 步骤 3: 尝试加载 Vue...');
+      
+      import('/node_modules/.vite/deps/vue.js?v=66f21afe')
+        .then(({ createApp }) => {
+          log('✅ 步骤 3: Vue 加载成功');
+          
+          // 创建一个简单的 Vue 应用
+          try {
+            const app = createApp({
+              template: '<div>Vue 组件已渲染！</div>'
+            });
+            
+            // 挂载到新元素
+            const vueContainer = document.createElement('div');
+            vueContainer.id = 'vue-app';
+            document.body.appendChild(vueContainer);
+            
+            app.mount('#vue-app');
+            log('✅ 步骤 4: Vue 应用挂载成功');
+            log('🎉 所有测试通过！');
+          } catch (error) {
+            log('❌ 步骤 4: Vue 应用创建失败 - ' + error.message, true);
+          }
+        })
+        .catch(error => {
+          log('❌ 步骤 3: Vue 加载失败 - ' + error.message, true);
+          log('详细错误: ' + error, true);
+        });
+    } catch (error) {
+      log('❌ 步骤 3: ES6 模块不支持 - ' + error.message, true);
+    }
+  </script>
+</body>
+</html>

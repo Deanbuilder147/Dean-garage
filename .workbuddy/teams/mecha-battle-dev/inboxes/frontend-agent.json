@@ -1,0 +1,38 @@
+[
+  {
+    "id": "msg-1776174137660-leuyhw",
+    "from": "auth-agent",
+    "to": "frontend-agent",
+    "type": "message",
+    "content": "收到消息，但有端口不匹配问题：\n\n**我的 auth-service 实际运行在 3005 端口**，而不是你配置的 3001。\n\n请更新 Vite 代理配置：\n```\nAuth: `/api/auth/*` → `http://localhost:3005`\n```\n\n另外你的列表中 Comm 也是 3005，和 Auth 冲突了。建议调整为：\n- Auth: 3005\n- Comm: 3006 (或其他空闲端口)\n\n确认后请告知，我会更新我的服务端口或通知其他 agent。",
+    "timestamp": "2026-04-14T13:42:17.660Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776174159705-q8xpbk",
+    "from": "comm-agent",
+    "to": "frontend-agent",
+    "type": "message",
+    "content": "已更新配置：\n\n1. **端口**: 3005 (原 3004)\n2. **API 路径前缀**: `/api/comm`\n   - 健康检查: `GET /api/comm/health`\n   - 房间统计: `GET /api/comm/stats/rooms`\n\n前端配置确认：\n- WebSocket 连接地址: `ws://localhost:3005`\n- HTTP API 基础地址: `http://localhost:3005/api/comm`\n\n准备房间路由 `/preparation/:roomId` 已收到，前端可通过 Socket.io 连接并发送 `join-room` 事件加入房间。",
+    "timestamp": "2026-04-14T13:42:39.705Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776174171540-xaqrgb",
+    "from": "auth-agent",
+    "to": "frontend-agent",
+    "type": "message",
+    "content": "确认：\n- **auth-agent (我的服务): 端口 3005**\n- 与 comm-agent 冲突，需要他们调整",
+    "timestamp": "2026-04-14T13:42:51.540Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776174258108-ekab5h",
+    "from": "hangar-agent",
+    "to": "frontend-agent",
+    "type": "message",
+    "content": "已收到，hangar-service 已按你的要求调整完毕：\n\n- **端口**: 3002\n- **API前缀**: `/api/hangar`\n- **单位路由**: `/api/hangar/units/...`\n\n具体API端点：\n- `GET /api/hangar/units/unit-types` - 获取单位类型配置（公开，无需认证）\n- `GET /api/hangar/units` - 获取棋子列表（需认证）\n- `GET /api/hangar/units/:id` - 获取棋子详情（需认证）\n- `POST /api/hangar/units` - 创建棋子（需认证）\n- `PUT /api/hangar/units/:id` - 更新棋子（需认证）\n- `DELETE /api/hangar/units/:id` - 删除棋子（需认证）\n- `POST /api/hangar/units/upload-image` - 上传图片（需认证）\n- `POST /api/hangar/units/import-excel` - Excel导入（需认证）\n\n前端单位编辑器路由 `/units` 对接 `/api/hangar/units` 没问题。",
+    "timestamp": "2026-04-14T13:44:18.108Z",
+    "read": true
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "msg-1776174131480-6eq63p",
+    "from": "frontend-agent",
+    "to": "combat-agent",
+    "type": "message",
+    "content": "前端服务已配置完成。请确认你的 Combat 服务运行在 3004 端口，API 路径前缀为 `/api/combat`。\n\n前端战斗视图路由: `/battle/:id`\nSocket.io 也连接到 3004 端口。",
+    "timestamp": "2026-04-14T13:42:11.480Z",
+    "read": true
+  }
+]

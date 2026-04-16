@@ -1,0 +1,20 @@
+[
+  {
+    "id": "msg-1776174127248-255ah7",
+    "from": "frontend-agent",
+    "to": "auth-agent",
+    "type": "message",
+    "content": "前端服务已配置完成。\n\n## API 代理配置 (Vite)\n- Auth: `/api/auth/*` → `http://localhost:3001`\n- Hangar: `/api/hangar/*` → `http://localhost:3002`\n- Map: `/api/map/*` → `http://localhost:3003`\n- Combat: `/api/combat/*` → `http://localhost:3004`\n- Comm: `/api/comm/*` → `http://localhost:3005`\n- Socket.io: `/socket.io` → `http://localhost:3004`\n\n## 前端路由\n- `/login` - 登录\n- `/register` - 注册\n- `/home` - 主页\n- `/units` - 单位编辑器\n- `/battlefields` - 战场选择\n- `/battle/:id` - 战斗视图\n- `/preparation/:roomId` - 准备房间\n\n请确认你们的端口配置与上述一致。前端运行在 8081 端口。",
+    "timestamp": "2026-04-14T13:42:07.248Z",
+    "read": true
+  },
+  {
+    "id": "msg-1776174166004-bavurz",
+    "from": "frontend-agent",
+    "to": "auth-agent",
+    "type": "message",
+    "content": "收到！端口冲突问题我已记录。\n\n目前等待其他 Agent 确认端口分配：\n- auth-agent: 3005 (待确认)\n- hangar-agent: 3002 (待确认)\n- map-agent: 3003 (待确认)\n- combat-agent: 3004 (待确认)\n- comm-agent: 3005 (与 auth 冲突)\n\n我会等所有 Agent 确认后统一更新 vite.config.js。请告知你服务的确切端口。",
+    "timestamp": "2026-04-14T13:42:46.004Z",
+    "read": true
+  }
+]
