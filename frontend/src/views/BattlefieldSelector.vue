@@ -96,6 +96,7 @@ import { useRouter } from 'vue-router';
 import Button from '@/components/ui/Button.vue';
 import CRTScanlines from '@/components/ui/CRTScanlines.vue';
 import Icon from '@/components/ui/Icon.vue';
+import { commAPI } from '@/api/client.js';
 
 const router = useRouter();
 
@@ -165,31 +166,22 @@ async function createRoom() {
   creating.value = true;
   
   try {
-    const token = localStorage.getItem('token');
-    const res = await fetch('/api/comm/rooms', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        battlefield_id: selectedBattlefield.value.id,
-        max_players: 6
-      })
+    const res = await commAPI.createRoom({
+      battlefield_id: selectedBattlefield.value.id,
+      max_players: 6
     });
     
-    const data = await res.json();
-    
-    if (res.ok && data.room) {
+    if (res.data && res.data.room) {
       // 跳转到整备室
-      router.push(`/preparation/${data.room.id}`);
+      router.push(`/preparation/${res.data.room.id}`);
       emit('close');
     } else {
-      alert(data.error || '创建房间失败');
+      alert(res.data?.error || '创建房间失败');
     }
   } catch (err) {
     console.error('创建房间失败:', err);
-    alert('创建房间失败，请检查网络连接');
+    const errorMsg = err.response?.data?.error || '创建房间失败，请检查网络连接';
+    alert(errorMsg);
   } finally {
     creating.value = false;
   }
