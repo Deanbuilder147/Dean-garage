@@ -1,18 +1,20 @@
-FROM node:20-alpine as builder
+# 机甲战棋游戏 - Frontend Dockerfile
+
+FROM node:18-alpine
+
+RUN apk add --no-cache curl
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci --only=production
 
 COPY . .
-RUN npm run build
 
-FROM nginx:alpine
+ENV NODE_ENV=production
+ENV PORT=8081
 
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8081/health || exit 1
 
-EXPOSE 8080
-
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["npm", "run", "preview"]

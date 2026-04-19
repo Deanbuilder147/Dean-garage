@@ -63,11 +63,11 @@ export const mapAPI = {
 };
 
 export const combatAPI = {
-  getBattles: () => apiClient.get('/combat/battles'),
-  getBattle: (id) => apiClient.get(`/combat/battles/${id}`),
-  createBattle: (data) => apiClient.post('/combat/battles', data),
-  joinBattle: (id, data) => apiClient.post(`/combat/battles/${id}/join`, data),
-  getBattleState: (id) => apiClient.get(`/combat/battles/${id}/state`)
+  getBattles: () => apiClient.get('/combat'),
+  getBattle: (id) => apiClient.get(`/combat/${id}`),
+  createBattle: (data) => apiClient.post('/combat', data),
+  joinBattle: (id, data) => apiClient.post(`/combat/${id}/join`, data),
+  getBattleState: (id) => apiClient.get(`/combat/${id}/state`)
 };
 
 export const commAPI = {

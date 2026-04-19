@@ -463,13 +463,31 @@ function getSpawnPointStyle(spawnPoint) {
 async function loadBattle() {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.get(`/api/battles/${battleId}`, {
+    const response = await axios.get(`/api/combat/${battleId}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
+    
+    console.log('[BattleView] API Response:', response.data);
     battleState.value = response.data.battle.battlefield_state;
-    nextTick(() => initBattleCanvas());
+    
+    console.log('[BattleView] Battle State:', battleState.value);
+    console.log('[BattleView] Phase:', battleState.value?.phase);
+    console.log('[BattleView] Cells count:', battleState.value?.cells?.length);
+    console.log('[BattleView] Width:', battleState.value?.width);
+    console.log('[BattleView] Height:', battleState.value?.height);
+    console.log('[BattleView] Units:', battleState.value?.units);
+    
+    if (battleState.value?.cells && battleState.value.cells.length > 0) {
+      console.log('[BattleView] First cell:', battleState.value.cells[0]);
+    }
+    
+    nextTick(() => {
+      console.log('[BattleView] Canvas container:', canvasContainer.value);
+      console.log('[BattleView] Initializing canvas...');
+      initBattleCanvas();
+    });
   } catch (err) {
-    console.error('加载战斗失败:', err);
+    console.error('[BattleView] Load battle error:', err);
   }
 }
 
@@ -493,11 +511,29 @@ function initBattleCanvas() {
 }
 
 function renderBattlefield() {
-  if (!app || !battleState.value) return;
+  if (!app || !battleState.value) {
+    console.warn('[BattleView] Cannot render: app or battleState is missing');
+    return;
+  }
+
+  const { 
+    width: bfWidth = 10, 
+    height: bfHeight = 10, 
+    cells = [], 
+    units = [], 
+    phase = 'deployment',
+    spawnOrder = [],
+    currentSpawnIndex = 0
+  } = battleState.value;
+  
+  console.log('[BattleView] Rendering battlefield:', { bfWidth, bfHeight, cellsCount: cells.length, phase });
+  
+  if (cells.length === 0) {
+    console.error('[BattleView] No cells to render!');
+    return;
+  }
 
   app.stage.removeChildren();
-
-  const { width: bfWidth, height: bfHeight, cells, units, phase, spawnOrder, currentSpawnIndex } = battleState.value;
 
   const hexSize = 30;
   const hexWidth = hexSize * 2;
@@ -711,7 +747,7 @@ function selectUnit(unit) {
 async function selectSpawnPoint(q, r) {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/select-spawn`, {
+    const response = await axios.post(`/api/combat/${battleId}/select-spawn`, {
       q,
       r
     }, {
@@ -736,7 +772,7 @@ async function handleDropOnSpawn(q, r) {
 
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/deploy-unit`, {
+    const response = await axios.post(`/api/combat/${battleId}/deploy-unit`, {
       unit_id: draggedUnit.value.id,
       q,
       r
@@ -756,7 +792,7 @@ async function handleDropOnSpawn(q, r) {
 async function endDeploymentPhase() {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/end-deployment`, {}, {
+    const response = await axios.post(`/api/combat/${battleId}/end-deployment`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
@@ -782,7 +818,7 @@ function cancelRoyroyDeploy() {
 async function endTacticalPhase() {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/end-tactical`, {}, {
+    const response = await axios.post(`/api/combat/${battleId}/end-tactical`, {}, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
@@ -806,7 +842,7 @@ async function executeAttack(target) {
 
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/attack`, {
+    const response = await axios.post(`/api/combat/${battleId}/attack`, {
       attacker_id: selectedUnit.value.id,
       target_id: target.id,
       attack_type: 'melee' // 简化：默认近战
@@ -858,7 +894,7 @@ async function executeArtillery() {
 
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/action`, {
+    const response = await axios.post(`/api/combat/${battleId}/action`, {
       actionType: 'artillery',
       params: {
         centerQ: selectedUnit.value.q,
@@ -882,7 +918,7 @@ async function executeSupport(supportUnitId) {
 
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/support`, {
+    const response = await axios.post(`/api/combat/${battleId}/support`, {
       targetId: supportData.value.target_id,
       supportUnitId
     }, {
@@ -913,7 +949,7 @@ function skipDeployment() {
 async function endTurn() {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/end-turn`, {
+    const response = await axios.post(`/api/combat/${battleId}/end-turn`, {
       currentFaction: battleState.value.currentFaction
     }, {
       headers: { Authorization: `Bearer ${token}` }
@@ -956,7 +992,7 @@ async function chooseSurprise(type) {
     
     if (type === 'giveup') {
       // 放弃奇袭
-      const response = await axios.post(`/api/battles/${battleId}/surprise-choice`, {
+      const response = await axios.post(`/api/combat/${battleId}/surprise-choice`, {
         choice: 'giveup',
         original_attacker_id: selectedUnit.value.id,
         target_id: currentAttackData.value.target_id,
@@ -986,7 +1022,7 @@ async function chooseSurprise(type) {
 async function executeSurpriseChoice(choice, surpriseUnitId) {
   try {
     const token = localStorage.getItem('token');
-    const response = await axios.post(`/api/battles/${battleId}/surprise-choice`, {
+    const response = await axios.post(`/api/combat/${battleId}/surprise-choice`, {
       choice,
       surprise_unit_id: surpriseUnitId,
       original_attacker_id: selectedUnit.value.id,

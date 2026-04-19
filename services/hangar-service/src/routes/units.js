@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs';
 import XLSX from 'xlsx';
+import { z } from 'zod';
 import db from '../database/db.js';
 import auth from '../middleware/auth.js';
 import validateUnit from '../middleware/validateUnit.js';
@@ -18,6 +19,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const router = Router();
+
+// Zod validation schemas
+const createUnitSchema = z.object({
+  name: z.string().min(1, "Name is required").max(50, "Name cannot exceed 50 characters"),
+  codename: z.string().max(50).optional(),
+  faction: z.enum(['earth', 'byron', 'maxion']).default('earth'),
+  main_type: z.string().max(20).optional(),
+  main_ge_dou: z.number().min(0, "Cannot be negative").optional(),
+  main_she_ji: z.number().min(0, "Cannot be negative").optional(),
+  main_jie_gou: z.number().min(0, "Cannot be negative").optional(),
+  main_ji_dong: z.number().min(0, "Cannot be negative").optional(),
+  has_royroy: z.boolean().optional(),
+  royroy_name: z.string().max(50).optional()
+});
 
 // 配置文件上传
 const storage = multer.diskStorage({
@@ -89,22 +104,19 @@ router.get('/:id', auth, (req, res) => {
 router.post('/', auth, (req, res) => {
   try {
     const data = req.body;
-    
-    console.log('创建棋子数据:', JSON.stringify(data, null, 2));
 
-    // 宽松验证：只检查必需字段和数值范围
-    const errors = [];
-    if (!data.name) errors.push('名称不能为空');
-    if (!data.faction) errors.push('阵营不能为空');
+    // Validate with Zod schema
+    const validated = createUnitSchema.parse(data);
     
     // 检查属性值是否为非负数
+    const errors = [];
     const checkNonNegative = (val, name) => {
-      if (val !== undefined && val !== null && val < 0) errors.push(`${name}不能为负数`);
+      if (val !== undefined && val !== null && val < 0) errors.push(name + '不能为负数');
     };
-    checkNonNegative(data.main_格斗, '主机体格斗');
-    checkNonNegative(data.main_射击, '主机体射击');
-    checkNonNegative(data.main_结构, '主机体结构');
-    checkNonNegative(data.main_机动, '主机体机动');
+    checkNonNegative(data.main_ge_dou, '主机体格斗');
+    checkNonNegative(data.main_she_ji, '主机体射击');
+    checkNonNegative(data.main_jie_gou, '主机体结构');
+    checkNonNegative(data.main_ji_dong, '主机体机动');
     
     if (errors.length > 0) {
       return res.status(400).json({ error: '验证失败', details: errors });
@@ -242,14 +254,12 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
     // 查找"设定器"工作表
     let sheetName = '设定器';
     if (!workbook.Sheets[sheetName]) {
-      console.log('工作表"设定器"不存在，可用工作表:', workbook.SheetNames);
       // 清理临时文件
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Excel文件中没有找到"设定器"工作表，可用工作表: ' + workbook.SheetNames.join(', ') });
+      return res.status(400).json({ error: 'Excel 文件中没有找到"设定器"工作表，可用工作表：' + workbook.SheetNames.join(', ') });
     }
 
     const worksheet = workbook.Sheets[sheetName];
-    console.log('已加载工作表:', sheetName);
 
     // 读取单元格值
     const getCell = (addr) => {
@@ -261,13 +271,10 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
       return val?.toString() || null;
     };
 
-    // 读取基础信息 (行2)
-    console.log('开始读取基础信息...');
+    // 读取基础信息 (行 2)
     const name = getCell('C2') || '未命名';
     const codename = getCell('F2') || '';
     const factionRaw = getCell('I2') || '';
-    
-    console.log(`基础信息: name=${name}, codename=${codename}, factionRaw=${factionRaw}`);
 
     // 映射阵营（支持多种写法）
     const factionMap = {
@@ -276,11 +283,9 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
       '地球': 'earth', '拜隆': 'balon', '马克': 'maxion'
     };
     const faction = factionMap[factionRaw] || 'earth';
-    console.log(`阵营映射: ${factionRaw} -> ${faction}`);
 
-    // 读取单位属性 (行4-8)
+    // 读取单位属性 (行 4-8)
     const units = {};
-    console.log('开始读取单位属性...');
     for (let row = 4; row <= 8; row++) {
       const unitName = getCell('A' + row);
       const unitType = getCell('B' + row);
@@ -290,21 +295,18 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
       const jie = parseInt(getCell('F' + row)) || 0;
       const ji = parseInt(getCell('G' + row)) || 0;
       const skillSlots = parseInt(getCell('H' + row)) || 0;
-      
-      console.log(`行${row}: name=${unitName}, type=${unitType}, 格斗=${gou}, 射击=${she}, 结构=${jie}, 机动=${ji}`);
-      
+
       if (!unitName) continue;
 
       units[unitName] = {
         type: unitType || 'none',
-        格斗: gou,
-        射击: she,
-        结构: jie,
-        机动: ji,
+        '格斗': gou,
+        '射击': she,
+        '结构': jie,
+        '机动': ji,
         skillSlots: skillSlots
       };
     }
-    console.log('读取到的单位:', Object.keys(units));
 
     // 主机体数据
     const mainUnit = units['主机体'] || {};
@@ -313,14 +315,13 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
     const 结构 = mainUnit.结构 || 0;
     const 机动 = mainUnit.机动 || 0;
 
-    // 读取技能表 (行11-22)
+    // 读取技能表 (行 11-22)
     const main_skills = [];
     const royroy_skills = [];
     const left_skills = [];
     const right_skills = [];
     const extra_skills = [];
 
-    console.log('开始读取技能表...');
     for (let row = 11; row <= 22; row++) {
       const skillName = getCell('C' + row);
       const skillType = getCell('D' + row);
@@ -328,8 +329,6 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
       const skillEffect = getCell('F' + row);
       const skillRange = getCell('G' + row);
       const skillSpecial = getCell('H' + row);
-
-      console.log(`行${row}: name=${skillName}, type=${skillType}`);
 
       if (!skillName) continue;
 
@@ -343,31 +342,25 @@ router.post('/import-excel', auth, upload.single('file'), (req, res) => {
       };
 
       // 根据行号分配技能
-      // 12-14行: 主机体技能(3个)
-      // 15-16行: Royroy技能(2个)
-      // 17-18行: 右手技能(2个)
-      // 19-20行: 左手技能(2个)
-      // 21-22行: 其它/Extra技能(2个)
+      // 12-14 行：主机体技能 (3 个)
+      // 15-16 行：Royroy 技能 (2 个)
+      // 17-18 行：右手技能 (2 个)
+      // 19-20 行：左手技能 (2 个)
+      // 21-22 行：其它/Extra 技能 (2 个)
       if (row >= 12 && row <= 14) {
         main_skills.push(skill);
-        console.log(`  -> 主机体技能[${main_skills.length}]`);
       } else if (row >= 15 && row <= 16) {
         royroy_skills.push(skill);
-        console.log(`  -> Royroy技能[${royroy_skills.length}]`);
       } else if (row >= 17 && row <= 18) {
         right_skills.push(skill);
-        console.log(`  -> 右手技能[${right_skills.length}]`);
       } else if (row >= 19 && row <= 20) {
         left_skills.push(skill);
-        console.log(`  -> 左手技能[${left_skills.length}]`);
       } else if (row >= 21 && row <= 22) {
-        // 其它技能从E列读取属性（与其他技能不同）
+        // 其它技能从 E 列读取属性（与其他技能不同）
         skill.attribute = getCell('E' + row) || '';
         extra_skills.push(skill);
-        console.log(`  -> 其它技能[${extra_skills.length}]`);
       }
     }
-    console.log('技能读取完成:', {main: main_skills.length, royroy: royroy_skills.length, left: left_skills.length, right: right_skills.length, extra: extra_skills.length});
 
     // 装备类型
     const left_type = units['左手']?.type || 'none';

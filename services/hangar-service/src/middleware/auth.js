@@ -9,7 +9,11 @@
  */
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mecha-battle-auth-secret-key';
+// 强制要求 JWT_SECRET
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('[配置错误] JWT_SECRET 环境变量必须设置！');
+}
 
 function authMiddleware(req, res, next) {
   // 模式1：信任上游服务转发的用户信息

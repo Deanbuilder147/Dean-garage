@@ -542,7 +542,7 @@ async function loadRoomInfo() {
       }
       
       // 如果战斗已开始，跳转
-      if (data.room?.status === 'fighting' && data.battle_id) {
+      if ((data.room?.status === 'fighting' || data.room?.status === 'playing') && data.battle_id) {
         router.push(`/battle/${data.battle_id}`);
         return;
       }

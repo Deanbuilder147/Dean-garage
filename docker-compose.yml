@@ -6,9 +6,9 @@ services:
     image: postgres:14-alpine
     container_name: mecha-battle-db
     environment:
-      POSTGRES_DB: mecha_battle
-      POSTGRES_USER: mecha_user
-      POSTGRES_PASSWORD: mecha_secure_password
+      POSTGRES_DB: ${POSTGRES_DB:-mecha_battle}
+      POSTGRES_USER: ${POSTGRES_USER:-mecha_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -28,8 +28,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
-      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
     ports:
       - "3001:3001"
     depends_on:
@@ -46,7 +46,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3002
-      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+      DATABASE_URL: ${DATABASE_URL}
     ports:
       - "3002:3002"
     depends_on:
@@ -63,7 +63,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3003
-      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+      DATABASE_URL: ${DATABASE_URL}
     ports:
       - "3003:3003"
     depends_on:
@@ -80,8 +80,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3004
-      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
-      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
     ports:
       - "3004:3004"
     depends_on:
@@ -98,7 +98,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3005
-      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+      JWT_SECRET: ${JWT_SECRET}
     ports:
       - "3005:3005"
     depends_on:

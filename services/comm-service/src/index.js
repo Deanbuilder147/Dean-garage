@@ -14,8 +14,13 @@ import { setupSocketHandlers, roomStates } from './services/socketService.js';
 const app = express();
 const httpServer = createServer(app);
 
-// JWT配置（与auth-service保持一致）
-const JWT_SECRET = process.env.JWT_SECRET || 'mecha-battle-auth-secret-key';
+// JWT 配置（与 auth-service 保持一致）
+// 环境变量必须设置，无 fallback（安全要求）
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[启动错误] JWT_SECRET 环境变量必须设置！');
+  process.exit(1);
+}
 
 // JWT验证中间件
 function authenticate(req, res, next) {

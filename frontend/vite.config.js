@@ -11,6 +11,7 @@ export default defineConfig({
     }
   },
   server: {
+    host: '0.0.0.0',
     port: 8081,
     proxy: {
       // Auth 服务
@@ -38,9 +39,9 @@ export default defineConfig({
         target: 'http://localhost:3005',
         changeOrigin: true
       },
-      // Socket.io
+      // Socket.io (Comm Service)
       '/socket.io': {
-        target: 'http://localhost:3004',
+        target: 'http://localhost:3005',
         ws: true
       }
     }

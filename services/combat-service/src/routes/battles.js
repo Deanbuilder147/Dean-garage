@@ -1,11 +1,20 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import db from '../database/db.js';
 import { CombatResolver } from '../services/combatResolver.js';
 import { TurnManager } from '../services/turnManager.js';
+import { validateRequest, createBattleSchema, moveSchema, attackSchema, battleActionSchema } from '../validators/battle.validators.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'mecha-battle-auth-secret-key';
+
+// JWT 配置（与 auth-service 保持一致）
+// 环境变量必须设置，无 fallback（安全要求）
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.refine(val => val, { message: '[启动错误] JWT_SECRET 环境变量必须设置！' });
+  process.exit(1);
+}
 
 // 认证中间件
 const authenticate = (req, res, next) => {
@@ -82,9 +91,15 @@ router.get('/:id', authenticate, (req, res) => {
 });
 
 // 创建战斗会话
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
-    const { battlefield_id, room_id } = req.body;
+    // Validate request with Zod
+    const validation = validateRequest(createBattleSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json(validation.error);
+    }
+    
+    const { battlefield_id, room_id, players } = validation.data;
 
     // TODO: 需要从地图服务获取战场信息
     // const battlefield = await fetch(`${process.env.MAP_SERVICE_URL}/api/battlefields/${battlefield_id}`);
@@ -169,9 +184,15 @@ router.post('/', authenticate, (req, res) => {
 });
 
 // 执行移动
-router.post('/:id/move', authenticate, (req, res) => {
+router.post('/:id/move', authenticate, async (req, res) => {
   try {
-    const { unit_id, target_q, target_r } = req.body;
+    // Validate request with Zod
+    const validation = validateRequest(moveSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json(validation.error);
+    }
+    
+    const { unit_id, target_q, target_r } = validation.data;
     
     const battle = db.prepare(
       'SELECT * FROM battle_sessions WHERE id = ?'
@@ -218,9 +239,15 @@ router.post('/:id/move', authenticate, (req, res) => {
 });
 
 // 执行攻击
-router.post('/:id/attack', authenticate, (req, res) => {
+router.post('/:id/attack', authenticate, async (req, res) => {
   try {
-    const { attacker_id, target_id, attack_type } = req.body;
+    // Validate request with Zod
+    const validation = validateRequest(attackSchema, req.body);
+    if (!validation.success) {
+      return res.status(400).json(validation.error);
+    }
+    
+    const { attacker_id, target_id, attack_type, skill_id } = validation.data;
     
     const battle = db.prepare(
       'SELECT * FROM battle_sessions WHERE id = ?'
@@ -635,6 +662,209 @@ router.post('/:id/fog-system', authenticate, (req, res) => {
   } catch (error) {
     console.error('Fog system error:', error);
     res.status(500).json({ error: '迷雾系统失败' });
+  }
+});
+
+// 选择出生点（出生点选择阶段）
+router.post('/:id/select-spawn', authenticate, (req, res) => {
+  try {
+    const { q, r } = req.body;
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    
+    // TODO: 实现出生点选择逻辑
+    // 简化处理：标记当前玩家已选择
+    if (state.spawn_order) {
+      const currentSpawner = state.spawn_order.find(p => !p.has_selected);
+      if (currentSpawner) {
+        currentSpawner.has_selected = true;
+        currentSpawner.spawn_point = { q, r, type: 'mothership' };
+      }
+    }
+    
+    // 检查是否所有玩家都选择了出生点
+    const allSelected = state.spawn_order?.every(p => p.has_selected);
+    if (allSelected) {
+      state.phase = 'spawn_deployment';
+      state.spawn_phase_done = true;
+    }
+    
+    db.prepare('UPDATE battle_sessions SET units_state = ?, phase = ?, spawn_order = ? WHERE id = ?')
+      .run(JSON.stringify(state), state.phase, JSON.stringify(state.spawn_order), req.params.id);
+    
+    res.json({ message: '出生点选择成功', state });
+  } catch (error) {
+    console.error('Select spawn error:', error);
+    res.status(500).json({ error: '选择出生点失败' });
+  }
+});
+
+// 部署单位（出生点部署阶段）
+router.post('/:id/deploy-unit', authenticate, (req, res) => {
+  try {
+    const { unit_id, q, r } = req.body;
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    
+    // TODO: 实现单位部署逻辑
+    // 简化处理：将单位添加到战场
+    if (!state.units) state.units = [];
+    
+    // 检查单位是否已部署
+    const existing = state.units.find(u => u.id === unit_id);
+    if (!existing) {
+      // 从待部署列表获取单位信息（简化：创建基础单位）
+      state.units.push({
+        id: unit_id,
+        name: 'Unit ' + unit_id,
+        q, r,
+        hp: 100,
+        max_hp: 100,
+        faction: 'earth',
+        has_acted: false,
+        has_moved: false
+      });
+    }
+    
+    db.prepare('UPDATE battle_sessions SET units_state = ? WHERE id = ?')
+      .run(JSON.stringify(state), req.params.id);
+    
+    res.json({ message: '单位部署成功', state });
+  } catch (error) {
+    console.error('Deploy unit error:', error);
+    res.status(500).json({ error: '部署单位失败' });
+  }
+});
+
+// 结束部署阶段
+router.post('/:id/end-deployment', authenticate, (req, res) => {
+  try {
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    state.phase = 'tactical';
+    
+    db.prepare('UPDATE battle_sessions SET units_state = ?, phase = ? WHERE id = ?')
+      .run(JSON.stringify(state), state.phase, req.params.id);
+    
+    res.json({ message: '部署阶段结束', state });
+  } catch (error) {
+    console.error('End deployment error:', error);
+    res.status(500).json({ error: '结束部署失败' });
+  }
+});
+
+// 结束战术阶段
+router.post('/:id/end-tactical', authenticate, (req, res) => {
+  try {
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    state.phase = 'deployment';
+    state.turn_number = 1;
+    state.current_faction = 'earth';
+    
+    db.prepare('UPDATE battle_sessions SET units_state = ?, phase = ?, current_faction = ?, turn_number = ? WHERE id = ?')
+      .run(JSON.stringify(state), state.phase, state.current_faction, state.turn_number, req.params.id);
+    
+    res.json({ message: '战术阶段结束', state });
+  } catch (error) {
+    console.error('End tactical error:', error);
+    res.status(500).json({ error: '结束战术阶段失败' });
+  }
+});
+
+// 通用行动处理（用于火力覆盖等）
+router.post('/:id/action', authenticate, (req, res) => {
+  try {
+    const { actionType, params } = req.body;
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    
+    if (actionType === 'artillery') {
+      // 调用火力覆盖
+      const { centerQ, centerR } = params;
+      
+      if (state.current_faction !== 'earth') {
+        return res.status(400).json({ error: '只有地球联合可以使用火力覆盖' });
+      }
+      
+      if (state.earthArtilleryUsed) {
+        return res.status(400).json({ error: '火力覆盖已使用' });
+      }
+      
+      state.earthArtilleryUsed = true;
+      state.battle_log = state.battle_log || [];
+      state.battle_log.push({
+        type: 'artillery',
+        message: `火力覆盖 (${centerQ},${centerR})`,
+        timestamp: new Date().toISOString()
+      });
+      
+      db.prepare('UPDATE battle_sessions SET units_state = ? WHERE id = ?')
+        .run(JSON.stringify(state), req.params.id);
+      
+      return res.json({ message: '火力覆盖发动成功', state });
+    }
+    
+    res.status(400).json({ error: '未知的行动类型' });
+  } catch (error) {
+    console.error('Action error:', error);
+    res.status(500).json({ error: '行动失败' });
+  }
+});
+
+// 拜隆增援
+router.post('/:id/support', authenticate, (req, res) => {
+  try {
+    const { support_unit_id } = req.body;
+    const battle = db.prepare('SELECT * FROM battle_sessions WHERE id = ?').get(req.params.id);
+    
+    if (!battle) {
+      return res.status(404).json({ error: '战斗不存在' });
+    }
+    
+    const state = JSON.parse(battle.units_state || '{}');
+    
+    // TODO: 实现拜隆增援逻辑
+    // 简化处理：记录增援
+    state.battle_log = state.battle_log || [];
+    state.battle_log.push({
+      type: 'support',
+      message: `拜隆单位 ${support_unit_id} 进行增援`,
+      timestamp: new Date().toISOString()
+    });
+    
+    db.prepare('UPDATE battle_sessions SET units_state = ? WHERE id = ?')
+      .run(JSON.stringify(state), req.params.id);
+    
+    res.json({ message: '增援成功', state });
+  } catch (error) {
+    console.error('Support error:', error);
+    res.status(500).json({ error: '增援失败' });
   }
 });
 

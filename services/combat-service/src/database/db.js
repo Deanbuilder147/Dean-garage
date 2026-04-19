@@ -1,12 +1,17 @@
 import sql from 'sql.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-// 确保目录存在
-const DB_DIR = '/tmp';
+// ES module 中获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 使用数据目录（避免/tmp 被清空）
+const DB_DIR = process.env.DB_PATH || path.join(__dirname, '../../data');
 const DB_PATH = path.join(DB_DIR, 'combat.db');
 
 class CombatDatabase {
@@ -17,6 +22,10 @@ class CombatDatabase {
   }
 
   async initializeDatabase() {
+    // 确保数据目录存在并设置正确权限
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
+    }
     try {
       // 加载SQL.js库
       this.SQL = await sql();

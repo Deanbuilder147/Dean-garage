@@ -2,7 +2,7 @@
   <button
     :class="['tactical-btn', variantClass, sizeClass, { 'btn-disabled': disabled, 'btn-block': block }]"
     :disabled="disabled"
-    @click="$emit('click')"
+    @click="$emit('click', $event)"
   >
     <slot></slot>
   </button>

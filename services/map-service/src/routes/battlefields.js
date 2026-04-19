@@ -1,18 +1,47 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import db from '../database/db.js';
 import HexUtils from '../utils/hexUtils.js';
 import config from '../config/index.js';
 
 const router = express.Router();
 
+// Zod validation schemas
+const createBattlefieldSchema = z.object({
+  name: z.string().min(1, "战场名称必填").max(50, "战场名称不能超过 50 个字符"),
+  width: z.number().int().positive().max(100, "宽度不能超过 100").default(20),
+  height: z.number().int().positive().max(100, "高度不能超过 100").default(30),
+  terrain: z.any().optional(),
+  type: z.string().max(20).default('standard'),
+  is_public: z.boolean().default(true)
+});
+
+const updateBattlefieldSchema = z.object({
+  name: z.string().min(1).max(50).optional(),
+  terrain: z.any().optional(),
+  type: z.string().max(20).optional(),
+  is_public: z.boolean().optional()
+});
+
+const terrainSchema = z.object({
+  q: z.number().int(),
+  r: z.number().int(),
+  terrain: z.string()
+});
+
 // 认证中间件
 const authenticate = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     
-    // 开发环境：如果没有token，使用测试用户ID=1
+    // 生产环境：必须提供 token
+    // 开发环境：允许无 token 访问测试用户（向后兼容）
     if (!authHeader) {
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(401).json({ error: '未授权访问' });
+      }
+      // 开发环境保持 test 用户兼容
       req.user = { userId: 1, username: 'test' };
       return next();
     }
@@ -25,11 +54,7 @@ const authenticate = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    if (process.env.NODE_ENV !== 'production') {
-      req.user = { userId: 1, username: 'test' };
-      return next();
-    }
-    return res.status(401).json({ error: 'Token无效' });
+    return res.status(401).json({ error: 'Token 无效' });
   }
 };
 
@@ -154,11 +179,9 @@ router.get('/:id/spawn-points', authenticate, (req, res) => {
 // 创建战场
 router.post('/', authenticate, (req, res) => {
   try {
-    const { name, width = 20, height = 30, terrain, type = 'standard', is_public = 1 } = req.body;
-    
-    if (width > 100 || height > 100) {
-      return res.status(400).json({ error: '地图尺寸不能超过100×100' });
-    }
+    // Validate input with Zod
+    const validated = createBattlefieldSchema.parse(req.body);
+    const { name, width, height, terrain, type, is_public } = validated;
     
     // 解析地形数据
     let terrainData = '{}';
@@ -182,8 +205,14 @@ router.post('/', authenticate, (req, res) => {
       battlefield
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ 
+        error: '验证失败',
+        details: error.errors.map(e => ({ field: e.path[0], message: e.message }))
+      });
+    }
     console.error('[Battlefields] Create error:', error);
-    res.status(500).json({ error: '创建战场失败: ' + error.message });
+    res.status(500).json({ error: '创建战场失败：' + error.message });
   }
 });
 
@@ -200,7 +229,9 @@ router.put('/:id', authenticate, (req, res) => {
       return res.status(404).json({ error: '战场不存在' });
     }
     
-    const { terrain, name, type, is_public } = req.body;
+    // Validate input with Zod
+    const validated = updateBattlefieldSchema.parse(req.body);
+    const { terrain, name, type, is_public } = validated;
     
     if (terrain !== undefined) {
       const terrainStr = typeof terrain === 'object' ? JSON.stringify(terrain) : terrain;
@@ -226,6 +257,12 @@ router.put('/:id', authenticate, (req, res) => {
       battlefield: updated
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ 
+        error: '验证失败',
+        details: error.errors.map(e => ({ field: e.path[0], message: e.message }))
+      });
+    }
     console.error('[Battlefields] Update error:', error);
     res.status(500).json({ error: '更新战场失败' });
   }
@@ -267,6 +304,16 @@ router.post('/:id/terrain', authenticate, (req, res) => {
   try {
     const { id } = req.params;
     const { terrain } = req.body; // { "q,r": terrainId, ... }
+    
+    // Validate battlefield ID
+    if (!id) {
+      return res.status(400).json({ error: '战场 ID 必填' });
+    }
+    
+    // Validate terrain data
+    if (!terrain || typeof terrain !== 'object') {
+      return res.status(400).json({ error: '地形数据必须是对象' });
+    }
     
     const battlefield = db.prepare('SELECT * FROM battlefields WHERE id = ?').get(id);
     if (!battlefield) {

@@ -1,7 +1,15 @@
 import { WebSocketServer } from 'ws';
+import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mecha-battle-auth-secret-key';
+// 加载环境变量（必须在读取 process.env 之前调用）
+dotenv.config();
+
+// 强制要求 JWT_SECRET
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('[配置错误] JWT_SECRET 环境变量必须设置！');
+}
 
 class CombatSocketService {
   constructor() {

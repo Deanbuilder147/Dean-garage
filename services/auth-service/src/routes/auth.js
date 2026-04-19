@@ -1,29 +1,31 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import db from '../database/db.js';
 import config from '../config/index.js';
 
 const router = express.Router();
 
+// Zod validation schemas
+const registerSchema = z.object({
+  username: z.string().min(3, "用户名长度至少 3 个字符").max(20, "用户名长度不能超过 20 个字符"),
+  password: z.string().min(6, "密码长度至少 6 个字符").max(100, "密码长度不能超过 100 个字符")
+});
+
+const loginSchema = z.object({
+  username: z.string().min(1, "用户名必填"),
+  password: z.string().min(1, "密码必填")
+});
+
 // 注册
 router.post('/register', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    // Validate input with Zod
+    const validated = registerSchema.parse(req.body);
+    const { username, password } = validated;
     
-    if (!username || !password) {
-      return res.status(400).json({ error: '用户名和密码必填' });
-    }
-    
-    if (username.length < 3 || username.length > 20) {
-      return res.status(400).json({ error: '用户名长度需在3-20个字符之间' });
-    }
-    
-    if (password.length < 6) {
-      return res.status(400).json({ error: '密码长度至少6个字符' });
-    }
-    
-    // 检查用户是否存在
+    // Check if user exists
     const existing = db.get('SELECT id FROM users WHERE username = ?', [username]);
     
     if (existing) {
@@ -47,6 +49,12 @@ router.post('/register', async (req, res) => {
       }
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ 
+        error: '验证失败',
+        details: error.errors.map(e => ({ field: e.path[0], message: e.message }))
+      });
+    }
     console.error('Register error:', error);
     res.status(500).json({ error: '注册失败' });
   }
@@ -55,7 +63,9 @@ router.post('/register', async (req, res) => {
 // 登录
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    // Validate input with Zod
+    const validated = loginSchema.parse(req.body);
+    const { username, password } = validated;
     
     if (!username || !password) {
       return res.status(400).json({ error: '用户名和密码必填' });
@@ -118,7 +128,7 @@ router.get('/me', (req, res) => {
     res.json({ user });
   } catch (error) {
     console.error('Auth check error:', error);
-    res.status(401).json({ error: 'Token无效或已过期' });
+    res.status(401).json({ error: 'Token 无效或已过期' });
   }
 });
 

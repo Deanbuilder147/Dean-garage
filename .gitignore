@@ -60,3 +60,30 @@ temp/
 # Battle Simulator specific
 Battle Simulator*/
 战斗模拟器*/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Test scripts and temp files
+test-*.sh
+*_test.sh
+comprehensive-test.sh
+run-services.sh
+stop-services.sh
+start-all.sh
+classify_reports.sh
+q1/
+nodemon/
+test-reports/
+
+# Uploads (user content)
+services/hangar-service/uploads/
+
+# API debug pages
+frontend/public/api-debug.html
+frontend/public/test-button.html
+
+# Package root files (from service installs)
+package-lock.json

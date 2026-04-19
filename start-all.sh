@@ -3,7 +3,7 @@
 # 机甲战棋项目 - 一键启动所有服务
 # 使用: ./start-all.sh
 
-PROJECT_DIR="/Users/dingxuyang/WorkBuddy/20260414174321"
+PROJECT_DIR="/home/agentuser/Dean-garage"
 
 echo "🎮 启动机甲战棋项目..."
 echo "========================"
@@ -50,7 +50,7 @@ echo -e "${GREEN}✅ 所有服务已启动！${NC}"
 echo "========================"
 echo ""
 echo "访问地址:"
-echo "  🌐 前端页面: http://localhost:8081"
+echo "  🌐 前端页面：http://<your-server-IP>:8081"
 echo ""
 echo "后端服务:"
 echo "  • auth-service:   http://localhost:3001/api/auth"
@@ -66,3 +66,5 @@ echo "  tail -f /tmp/map-service.log"
 echo "  tail -f /tmp/combat-service.log"
 echo "  tail -f /tmp/comm-service.log"
 echo "  tail -f /tmp/frontend.log"
+echo ""
+echo "⚠️  提示：从外部访问请使用你的云服务器公网 IP 替换 localhost"
