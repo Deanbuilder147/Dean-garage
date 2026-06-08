@@ -1,0 +1,226 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: mecha-battle-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mecha_battle}
+      POSTGRES_USER: ${POSTGRES_USER:-mecha_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mecha_user_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mecha_user -d mecha_battle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auth Service (Port 3001)
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: mecha-auth
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET}
+      DB_ADAPTER: ${DB_ADAPTER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "3001:3001"
+    volumes:
+      - auth_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Hangar Service (Port 3002)
+  hangar-service:
+    build:
+      context: ./services/hangar-service
+      dockerfile: Dockerfile
+    container_name: mecha-hangar
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      JWT_SECRET: ${JWT_SECRET}
+      DB_ADAPTER: ${DB_ADAPTER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "3002:3002"
+    volumes:
+      - hangar_data:/app/data
+      - hangar_uploads:/app/uploads
+      - shared_data:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Map Service (Port 3003)
+  map-service:
+    build:
+      context: ./services/map-service
+      dockerfile: Dockerfile
+    container_name: mecha-map
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      JWT_SECRET: ${JWT_SECRET}
+      DB_ADAPTER: ${DB_ADAPTER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "3003:3003"
+    volumes:
+      - map_data:/app/data
+      - shared_data:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Combat Service (Port 3004)
+  combat-service:
+    build:
+      context: ./services/combat-service
+      dockerfile: Dockerfile
+    container_name: mecha-combat
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      JWT_SECRET: ${JWT_SECRET}
+      DB_ADAPTER: ${DB_ADAPTER:-sqlite}
+      DATABASE_URL: ${DATABASE_URL}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      HANGAR_SERVICE_URL: http://hangar-service:3002
+      MAP_SERVICE_URL: http://map-service:3003
+      COMM_SERVICE_URL: http://comm-service:3005
+    ports:
+      - "3004:3004"
+    volumes:
+      - combat_data:/app/data
+      - shared_data:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Comm Service (Port 3005)
+  comm-service:
+    build:
+      context: ./services/comm-service
+      dockerfile: Dockerfile
+    container_name: mecha-comm
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      JWT_SECRET: ${JWT_SECRET}
+      COMBAT_SERVICE_URL: http://combat-service:3004
+      MAP_SERVICE_URL: http://map-service:3003
+    ports:
+      - "3005:3005"
+    depends_on:
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/api/comm/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Online Battle Service (Port 3006)
+  online-battle-service:
+    build:
+      context: ./services/online-battle-service
+      dockerfile: Dockerfile
+    container_name: mecha-online-battle
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      COMBAT_SERVICE_URL: http://combat-service:3004
+      MAP_SERVICE_URL: http://map-service:3003
+      COMM_SERVICE_URL: http://comm-service:3005
+    ports:
+      - "3006:3006"
+    depends_on:
+      - auth-service
+      - combat-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Frontend (Port 8081)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mecha-frontend
+    ports:
+      - "8081:8081"
+    environment:
+      VITE_API_BASE: /api
+      AUTH_SERVICE_HOST: auth-service
+      HANGAR_SERVICE_HOST: hangar-service
+      MAP_SERVICE_HOST: map-service
+      COMBAT_SERVICE_HOST: combat-service
+      COMM_SERVICE_HOST: comm-service
+    depends_on:
+      - auth-service
+      - hangar-service
+      - map-service
+      - combat-service
+      - comm-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  shared_data:
+  auth_data:
+  hangar_data:
+  hangar_uploads:
+  map_data:
+  combat_data:
+
+networks:
+  default:
+    name: mecha-network

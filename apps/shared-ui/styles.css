@@ -1,0 +1,95 @@
+/* 共享样式变量 */
+:root {
+  /* 颜色系统 */
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --secondary: #8b5cf6;
+  --accent: #ec4899;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+  
+  /* 表面颜色 */
+  --surface: #0f172a;
+  --surface-light: #1e293b;
+  --surface-lighter: #334155;
+  --on-surface: #f1f5f9;
+  --on-surface-muted: #94a3b8;
+  
+  /* 边框 */
+  --border: #475569;
+  --border-light: #64748b;
+  
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  
+  /* 圆角 */
+  --radius-sm: 0.25rem;
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  
+  /* 间距 */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  
+  /* 字体 */
+  --font-mono: 'Space Grotesk', 'Courier New', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+/* 全局重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--surface);
+  color: var(--on-surface);
+  line-height: 1.6;
+}
+
+/* 工具类 */
+.text-primary { color: var(--primary); }
+.text-secondary { color: var(--secondary); }
+.text-accent { color: var(--accent); }
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger { color: var(--danger); }
+.text-muted { color: var(--on-surface-muted); }
+
+.bg-surface { background: var(--surface); }
+.bg-surface-light { background: var(--surface-light); }
+
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-2 { gap: var(--spacing-sm); }
+.gap-4 { gap: var(--spacing); }
+
+.p-2 { padding: var(--spacing-sm); }
+.p-4 { padding: var(--spacing); }
+.p-6 { padding: var(--spacing-lg); }
+
+.m-2 { margin: var(--spacing-sm); }
+.m-4 { margin: var(--spacing); }
+
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+
+.rounded { border-radius: var(--radius); }
+.rounded-lg { border-radius: var(--radius-lg); }
+
+.shadow { box-shadow: var(--shadow); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
