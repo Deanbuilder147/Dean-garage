@@ -67,8 +67,8 @@ const hoverCoord = ref('')
 // ISO 矩阵参数 — 使用 reactive 以支持父层通过 props 动态调节 3D 视角
 const ISO = reactive({ ...ISO_DEFAULTS })
 
-// Phase9++: 简化 ISO 矩阵 — 使用用户指定公式 transform(scaleX, shearY*scaleX, 0, scaleY)
-// R=0 行天然水平 (flatY=0 → screenY=0)，列向量绝对平行 (无 shearX)，无需旋转补偿
+// Phase9.6: 标准等距平行投影 — transform(scaleX, 0, shearX, scaleY, 0, 0)
+// 性质: R=0 行 screenY=offsetY (绝对水平地平线), shearX 驱动 X 轴等距倾斜, 列向量绝对平行
 
 
 // ================================================================
@@ -120,20 +120,21 @@ function formatCoord(q, r) {
 
 /**
  * canvas 像素坐标 → 世界坐标 (含 ISO 逆矩阵)
- * 四步管线: 像素 → -offset → ÷scale → ISO逆矩阵 → { x, y, wx, wy }
- */
-/**
- * canvas 像素坐标 → 世界坐标 (含 ISO 逆矩阵)
  *
- * 正向 CTM: T → S → transform(scaleX, shearY*scaleX, 0, scaleY)
- *   即: screenX = offsetX + scale * scaleX * flatX
- *       screenY = offsetY + scale * (scaleY * flatY + shearY * scaleX * flatX)
+ * 正向 CTM: translate → scale → transform(scaleX, 0, shearX, scaleY, 0, 0)
+ *   即: screenX = offsetX + scale * (scaleX * flatX + shearX * flatY)
+ *       screenY = offsetY + scale * (scaleY * flatY)
+ *
+ * 性质:
+ *   - R=0 行: flatY=0 → screenY=offsetY (绝对水平地平线)
+ *   - shearX 驱动 X 轴倾斜 (flatY 越大, X 偏移越多 → 标准等距纵深感)
  *
  * 逆矩阵管线 (严格成对倒数):
- *   1) 减 offsetX/Y → rel
- *   2) 除 scale → world
- *   3) flatX = worldX / scaleX
- *   4) flatY = (worldY - shearY * worldX) / scaleY
+ *   1) relX = cx - offsetX, relY = cy - offsetY
+ *   2) worldX = relX / scale, worldY = relY / scale
+ *   3) flatY = worldY / scaleY
+ *   4) flatX = (worldX - shearX * flatY) / scaleX
+ *         = (worldX - shearX * worldY / scaleY) / scaleX
  */
 function canvasPosToWorld(cx, cy) {
   // 1) 减去相机平移量
@@ -142,9 +143,9 @@ function canvasPosToWorld(cx, cy) {
   // 2) 除以缩放比例
   const worldX = relX / scale.value
   const worldY = relY / scale.value
-  // 3) 逆向 ISO 仿射: 与正向 CTM transform(scaleX, shearY*scaleX, 0, scaleY) 严格成对倒数
-  const flatX = worldX / ISO.scaleX
-  const flatY = (worldY - ISO.shearY * worldX) / ISO.scaleY
+  // 3) 逆向 ISO 仿射: 与正向 CTM transform(scaleX, 0, shearX, scaleY, 0, 0) 严格成对倒数
+  const flatY = worldY / ISO.scaleY
+  const flatX = (worldX - ISO.shearX * flatY) / ISO.scaleX
   return { x: flatX, y: flatY, wx: worldX, wy: worldY }
 }
 
@@ -169,15 +170,17 @@ function getWorldPos(e) {
 /** 设置 offsetX/offsetY 使棋盘几何中心对齐画布中心 (含等距变换) */
 /**
  * 设置 offsetX/offsetY 使棋盘几何中心对齐画布中心
- * 使用简化 ISO: screenX=flatX*scaleX, screenY=flatY*scaleY+screenX*shearY
+ * 使用标准等距平行投影:
+ *   screenX = scaleX * flatX + shearX * flatY
+ *   screenY = scaleY * flatY  (仅依赖 flatY, R=0 行绝对水平)
  */
 function centerGrid() {
   const canvas = mapCanvas.value
   if (!canvas) return
   const midGrid = hexToPixel(Math.floor(props.gridWidth / 2), Math.floor(props.gridHeight / 2))
-  // 简化 ISO: 无旋转, 无 shearX, Y 仅由 shearY 倾斜
-  const isoCenterX = midGrid.x * ISO.scaleX
-  const isoCenterY = midGrid.y * ISO.scaleY + isoCenterX * ISO.shearY
+  // 标准等距: X 由 flatX 和 flatY (通过 shearX) 共同决定, Y 仅由 flatY 决定
+  const isoCenterX = midGrid.x * ISO.scaleX + midGrid.y * ISO.shearX
+  const isoCenterY = midGrid.y * ISO.scaleY
   offsetX.value = canvas.width / 2 - isoCenterX * scale.value
   offsetY.value = canvas.height / 2 - isoCenterY * scale.value
 }
@@ -232,13 +235,18 @@ function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.save()
 
-  // === CTM: 平移 → 缩放 → 等距仿射 (用户指定公式) ===
-  // 公式: screenX = flatX * scaleX, screenY = flatY * scaleY + screenX * shearY
-  // 等价 canvas: transform(scaleX, shearY*scaleX, 0, scaleY, 0, 0)
-  // 性质: R=0 行天然水平 (flatY=0 → screenY=0), 列向量绝对平行 (无 shearX 干扰)
+  // === CTM: 平移 → 缩放 → 标准等距平行投影 ===
+  // 公式:
+  //   screenX = scaleX * flatX + shearX * flatY  (shearX 驱动 X 轴纵深感)
+  //   screenY = scaleY * flatY                    (Y 仅依赖 flatY, 绝对水平)
+  // 等价 canvas: transform(scaleX, 0, shearX, scaleY, 0, 0)
+  // 性质:
+  //   - R=0 行 screenY=0 → 画布上绝对水平地平线
+  //   - shearX 滑块拉动 → 整列平行推移 (等距纵深感)
+  //   - 列斜率恒定 = shearX * scaleY / (scaleX * sqrt(3)), 首尾列绝对平行
   ctx.translate(offsetX.value, offsetY.value)
   ctx.scale(scale.value, scale.value)
-  ctx.transform(ISO.scaleX, ISO.shearY * ISO.scaleX, 0, ISO.scaleY, 0, 0)
+  ctx.transform(ISO.scaleX, 0, ISO.shearX, ISO.scaleY, 0, 0)
 
   // 调用父层绘制函数 (ctx 已应用 CTM)
   if (props.drawFn) {
@@ -421,7 +429,7 @@ function zoomReset() {
   const worldW = lastCol.x + HEX_RADIUS * 2
   const worldH = lastRow.y + HEX_RADIUS * 2
   const cw = worldW * ISO.scaleX + worldH * Math.abs(ISO.shearX) + 200
-  const ch = worldW * Math.abs(ISO.shearY) + worldH * ISO.scaleY + 200
+  const ch = worldH * ISO.scaleY + 200  // 新公式: screenY=scaleY*flatY, 无 shearY 分量
   const viewW = wrapper.clientWidth
   const viewH = wrapper.clientHeight
   const pad = 20
