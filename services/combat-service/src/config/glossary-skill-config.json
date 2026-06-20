@@ -1,9 +1,9 @@
 {
   "_meta": {
-    "version": "3.0",
-    "description": "机甲战棋词条库中枢配置 — 确定性技能参数字典",
+    "version": "4.0",
+    "description": "机甲战棋词条库中枢配置 — 含技能 + 地形 + 可破坏环境",
     "generated_from": "GlossaryView.vue + 去骰化改造",
-    "date": "2026-06-19 21:54:52",
+    "date": "2026-06-20 19:20:00",
     "principle": "技能效果确定化 + 5 通用字段结构 (target_filter/cast_range/aoe_radius/base_damage/status_effects)"
   },
   "skills": {
@@ -162,6 +162,98 @@
       "chance": 0.333,
       "multiplier_min": 1.0,
       "multiplier_max": 1.5
+    }
+  },
+  "terrains": {
+    "moon": {
+      "name": "月面",
+      "color": "#c0c0c0",
+      "move_cost": 1,
+      "defense_bonus": 0,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "moon"
+    },
+    "plain": {
+      "name": "平原",
+      "color": "#7a9b4f",
+      "move_cost": 1,
+      "defense_bonus": 0,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "plain"
+    },
+    "mountain": {
+      "name": "山地",
+      "color": "#8b7355",
+      "move_cost": 3,
+      "defense_bonus": 20,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "mountain"
+    },
+    "water": {
+      "name": "水域",
+      "color": "#4682b4",
+      "move_cost": 99,
+      "defense_bonus": -10,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "water"
+    },
+    "forest": {
+      "name": "森林",
+      "color": "#2d5a27",
+      "move_cost": 2,
+      "defense_bonus": 15,
+      "is_destructible": true,
+      "max_hp": 3,
+      "destroyed_transform_to": "plain"
+    },
+    "fortress": {
+      "name": "堡垒",
+      "color": "#4a4a6a",
+      "move_cost": 1,
+      "defense_bonus": 30,
+      "is_destructible": true,
+      "max_hp": 5,
+      "destroyed_transform_to": "plain"
+    },
+    "ruins": {
+      "name": "废墟",
+      "color": "#696969",
+      "move_cost": 2,
+      "defense_bonus": 10,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "ruins"
+    },
+    "crystal": {
+      "name": "晶矿",
+      "color": "#7b68ee",
+      "move_cost": 2,
+      "defense_bonus": 5,
+      "is_destructible": true,
+      "max_hp": 2,
+      "destroyed_transform_to": "plain"
+    },
+    "rubble": {
+      "name": "残骸",
+      "color": "#8b7d6b",
+      "move_cost": 2,
+      "defense_bonus": 10,
+      "is_destructible": false,
+      "max_hp": 0,
+      "destroyed_transform_to": "rubble"
+    },
+    "city_building": {
+      "name": "城市建筑",
+      "color": "#b8860b",
+      "move_cost": 1,
+      "defense_bonus": 25,
+      "is_destructible": true,
+      "max_hp": 4,
+      "destroyed_transform_to": "rubble"
     }
   }
 }

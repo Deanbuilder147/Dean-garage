@@ -14,18 +14,21 @@ class TerrainMovement {
   static MAP_SERVICE_URL = process.env.MAP_SERVICE_URL || 'http://map-service:3003';
 
   // 硬编码回退默认值（与 Map Service 数据库初始化一致）
+  // Phase9.5: 回退地形表 — 新增 is_destructible / max_hp / destroyed_transform_to 字段
   static FALLBACK_TERRAINS = {
-    empty:     { name: '空地',     cost: 1,  defense: 0,  can_spawn: true,  color: '#88CC88' },
-    plain:     { name: '平原',     cost: 1,  defense: 0,  can_spawn: true,  color: '#AAFFAA' },
-    forest:    { name: '森林',     cost: 2,  defense: 10, can_spawn: true,  color: '#228822' },
-    mountain:  { name: '山地',     cost: 3,  defense: 20, can_spawn: false, color: '#886644' },
-    water:     { name: '水域',     cost: 99, defense: 0,  can_spawn: false, color: '#4488FF' },
-    base:      { name: '基地',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FF4444' },
-    mothership:{ name: '母舰',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FFD700' },
-    ruin:      { name: '废墟',     cost: 2,  defense: 15, can_spawn: true,  color: '#998866' },
-    lava:      { name: '岩浆',     cost: 3,  defense: 0,  can_spawn: false, color: '#FF6600' },
-    lunar:     { name: '月面',     cost: 1,  defense: 0,  can_spawn: true,  color: '#CCCCCC' },
-    crater:    { name: '陨石坑',   cost: 2,  defense: 5,  can_spawn: true,  color: '#777766' },
+    empty:     { name: '空地',     cost: 1,  defense: 0,  can_spawn: true,  color: '#88CC88', is_destructible: false, max_hp: 0, destroyed_transform_to: 'empty' },
+    plain:     { name: '平原',     cost: 1,  defense: 0,  can_spawn: true,  color: '#AAFFAA', is_destructible: false, max_hp: 0, destroyed_transform_to: 'plain' },
+    forest:    { name: '森林',     cost: 2,  defense: 10, can_spawn: true,  color: '#228822', is_destructible: true,  max_hp: 3, destroyed_transform_to: 'plain' },
+    mountain:  { name: '山地',     cost: 3,  defense: 20, can_spawn: false, color: '#886644', is_destructible: false, max_hp: 0, destroyed_transform_to: 'mountain' },
+    water:     { name: '水域',     cost: 99, defense: 0,  can_spawn: false, color: '#4488FF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'water' },
+    base:      { name: '基地',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FF4444', is_destructible: true,  max_hp: 5, destroyed_transform_to: 'ruin' },
+    mothership:{ name: '母舰',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FFD700', is_destructible: true,  max_hp: 8, destroyed_transform_to: 'ruin' },
+    ruin:      { name: '废墟',     cost: 2,  defense: 15, can_spawn: true,  color: '#998866', is_destructible: false, max_hp: 0, destroyed_transform_to: 'ruin' },
+    lava:      { name: '岩浆',     cost: 3,  defense: 0,  can_spawn: false, color: '#FF6600', is_destructible: false, max_hp: 0, destroyed_transform_to: 'lava' },
+    lunar:     { name: '月面',     cost: 1,  defense: 0,  can_spawn: true,  color: '#CCCCCC', is_destructible: false, max_hp: 0, destroyed_transform_to: 'lunar' },
+    crater:    { name: '陨石坑',   cost: 2,  defense: 5,  can_spawn: true,  color: '#777766', is_destructible: false, max_hp: 0, destroyed_transform_to: 'crater' },
+    city_building: { name: '城市建筑', cost: 1, defense: 25, can_spawn: false, color: '#b8860b', is_destructible: true,  max_hp: 4, destroyed_transform_to: 'ruin' },
+    rubble:    { name: '残骸',     cost: 2,  defense: 10, can_spawn: true,  color: '#8b7d6b', is_destructible: false, max_hp: 0, destroyed_transform_to: 'rubble' },
   };
 
   // 地形描述回退
@@ -171,6 +174,83 @@ class TerrainMovement {
       description: t.description || this.FALLBACK_DESCRIPTIONS[id] || '',
     }));
   }
+
+
+  // ============================================================
+  //  Phase 9.5: 可破坏地形支持方法
+  // ============================================================
+
+  /**
+   * 检查地形是否可破坏
+   */
+  static isDestructible(terrainId) {
+    const data = this.getTerrainData()
+    const t = data[terrainId]
+    return t ? !!t.is_destructible : false
+  }
+
+  /**
+   * 获取地形的最大 HP
+   */
+  static getTerrainMaxHp(terrainId) {
+    const data = this.getTerrainData()
+    const t = data[terrainId]
+    return t ? (t.max_hp || 0) : 0
+  }
+
+  /**
+   * 获取地形被破坏后的转化目标
+   */
+  static getDestroyedTransformTo(terrainId) {
+    const data = this.getTerrainData()
+    const t = data[terrainId]
+    return t ? (t.destroyed_transform_to || terrainId) : terrainId
+  }
+
+  /**
+   * 应用地形破坏转换：
+   *   - 将 terrainMap 中指定格子的 terrain_id 替换为退化地形
+   *   - 更新 move_cost 为退化地形的消耗
+   *   - 返回更新后的 terrainCell 快照
+   */
+  static applyTerrainDestruction(terrainMap, q, r, terrainDefs = {}) {
+    const key = `${q},${r}`
+    const cell = terrainMap[key]
+    if (!cell) return null
+
+    const oldTerrainId = cell.terrain_id || cell.terrain || 'empty'
+    const transformTo = this.getDestroyedTransformTo(oldTerrainId)
+
+    // 获取退化地形的属性
+    const newTerrain = terrainDefs[transformTo]
+        || this.getTerrainData()[transformTo]
+        || this.FALLBACK_TERRAINS[transformTo]
+        || {}
+
+    const oldMoveCost = cell.move_cost || this.getMoveCost(oldTerrainId)
+    const newMoveCost = newTerrain.move_cost !== undefined
+        ? newTerrain.move_cost
+        : (newTerrain.cost || 1)
+
+    // 更新 terrainMap 中的格子
+    if (terrainMap[key]) {
+        terrainMap[key].terrain_id = transformTo
+        terrainMap[key].terrain = transformTo
+        terrainMap[key].move_cost = newMoveCost
+        terrainMap[key].terrain_hp = 0
+        terrainMap[key].is_destructible = false
+    }
+
+    return {
+        key,
+        old_terrain_id: oldTerrainId,
+        new_terrain_id: transformTo,
+        old_move_cost: oldMoveCost,
+        new_move_cost: newMoveCost,
+        destroyed: true,
+    }
+  }
+
 
   /**
    * 计算路径总消耗

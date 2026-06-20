@@ -223,6 +223,98 @@ class DamagePipe {
         return reduction;
     }
 
+
+    // ============================================================
+    //  Phase 9.5: 可破坏地形伤害管道
+    //  当攻击目标为地形格子且 is_destructible=true 时，扣减 terrain_hp
+    //  HP 归零时返回地形退化结果，并更新寻路 move_cost
+    // ============================================================
+
+    /**
+     * 计算对可破坏地形的伤害
+     * @param {Object} attacker      - 攻击者单位数据 { attack, weaponType, ... }
+     * @param {Object} terrainCell   - 目标地形格子 { terrain_id, terrain_hp, is_destructible, max_hp, destroyed_transform_to }
+     * @param {Object} terrainDefs   - 全地形定义字典 (用于获取退化后地形的 move_cost)
+     * @returns {Object} { damage, hp_before, hp_after, destroyed, new_terrain_id, new_move_cost }
+     */
+    static calculateTerrainDamage(attacker, terrainCell, terrainDefs = {}) {
+        const result = {
+            damage: 0,
+            hp_before: terrainCell.terrain_hp || terrainCell.max_hp || 0,
+            hp_after: 0,
+            destroyed: false,
+            new_terrain_id: null,
+            new_move_cost: null,
+            message: ''
+        }
+
+        // 不可破坏地形，直接返回
+        if (!terrainCell.is_destructible) {
+            result.hp_after = result.hp_before
+            result.message = `${terrainCell.terrain_id} 不可破坏`
+            return result
+        }
+
+        // 计算基础伤害 (与单位伤害管道一致的攻击力取值)
+        const baseAttack = attacker.melee || attacker.ranged || attacker.attack || 10
+
+        // 对地形的伤害 = 基础攻击力 * 0.8 (地形无机动值闪避)
+        // 某些武器类型对建筑有加成
+        let damage = Math.floor(baseAttack * 0.8)
+        if (attacker.weaponType === 'explosive' || attacker.weaponType === 'beam') {
+            damage = Math.floor(baseAttack * 1.0)  // 爆炸/光束对建筑全额伤害
+        }
+
+        // 保底伤害
+        if (damage < 1) damage = 1
+
+        result.damage = damage
+
+        // 计算剩余 HP
+        const maxHp = terrainCell.max_hp || 1
+        result.hp_after = Math.max(0, result.hp_before - damage)
+
+        // 判断是否破坏
+        if (result.hp_after <= 0) {
+            result.destroyed = true
+            const transformTo = terrainCell.destroyed_transform_to || 'plain'
+            result.new_terrain_id = transformTo
+
+            // 获取退化后地形的移动消耗
+            const newTerrain = terrainDefs[transformTo] || {}
+            result.new_move_cost = newTerrain.move_cost !== undefined
+                ? newTerrain.move_cost
+                : (newTerrain.cost !== undefined ? newTerrain.cost : 1)
+
+            result.message = `${terrainCell.terrain_id} 被摧毁! 退化 → ${transformTo} (move_cost=${result.new_move_cost})`
+        } else {
+            result.message = `${terrainCell.terrain_id} 受到 ${damage} 点伤害，剩余 ${result.hp_after}/${maxHp} HP`
+        }
+
+        return result
+    }
+
+    /**
+     * 便捷方法：计算并应用地形伤害 (返回更新后的 terrainCell 快照)
+     */
+    static applyTerrainDamage(attacker, terrainCell, terrainDefs = {}) {
+        const result = this.calculateTerrainDamage(attacker, terrainCell, terrainDefs)
+
+        // 更新 terrainCell 的运行时 HP
+        terrainCell.terrain_hp = result.hp_after
+
+        // 如果被破坏，更新 terrain_id 和 move_cost
+        if (result.destroyed && result.new_terrain_id) {
+            terrainCell.terrain_id = result.new_terrain_id
+            terrainCell.is_destructible = false
+            terrainCell.max_hp = 0
+            terrainCell.destroyed_transform_to = result.new_terrain_id
+        }
+
+        return result
+    }
+
+
     static calculateQuick(attacker, defender, attackType = 'melee') {
         return this.calculate({
             attacker: {
