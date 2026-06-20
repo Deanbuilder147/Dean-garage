@@ -45,6 +45,11 @@ docker-compose.override.yml
 tmp/
 temp/
 *.tmp
+*.bak
+backups/
+fix_scripts/
+*_fix.py
+fix_*.py
 
 # 测试覆盖
 coverage/

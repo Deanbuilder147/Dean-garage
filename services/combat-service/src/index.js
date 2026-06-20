@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import battleRoutes from './routes/battles.js';
 import { setupWebSocket } from './services/socketService.js';
 import db from './database/db.js';
+import TerrainMovement from './services/combatCore/terrainMovement.cjs';
 
 // 加载环境变量
 
@@ -61,6 +62,7 @@ app.use((err, req, res, next) => {
 async function startServer() {
   try {
     await db.initializeDatabase();
+    await TerrainMovement.loadTerrainTypes();
     console.log('战斗数据库初始化完成');
     
     // 启动HTTP服务器

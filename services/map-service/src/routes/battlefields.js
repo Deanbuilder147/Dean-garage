@@ -18,6 +18,7 @@ const createBattlefieldSchema = z.object({
 });
 
 const updateBattlefieldSchema = z.object({
+  terrain_defs: z.any().optional(),
   name: z.string().min(1).max(50).optional(),
   terrain: z.any().optional(),
   type: z.string().max(20).optional(),
@@ -234,11 +235,16 @@ router.put('/:id', authenticate, (req, res) => {
     
     // Validate input with Zod
     const validated = updateBattlefieldSchema.parse(req.body);
-    const { terrain, name, type, is_public } = validated;
+    const { terrain, terrain_defs, name, type, is_public } = validated;
     
     if (terrain !== undefined) {
       const terrainStr = typeof terrain === 'object' ? JSON.stringify(terrain) : terrain;
       db.prepare('UPDATE battlefields SET terrain = ? WHERE id = ?').run(terrainStr, id);
+    }
+
+    if (terrain_defs !== undefined) {
+      const defsStr = typeof terrain_defs === 'object' ? JSON.stringify(terrain_defs) : terrain_defs;
+      db.prepare('UPDATE battlefields SET terrain_defs = ? WHERE id = ?').run(defsStr, id);
     }
     
     if (name !== undefined) {
@@ -301,6 +307,103 @@ router.get('/terrain/types', authenticate, (req, res) => {
     res.status(500).json({ error: '获取地形类型失败' });
   }
 });
+
+// 创建自定义地形类型
+router.post('/terrain/types', authenticate, (req, res) => {
+  try {
+    const { terrain_id, name, movement_cost, defense_bonus, can_spawn, color, description } = req.body;
+
+    if (!terrain_id || !name) {
+      return res.status(400).json({ error: 'terrain_id 和 name 是必填字段' });
+    }
+    if (!/^[a-z_]+$/.test(terrain_id)) {
+      return res.status(400).json({ error: 'terrain_id 只能包含小写字母和下划线' });
+    }
+
+    const existing = db.prepare('SELECT terrain_id FROM terrain_types WHERE terrain_id = ?').get(terrain_id);
+    if (existing) {
+      return res.status(409).json({ error: '地形类型已存在' });
+    }
+
+    db.prepare(
+      'INSERT INTO terrain_types (terrain_id, name, movement_cost, defense_bonus, can_spawn, color, description) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run([
+      terrain_id,
+      name,
+      movement_cost ?? 1,
+      defense_bonus ?? 0,
+      can_spawn !== false ? 1 : 0,
+      color || '#888888',
+      description || null
+    ]);
+
+    const created = db.prepare('SELECT * FROM terrain_types WHERE terrain_id = ?').get(terrain_id);
+    res.status(201).json({ message: '地形类型创建成功', terrainType: created });
+  } catch (error) {
+    console.error('[Terrain] Create type error:', error);
+    res.status(500).json({ error: '创建地形类型失败' });
+  }
+});
+
+// 更新地形类型
+router.put('/terrain/types/:terrainId', authenticate, (req, res) => {
+  try {
+    const { terrainId } = req.params;
+    const existing = db.prepare('SELECT * FROM terrain_types WHERE terrain_id = ?').get(terrainId);
+    if (!existing) {
+      return res.status(404).json({ error: '地形类型不存在' });
+    }
+
+    const { name, movement_cost, defense_bonus, can_spawn, color, description } = req.body;
+    const fields = [];
+    const values = [];
+
+    if (name !== undefined) { fields.push('name = ?'); values.push(name); }
+    if (movement_cost !== undefined) { fields.push('movement_cost = ?'); values.push(movement_cost); }
+    if (defense_bonus !== undefined) { fields.push('defense_bonus = ?'); values.push(defense_bonus); }
+    if (can_spawn !== undefined) { fields.push('can_spawn = ?'); values.push(can_spawn ? 1 : 0); }
+    if (color !== undefined) { fields.push('color = ?'); values.push(color); }
+    if (description !== undefined) { fields.push('description = ?'); values.push(description); }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: '没有需要更新的字段' });
+    }
+
+    values.push(terrainId);
+    db.prepare('UPDATE terrain_types SET ' + fields.join(', ') + ' WHERE terrain_id = ?').run(values);
+
+    const updated = db.prepare('SELECT * FROM terrain_types WHERE terrain_id = ?').get(terrainId);
+    res.json({ message: '地形类型更新成功', terrainType: updated });
+  } catch (error) {
+    console.error('[Terrain] Update type error:', error);
+    res.status(500).json({ error: '更新地形类型失败' });
+  }
+});
+
+// 删除自定义地形类型（不允许删除系统内置地形）
+router.delete('/terrain/types/:terrainId', authenticate, (req, res) => {
+  try {
+    const { terrainId } = req.params;
+    const BUILTIN = ['empty', 'forest', 'mountain', 'water', 'mothership', 'base', 'plain', 'ruin', 'lava', 'lunar', 'crater'];
+
+    if (BUILTIN.includes(terrainId)) {
+      return res.status(403).json({ error: '系统内置地形不可删除' });
+    }
+
+    const existing = db.prepare('SELECT * FROM terrain_types WHERE terrain_id = ?').get(terrainId);
+    if (!existing) {
+      return res.status(404).json({ error: '地形类型不存在' });
+    }
+
+    db.prepare('DELETE FROM terrain_types WHERE terrain_id = ?').run(terrainId);
+    res.json({ message: '地形类型已删除' });
+  } catch (error) {
+    console.error('[Terrain] Delete type error:', error);
+    res.status(500).json({ error: '删除地形类型失败' });
+  }
+});
+
+
 
 // 批量更新地形 (地形编辑器核心接口)
 router.post('/:id/terrain', authenticate, (req, res) => {

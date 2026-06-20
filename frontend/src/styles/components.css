@@ -222,8 +222,8 @@
   outline: none;
   border-color: var(--primary);
   box-shadow: 
-    0 0 0 2px rgba(0, 255, 65, 0.1),
-    0 0 8px rgba(0, 255, 65, 0.2);
+    0 0 0 2px rgba(255, 176, 0, 0.1),
+    0 0 8px rgba(255, 176, 0, 0.2);
 }
 
 .tactical-input::placeholder {
@@ -304,7 +304,7 @@
 }
 
 .tactical-list-item.active {
-  background: rgba(0, 255, 65, 0.05);
+  background: rgba(255, 176, 0, 0.05);
 }
 
 .tactical-list-item.active::before {
@@ -381,7 +381,7 @@
 }
 
 .status-badge.active {
-  background: rgba(0, 255, 65, 0.1);
+  background: rgba(255, 176, 0, 0.1);
   color: var(--primary);
 }
 

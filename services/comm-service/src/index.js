@@ -106,7 +106,7 @@ app.post('/api/comm/rooms', authenticate, async (req, res) => {
 
   try {
     // 调用 Combat-Service 创建战斗会话，获取真实的 UUID battle_id
-    const combatRes = await fetch(`${COMBAT_SERVICE_URL}/api/combat/battles`, {
+    const combatRes = await fetch(`${COMBAT_SERVICE_URL}/api/combat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

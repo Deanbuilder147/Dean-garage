@@ -59,6 +59,13 @@ async function initDatabase() {
     // 列已存在，忽略
   }
 
+  // 兼容性迁移：添加 terrain_defs 列
+  try {
+    db.run("ALTER TABLE battlefields ADD COLUMN terrain_defs TEXT DEFAULT '[]'");
+  } catch (e) {
+    // 列已存在，忽略
+  }
+
   // 创建地形类型表
   db.run(`
     CREATE TABLE IF NOT EXISTS terrain_types (
@@ -80,7 +87,12 @@ async function initDatabase() {
     { terrain_id: 'forest', name: '森林', movement_cost: 2, defense_bonus: 10, can_spawn: 1, color: '#228822', description: '中等机动消耗，中等防御' },
     { terrain_id: 'water', name: '水域', movement_cost: 99, defense_bonus: 0, can_spawn: 0, color: '#4488FF', description: '不可通行' },
     { terrain_id: 'mothership', name: '母舰', movement_cost: 1, defense_bonus: 0, can_spawn: 1, color: '#FFD700', description: '出生点-地球联邦' },
-    { terrain_id: 'base', name: '基地', movement_cost: 1, defense_bonus: 0, can_spawn: 1, color: '#FF4444', description: '出生点-拜火教' }
+    { terrain_id: 'base', name: '基地', movement_cost: 1, defense_bonus: 0, can_spawn: 1, color: '#FF4444', description: '出生点-拜火教' },
+    { terrain_id: 'plain', name: '平原', movement_cost: 1, defense_bonus: 0, can_spawn: 1, color: '#AAFFAA', description: '开阔地形，移动无阻碍' },
+    { terrain_id: 'ruin', name: '废墟', movement_cost: 2, defense_bonus: 15, can_spawn: 1, color: '#998866', description: '战场遗迹，提供掩护' },
+    { terrain_id: 'lava', name: '岩浆', movement_cost: 3, defense_bonus: 0, can_spawn: 0, color: '#FF6600', description: '危险地形，避免通过' },
+    { terrain_id: 'lunar', name: '月面', movement_cost: 1, defense_bonus: 0, can_spawn: 1, color: '#CCCCCC', description: '月球表面，平坦地形' },
+    { terrain_id: 'crater', name: '陨石坑', movement_cost: 2, defense_bonus: 5, can_spawn: 1, color: '#777766', description: '轻微掩护，移动稍慢' }
   ];
 
   for (const t of defaultTerrains) {

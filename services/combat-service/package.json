@@ -1,13 +1,13 @@
 {
+  "type": "module",
   "name": "combat-service",
   "version": "1.0.0",
-  "description": "Mecha Battle Combat Service",
+  "description": "机甲战棋 - 战斗计算服务 (Combat Service)",
   "main": "src/index.js",
-  "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "test": "jest"
+    "dev": "node --watch src/index.js",
+    "test": "node test/diceEngine.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -19,17 +19,5 @@
     "uuid": "^11.0.0",
     "ws": "^8.13.0",
     "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "jest": "^29.5.0",
-    "nodemon": "^2.0.22"
-  },
-  "keywords": [
-    "mecha",
-    "battle",
-    "combat",
-    "game"
-  ],
-  "author": "Mecha Battle Team",
-  "license": "MIT"
+  }
 }

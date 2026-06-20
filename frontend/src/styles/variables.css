@@ -89,11 +89,11 @@
   /* ===== 终端色彩 ===== */
   --terminal-bg: #061f28;
   --terminal-surface: #083d51;
-  --terminal-accent: #00ff41;
+  --terminal-accent: #ffb000;
   --terminal-text: #c1e8ff;
   --terminal-dim: #666666;
   --terminal-error: #ff6e81;
-  --terminal-border: rgba(0, 255, 65, 0.1);
+  --terminal-border: rgba(255, 176, 0, 0.1);
   
   /* ===== 字母间距 ===== */
   --tracking-tight: -0.025em;

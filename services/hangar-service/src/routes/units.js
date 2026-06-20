@@ -63,6 +63,10 @@ router.get('/', auth, (req, res) => {
     const units = db.all(`
       SELECT id, name, codename, faction, main_image_url,
              main_type as type,
+             main_机动 as mobility,
+             main_格斗 as melee,
+             main_射击 as ranged,
+             main_结构 as structure,
              has_royroy, created_at,
              left_type,
              right_type,

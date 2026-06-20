@@ -9,10 +9,13 @@ import { z } from 'zod';
 // UUID 格式验证
 const uuidSchema = z.string().uuid('无效的 ID 格式');
 
+// 单位 ID 验证 (接受任意非空字符串)
+const unitIdSchema = z.string().min(1, '单位 ID 不能为空');
+
 // 坐标验证 (六边形网格，范围 0-15)
 const coordinateSchema = z.object({
-  q: z.number().int().min(0, 'Q 坐标不能小于 0').max(15, 'Q 坐标不能大于 15'),
-  r: z.number().int().min(0, 'R 坐标不能小于 0').max(15, 'R 坐标不能大于 15'),
+  q: z.number().int().min(0, 'Q 坐标不能小于 0').max(99, 'Q 坐标不能大于 99'),
+  r: z.number().int().min(0, 'R 坐标不能小于 0').max(99, 'R 坐标不能大于 99'),
 });
 
 // 战斗动作类型枚举
@@ -38,24 +41,24 @@ export const createBattleSchema = z.object({
 
 // 执行移动 Schema
 export const moveSchema = z.object({
-  unit_id: uuidSchema.refine(val => val, { message: '单位 ID 格式无效' }),
-  target_q: z.number().int().min(0, '目标 Q 坐标不能小于 0').max(15, '目标 Q 坐标不能大于 15'),
-  target_r: z.number().int().min(0, '目标 R 坐标不能小于 0').max(15, '目标 R 坐标不能大于 15'),
+  unit_id: unitIdSchema,
+  target_q: z.number().int().min(0, '目标 Q 坐标不能小于 0').max(99, '目标 Q 坐标不能大于 99'),
+  target_r: z.number().int().min(0, '目标 R 坐标不能小于 0').max(99, '目标 R 坐标不能大于 99'),
 });
 
 // 执行攻击 Schema
 export const attackSchema = z.object({
-  attacker_id: uuidSchema.refine(val => val, { message: '攻击者 ID 格式无效' }),
-  target_id: uuidSchema.refine(val => val, { message: '目标 ID 格式无效' }),
+  attacker_id: unitIdSchema,
+  target_id: unitIdSchema,
   attack_type: z.enum(['melee', 'ranged', 'skill'], {
     errorMap: () => ({ message: '无效的攻击类型，必须是 melee, ranged 或 skill' }),
   }).optional(),
-  skill_id: uuidSchema.optional().refine(val => val, { message: '技能 ID 格式无效' }),
+  skill_id: z.string().optional(),  // Accept any skill_id (UUID or equipment-generated)
 });
 
 // 使用技能 Schema
 export const skillSchema = z.object({
-  unit_id: uuidSchema.refine(val => val, { message: '单位 ID 格式无效' }),
+  unit_id: unitIdSchema,
   skill_id: uuidSchema.refine(val => val, { message: '技能 ID 格式无效' }),
   target_unit_id: uuidSchema.optional().refine(val => val, { message: '目标单位 ID 格式无效' }),
   target_q: z.number().int().optional(),
@@ -64,7 +67,7 @@ export const skillSchema = z.object({
 
 // 使用物品 Schema
 export const itemSchema = z.object({
-  unit_id: uuidSchema.refine(val => val, { message: '单位 ID 格式无效' }),
+  unit_id: unitIdSchema,
   item_id: uuidSchema.refine(val => val, { message: '物品 ID 格式无效' }),
   target_unit_id: uuidSchema.optional(),
   target_q: z.number().int().optional(),
@@ -73,7 +76,7 @@ export const itemSchema = z.object({
 
 // 战斗动作 Schema (通用)
 export const battleActionSchema = z.object({
-  unit_id: uuidSchema.refine(val => val, { message: '单位 ID 格式无效' }),
+  unit_id: unitIdSchema,
   action_type: actionTypeSchema.refine(val => val, { message: '动作类型无效' }),
   target_id: uuidSchema.optional(),
   target_q: z.number().int().optional(),
@@ -85,16 +88,17 @@ export const battleActionSchema = z.object({
 // 选择出生点 Schema
 export const spawnSelectionSchema = z.object({
   player_id: uuidSchema.refine(val => val, { message: '玩家 ID 格式无效' }),
-  spawn_q: z.number().int().min(0, '出生点 Q 坐标不能小于 0').max(15, '出生点 Q 坐标不能大于 15'),
-  spawn_r: z.number().int().min(0, '出生点 R 坐标不能小于 0').max(15, '出生点 R 坐标不能大于 15'),
-  unit_ids: z.array(uuidSchema).min(1, '至少需要选择 1 个单位'),
+  spawn_q: z.number().int().min(0, '出生点 Q 坐标不能小于 0').max(99, '出生点 Q 坐标不能大于 99'),
+  spawn_r: z.number().int().min(0, '出生点 R 坐标不能小于 0').max(99, '出生点 R 坐标不能大于 99'),
+  unit_ids: z.array(unitIdSchema).min(1, '至少需要选择 1 个单位'),
 });
 
 // 部署单位 Schema
 export const deploymentSchema = z.object({
-  unit_id: uuidSchema.refine(val => val, { message: '单位 ID 格式无效' }),
-  q: z.number().int().min(0, '部署 Q 坐标不能小于 0').max(15, '部署 Q 坐标不能大于 15'),
-  r: z.number().int().min(0, '部署 R 坐标不能小于 0').max(15, '部署 R 坐标不能大于 15'),
+  unit_id: unitIdSchema,
+  q: z.number().int().min(0, '部署 Q 坐标不能小于 0').max(99, '部署 Q 坐标不能大于 99'),
+  r: z.number().int().min(0, '部署 R 坐标不能小于 0').max(99, '部署 R 坐标不能大于 99'),
+  unit_data: z.object({}).optional() // 前端可传完整棋子快照（自包含部署）
 });
 
 // 机甲配置 Schema
@@ -130,7 +134,7 @@ export function validateRequest(schema, data) {
         error: {
           code: 'VALIDATION_ERROR',
           message: '请求数据验证失败',
-          details: error.errors.map(e => ({
+          details: error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message,
             code: e.code,

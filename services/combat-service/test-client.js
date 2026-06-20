@@ -100,17 +100,13 @@ async function testAPI() {
     console.log(`   最终伤害: ${finalDamage}`);
     console.log();
 
-    // 测试奇袭系统
+    // 测试奇袭系统（v2.0 确定性）
 
-    console.log('🎲 测试奇袭系统...');
-    console.log(`   触发几率: 50% (马克西翁阵营)`);
-    console.log(`   骰子类型:`);
-    console.log(`     - 黑色骰子 (1-5): 伤害+2`);
-    console.log(`     - 红色骰子 (6-10): 移动-1`);
-    console.log(`   奇袭类型:`);
-    console.log(`     - 顶替攻击 (replace): 奇袭单位取代原攻击`);
-    console.log(`     - 先制攻击 (counter): 原攻击继续，奇袭单位额外攻击`);
-    console.log(`     - 放弃 (giveup): 放弃奇袭机会`);
+    console.log('⚔️ 测试奇袭系统...');
+    console.log(`   触发: 敌方攻击时100%触发先制进攻`);
+    console.log(`   效果: 跳过敌方回合，以70%攻击力反击`);
+    console.log(`   适用: 全员可用`);
+    console.log(`   模式: 确定性（无随机掷骰）`);
     console.log();
 
     // 测试阵营技能

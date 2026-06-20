@@ -116,8 +116,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       AUTH_SERVICE_URL: http://auth-service:3001
       HANGAR_SERVICE_URL: http://hangar-service:3002
-      MAP_SERVICE_URL: http://map-service:3003
-      COMM_SERVICE_URL: http://comm-service:3005
+      MAP_SERVICE_URL: http://mecha-map:3003
+      COMM_SERVICE_URL: http://mecha-comm:3005
     ports:
       - "3004:3004"
     volumes:
@@ -127,7 +127,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3004/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -144,8 +144,8 @@ services:
       NODE_ENV: production
       PORT: 3005
       JWT_SECRET: ${JWT_SECRET}
-      COMBAT_SERVICE_URL: http://combat-service:3004
-      MAP_SERVICE_URL: http://map-service:3003
+      COMBAT_SERVICE_URL: http://mecha-combat:3004
+      MAP_SERVICE_URL: http://mecha-map:3003
     ports:
       - "3005:3005"
     depends_on:
@@ -169,9 +169,9 @@ services:
       PORT: 3006
       JWT_SECRET: ${JWT_SECRET}
       AUTH_SERVICE_URL: http://auth-service:3001
-      COMBAT_SERVICE_URL: http://combat-service:3004
-      MAP_SERVICE_URL: http://map-service:3003
-      COMM_SERVICE_URL: http://comm-service:3005
+      COMBAT_SERVICE_URL: http://mecha-combat:3004
+      MAP_SERVICE_URL: http://mecha-map:3003
+      COMM_SERVICE_URL: http://mecha-comm:3005
     ports:
       - "3006:3006"
     depends_on:

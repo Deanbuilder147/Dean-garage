@@ -132,7 +132,7 @@ export default {
 }
 
 .tactical-btn-primary:hover {
-  box-shadow: 0 0 20px rgba(0, 255, 65, 0.3);
+  box-shadow: 0 0 20px rgba(255, 176, 0, 0.3);
 }
 
 /* 次要按钮（Secondary）- Ghost Border */

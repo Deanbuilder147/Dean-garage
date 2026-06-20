@@ -152,7 +152,7 @@ export const HexUtils = {
    * @param {Object} terrain - 地形数据 {"q,r": terrainId}
    * @param {number} maxIterations - 最大迭代次数
    */
-  findPath(start, goal, terrain = {}, maxIterations = 1000) {
+  findPath(start, goal, terrain = {}, maxIterations = 1000, terrainDefs = null) {
     const startKey = this.hexKey(start.q, start.r);
     const goalKey = this.hexKey(goal.q, goal.r);
     
@@ -161,14 +161,15 @@ export const HexUtils = {
     }
     
     // 地形通行代价
-    const getMovementCost = (terrainId) => {
-      if (!terrainId || terrainId === 'empty') return 1;
-      if (terrainId === 'forest') return 2;
-      if (terrainId === 'mountain') return 3;
-      if (terrainId === 'water') return Infinity;
-      return 1;
+    const getMovementCost = (terrainId, terrainDefs) => {
+      if (!terrainId || terrainId === "empty") return 1;
+      const fb = { empty: 1, lunar: 1, space: 1, repair_station: 1, mothership: 1, forest: 2, mountain: 3, water: 99, fortress: 5 };
+      if (terrainDefs && terrainDefs.length > 0) {
+        const d = terrainDefs.find(t => t.id === terrainId);
+        if (d && typeof d.moveCost === "number") return d.moveCost;
+      }
+      return fb[terrainId] !== undefined ? fb[terrainId] : 1;
     };
-    
     // 启发函数
     const heuristic = (a, b) => this.hexDistance(a.q, a.r, b.q, b.r);
     
@@ -208,7 +209,7 @@ export const HexUtils = {
       for (const neighbor of this.getNeighbors(current.q, current.r)) {
         const neighborKey = this.hexKey(neighbor.q, neighbor.r);
         const terrainId = terrain[neighborKey] || 'empty';
-        const cost = getMovementCost(terrainId);
+        const cost = getMovementCost(terrainId, terrainDefs);
         
         if (cost === Infinity) continue;
         

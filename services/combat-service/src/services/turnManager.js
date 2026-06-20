@@ -6,12 +6,23 @@
 
 import { CombatResolver } from './combatResolver.js';
 import { BuffManager } from './combatCore/index.cjs';
-
 export class TurnManager {
   
   // 阵营顺序
   static FACTION_ORDER = ['earth', 'balon', 'maxion'];
   
+
+  // 阵营数量（用于计算轮次）
+  static FACTION_COUNT = 3;
+
+  // 胜利条件类型
+  static VICTORY_TYPES = {
+    ANNIHILATE: 'annihilate',     // 全歼
+    ASSASSINATE: 'assassinate',   // 刺杀ACE
+    DESTROY_FACILITY: 'destroy_facility', // 摧毁设施
+    HOLD_POSITION: 'hold_position',      // 坚守（存活至第N轮）
+    CAPTURE: 'capture',           // 占领据点
+  };
   // 有效阶段列表（新增多人联机阶段）
   static VALID_PHASES = [
     'spawn_selection',     // 出生点选择阶段
@@ -158,9 +169,19 @@ export class TurnManager {
       faction: playerSpawn.faction,
       q: q,
       r: r,
+      hp: 100,
+      max_hp: 100,
+      attack: 12,
+      defense: 6,
+      mobility: 3,
+      weaponType: 'beam',
+      armorType: 'normal',
+      shield: 0,
+      level: 1,
       has_moved: false,
       has_acted: false,
-      royroy_deployed: false
+      royroy_deployed: false,
+      buffs: []
     };
     
     state.units.push(newUnit);
@@ -269,11 +290,11 @@ export class TurnManager {
    * 处理回合结束，进入下一回合
    */
   static nextTurn(state) {
-    const nextFaction = this.getNextFaction(state.currentFaction);
+    const nextFaction = this.getNextFaction(state.current_faction);
     
     // 如果回到地联，说明完成了一轮
     if (nextFaction === 'earth') {
-      state.turnNumber = (state.turnNumber || 1) + 1;
+      state.turn_number = (state.turn_number || 1) + 1;
       // 重置迷雾系统的每回合标志
       state.earthFogRolledThisTurn = false;
       // 重置阵营技能使用标志
@@ -281,7 +302,7 @@ export class TurnManager {
       state.fogSystemUsed = false;
     }
     
-    state.currentFaction = nextFaction;
+    state.current_faction = nextFaction;
     state.phase = 'move';
     
     // 重置单位状态
@@ -289,9 +310,28 @@ export class TurnManager {
       unit.has_moved = false;
       unit.has_acted = false;
       unit.skip_turn = false;
+      unit.skipped_tactical = false;
+      unit.skipped_move = false;
       // 重置造成伤害标记（用于隐匿判断）
       unit.dealtDamageLastTurn = unit.dealtDamageThisTurn || false;
       unit.dealtDamageThisTurn = false;
+    });
+
+    // 减少隐匿持续时间
+    state.units.forEach(unit => {
+      if (unit.concealed && unit.concealDuration !== undefined && unit.concealDuration > 0) {
+        unit.concealDuration--;
+        if (unit.concealDuration <= 0) {
+          unit.concealed = false;
+          state.battle_log.push({
+            type: 'conceal_expire',
+            unit_id: unit.id,
+            unit_name: unit.name || unit.id,
+            message: `${unit.name || unit.id} 的隐匿效果消失`,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
     });
     
     // 【Phase 2.3】回合开始时减少所有单位的Buff持续时间
@@ -305,7 +345,7 @@ export class TurnManager {
     state.battle_log.push({
       type: 'turn_change',
       faction: nextFaction,
-      turn_number: state.turnNumber,
+      turn_number: state.turn_number,
       timestamp: new Date().toISOString()
     });
     
@@ -355,23 +395,31 @@ export class TurnManager {
    * 应用回合开始效果
    */
   static applyTurnStartEffects(state) {
-    const faction = state.currentFaction;
+    const faction = state.current_faction;
     
-    // 地球联合：迷雾系统
-    if (faction === 'earth' && !state.earthFogRolledThisTurn) {
-      const fogResult = CombatResolver.resolveFogSystem(state.units, state.battlefield_state);
-      state.fogEffect = fogResult.effect;
-      state.fogRoll = fogResult.roll;
-      state.earthFogRolledThisTurn = true;
-      
-      state.battle_log.push({
-        type: 'fog_system',
-        roll: fogResult.roll,
-        effect: fogResult.effect,
-        message: fogResult.message
-      });
+    // 防守阵营（拜隆）：补给 — 每个己方回合自动恢复4HP
+    if (faction === 'balon') {
+      const factionRoles = state.faction_roles || {};
+      const role = factionRoles['balon'] || 'defense';
+      if (role === 'defense') {
+        for (const unit of (state.units || [])) {
+          if (unit.hp > 0 && unit.hp < (unit.max_hp || 100)) {
+            const healAmount = 4;
+            unit.hp = Math.min((unit.max_hp || 100), unit.hp + healAmount);
+            state.battle_log.push({
+              type: 'supply_heal',
+              unit_id: unit.id,
+              unit_name: unit.name || unit.id,
+              heal_amount: healAmount,
+              new_hp: unit.hp,
+              message: (unit.name || unit.id) + ' 补给恢复 ' + healAmount + ' HP',
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      }
     }
-    
+
     // 地形回复：拜隆月面回复 + 地球联合母舰回复
     const healingResult = CombatResolver.resolveTerrainHealing ?
       CombatResolver.resolveTerrainHealing(state.units, state.battlefield_state) :
@@ -445,7 +493,7 @@ export class TurnManager {
    */
   static getActiveUnits(state) {
     return state.units.filter(unit => 
-      unit.faction === state.currentFaction && 
+      unit.faction === state.current_faction && 
       this.canUnitAct(unit)
     );
   }
@@ -475,18 +523,51 @@ export class TurnManager {
   /**
    * 检查视线通路
    */
-  static checkLineOfSight(unit1, unit2, state) {
-    // 简化的视线检查：检查两点连线上的地形
-    const cells = this.getCellsBetween(unit1, unit2);
-    
-    for (const cell of cells) {
-      const terrain = CombatResolver.getTerrainAt(cell.q, cell.r, state.battlefield_state);
-      if (terrain === 'mountain' || terrain === 'building') {
-        return false; // 被地形阻挡
-      }
+      static getCellsBetween(unit1, unit2) {
+    // 六角格 Bresenham 算法：在六角坐标系中计算两点间的格子
+    const cells = [];
+    const dq = unit2.q - unit1.q;
+    const dr = unit2.r - unit1.r;
+    const steps = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq - dr));
+
+    if (steps === 0) {
+      cells.push({ q: unit1.q, r: unit1.r });
+      return cells;
     }
-    
-    return true;
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      // 六角格线性插值后取整，处理漂移
+      const q_f = unit1.q + dq * t;
+      const r_f = unit1.r + dr * t;
+
+      // 六角坐标舍入 (cube rounding)
+      const sq = Math.round(q_f);
+      const sr = Math.round(r_f);
+      const sx = Math.round(-q_f - r_f);
+      // 修正：确保 q + s + r === 0 (cube coordinate invariant)
+      // 此处直接用 q,r 坐标的舍入结果，在 offset 坐标系中已足够
+      // 使用 closest hex rounding
+      const dq_diff = Math.abs(sq - q_f);
+      const dr_diff = Math.abs(sr - r_f);
+      const ds_diff = Math.abs(sx + q_f + r_f);
+
+      let q, r;
+      if (dq_diff > dr_diff && dq_diff > ds_diff) {
+        q = -sr - sx;
+        r = sr;
+      } else if (dr_diff > ds_diff) {
+        q = sq;
+        r = -sq - sx;
+      } else {
+        q = sq;
+        r = sr;
+      }
+
+      cells.push({ q, r });
+    }
+
+    return cells;
   }
 
   /**
@@ -513,7 +594,10 @@ export class TurnManager {
     const factions = {};
     
     state.units.forEach(unit => {
-      factions[unit.faction] = true;
+      // 只统计存活单位 (hp > 0)
+      if (unit.hp > 0) {
+        factions[unit.faction] = true;
+      }
     });
     
     const remainingFactions = Object.keys(factions);
@@ -541,7 +625,7 @@ export class TurnManager {
    * 计算六角格距离
    */
   static calculateDistance(unit1, unit2) {
-    return Math.abs(unit1.q - unit2.q) + Math.abs(unit1.r - unit2.r);
+    return (Math.abs(unit1.q - unit2.q) + Math.abs(unit1.q + unit1.r - unit2.q - unit2.r) + Math.abs(unit1.r - unit2.r)) / 2;
   }
 
   /**
@@ -550,6 +634,148 @@ export class TurnManager {
   static rollDice(sides = 6) {
     return Math.floor(Math.random() * sides) + 1;
   }
+  /**
+   * 检查阵营技能是否可使用
+   * 偷袭阵营的奇袭/隐匿全员可用（无视ACE）
+   */
+  static canUseFactionSkill(state, factionKey, skillKey, unitId, factionRoles) {
+    // 获取阵营角色
+    const role = (factionRoles && factionRoles[factionKey]) || this.getDefaultRole(factionKey);
+    
+    // 偷袭阵营技能全员可用
+    if (role === 'ambush' && (skillKey === 'surprise' || skillKey === 'conceal')) {
+      return { allowed: true, reason: null };
+    }
+    
+    // ACE 检查
+    const aceUnits = state.ace_units || {};
+    const aceId = aceUnits[factionKey];
+    if (aceId && String(unitId) !== String(aceId)) {
+      return { allowed: false, reason: '需要ACE单位才能使用此技能' };
+    }
+
+    // 防守阵营被动技能全员可用（无视ACE，无冷却）
+    if (role === 'defense' && (skillKey === 'reinforcement' || skillKey === 'supply')) {
+      return { allowed: true, reason: null };
+    }
+    
+    // 火力覆盖：每场1次
+    if (skillKey === 'fire_cover') {
+      if (state.earthArtilleryUsed || state.fireCoverageUsed) {
+        return { allowed: false, reason: '火力覆盖已使用' };
+      }
+    }
+    
+    // 迷雾系统：每3轮1次
+    if (skillKey === 'fog_system') {
+      if (state.fogSystemUsed) {
+        const round = this.getRoundNumber(state);
+        if (state.fogCooldownRemaining > 0) {
+          return { allowed: false, reason: `迷雾冷却中，剩余 ${state.fogCooldownRemaining} 轮` };
+        }
+        return { allowed: false, reason: '迷雾已使用' };
+      }
+    }
+    
+    return { allowed: true, reason: null };
+  }
+  
+  /**
+   * 获取默认阵营角色
+   */
+  static getDefaultRole(factionKey) {
+    const defaults = {
+      earth: 'attack',
+      maxion: 'ambush',
+      balon: 'defense',
+      neutral: 'attack',
+    };
+    return defaults[factionKey] || 'attack';
+  }
+  
+  /**
+   * 获取当前轮次（所有阵营完成回合 = 1轮）
+   */
+  static getRoundNumber(state) {
+    const turn = state.turn_number || state.current_turn || 1;
+    return Math.ceil(turn / this.FACTION_COUNT);
+  }
+  
+  /**
+   * 检查胜利条件
+   */
+  static checkVictoryConditions(state, victoryConditions, holdRound, facilityCoord) {
+    const conditions = victoryConditions || ['annihilate'];
+    const units = state.units || [];
+    
+    for (const cond of conditions) {
+      switch (cond) {
+        case 'annihilate': {
+          // 全歼：检查某个阵营是否全部被消灭
+          const factions = {};
+          units.forEach(u => {
+            if (u.hp > 0) {
+              const f = u.faction || 'earth';
+              factions[f] = (factions[f] || 0) + 1;
+            }
+          });
+          const activeFactions = Object.keys(factions).filter(f => factions[f] > 0);
+          if (activeFactions.length <= 1) {
+            const winner = activeFactions[0] || 'earth';
+            return { victory: true, winner, condition: 'annihilate', message: `${winner} 全歼敌方！` };
+          }
+          break;
+        }
+        case 'assassinate': {
+          const aceUnits = state.ace_units || {};
+          for (const [faction, aceId] of Object.entries(aceUnits)) {
+            const ace = units.find(u => String(u.id) === String(aceId));
+            if (ace && ace.hp <= 0) {
+              const opponent = Object.keys(aceUnits).find(f => f !== faction);
+              return { victory: true, winner: opponent || 'earth', condition: 'assassinate', message: `${faction} ACE 被击杀！` };
+            }
+          }
+          break;
+        }
+        case 'destroy_facility': {
+          if (facilityCoord) {
+            const cell = (state.battlefield_state?.cells || state.cells || []).find(
+              c => c.q === facilityCoord.q && c.r === facilityCoord.r
+            );
+            if (cell && cell.destroyed) {
+              return { victory: true, winner: 'attacker', condition: 'destroy_facility', message: '设施已摧毁！' };
+            }
+          }
+          break;
+        }
+        case 'hold_position': {
+          const round = this.getRoundNumber(state);
+          if (round >= (holdRound || 8)) {
+            return { victory: true, winner: 'defender', condition: 'hold_position', message: `坚守成功！已存活 ${round} 轮` };
+          }
+          break;
+        }
+        case 'capture': {
+          // 占领：检查据点是否被单一阵营全部控制
+          const capturePoints = (state.battlefield_state?.cells || state.cells || []).filter(c => c.isCapturePoint);
+          if (capturePoints.length > 0) {
+            const allCaptured = capturePoints.every(cp => {
+              const occupyingUnits = units.filter(u => u.q === cp.q && u.r === cp.r && u.hp > 0);
+              if (occupyingUnits.length === 0) return false;
+              const factions = new Set(occupyingUnits.map(u => u.faction));
+              return factions.size === 1;
+            });
+            if (allCaptured) {
+              return { victory: true, winner: 'attacker', condition: 'capture', message: '所有据点已占领！' };
+            }
+          }
+          break;
+        }
+      }
+    }
+    return { victory: false, winner: null, condition: null, message: null };
+  }
+
 }
 
 export default TurnManager;

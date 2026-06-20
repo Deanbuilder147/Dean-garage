@@ -3,34 +3,36 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { createPinia } from 'pinia';
 import App from './App.vue';
 
-// 导入Google Fonts - 暂时注释，防止加载失败阻塞脚本
-// import 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap';
-
-// 导入全局样式变量
 import './styles/variables.css';
+import './styles/tailwind.css';
 
-// 导入视图
-import LoginView from './views/LoginView.vue';
-import RegisterView from './views/RegisterView.vue';
-import HomeView from './views/HomeView.vue';
+// 视图导入
+import NewLoginView from './views/NewLoginView.vue';
+import NewRegisterView from './views/NewRegisterView.vue';
+import NewHomeView from './views/NewHomeView.vue';
+import GlossaryView from './views/GlossaryView.vue';
+import NewUnitEditorView from './views/NewUnitEditorView.vue';
+import NewBattlefieldSelector from './views/NewBattlefieldSelector.vue';
+import NewBattleView from './views/NewBattleView.vue';
+import NewBattlefieldView from './views/NewBattlefieldView.vue';
+import NewPreparationRoom from './views/NewPreparationRoom.vue';
 import TerminalView from './views/TerminalView.vue';
-import UnitEditorView from './views/UnitEditorView.vue';
-import BattlefieldView from './views/BattlefieldView.vue';
-import BattleView from './views/BattleView.vue';
-import PreparationRoom from './views/PreparationRoom.vue';
 
 // 路由配置
 const routes = [
-  { path: '/', component: TerminalView },
-  { path: '/login', redirect: '/' },
-  { path: '/register', redirect: '/' },
-  { path: '/home', component: HomeView, meta: { requiresAuth: true } },
-  { path: '/units', component: UnitEditorView, meta: { requiresAuth: true } },
-  { path: '/units/new', component: UnitEditorView, meta: { requiresAuth: true } },
-  { path: '/units/:id', component: UnitEditorView, meta: { requiresAuth: true } },
-  { path: '/battlefields', component: BattlefieldView, meta: { requiresAuth: true } },
-  { path: '/battle/:id', component: BattleView, meta: { requiresAuth: true } },
-  { path: '/preparation/:roomId', component: PreparationRoom, meta: { requiresAuth: true } }
+  { path: '/', component: NewLoginView },
+  { path: '/login', component: NewLoginView },
+  { path: '/register', component: NewRegisterView },
+  { path: '/terminal', component: TerminalView },
+  { path: '/home', component: NewHomeView, meta: { requiresAuth: true } },
+  { path: '/units', component: NewUnitEditorView, meta: { requiresAuth: true } },
+  { path: '/units/new', component: NewUnitEditorView, meta: { requiresAuth: true } },
+  { path: '/units/:id', component: NewUnitEditorView, meta: { requiresAuth: true } },
+  { path: '/battlefields', component: NewBattlefieldSelector, meta: { requiresAuth: true } },
+  { path: '/battlefield-edit/:id?', component: NewBattlefieldView, meta: { requiresAuth: true } },
+  { path: '/glossary', component: GlossaryView, meta: { requiresAuth: true } },
+  { path: '/battle/:id', component: NewBattleView, meta: { requiresAuth: true } },
+  { path: '/preparation/:roomId', component: NewPreparationRoom, meta: { requiresAuth: true } }
 ];
 
 const router = createRouter({
@@ -43,11 +45,9 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token');
   const isLoggedIn = !!token;
   
-  // TerminalView (/) 不需要认证，它自己处理登录
-  if (to.path === '/') {
+  if (to.path === '/' || to.path === '/login' || to.path === '/register' || to.path === '/terminal') {
     next();
   }
-  // 需要认证但未登录 → 跳转终端（登录）
   else if (to.meta.requiresAuth && !isLoggedIn) {
     next('/');
   }

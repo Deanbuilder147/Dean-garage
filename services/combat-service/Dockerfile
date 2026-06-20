@@ -1,22 +1,23 @@
-# 机甲战棋游戏 - Combat Service Dockerfile
-
 FROM node:18-alpine
-
-RUN apk add --no-cache curl
 
 WORKDIR /app
 
+# 复制依赖文件
 COPY package*.json ./
+
+# 安装依赖
 RUN npm ci --only=production
 
-COPY . .
+# 复制源代码和 dicescript
+COPY src/ ./src/
+COPY vendor/ ./vendor/
 
-RUN mkdir -p /app/data
+# 暴露端口
+EXPOSE ${PORT:-3004}
 
-ENV NODE_ENV=production
-ENV PORT=3004
-
+# 健康检查（动态端口）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:${PORT:-3004}/health || exit 1
+  CMD wget -qO- http://localhost:${PORT:-3004}/health || exit 1
 
+# 启动服务
 CMD ["node", "src/index.js"]

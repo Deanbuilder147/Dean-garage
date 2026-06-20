@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
+import crypto from "crypto";
 
 // Import routes
 import matchmakingRoutes from './routes/matchmaking.js';
@@ -49,7 +50,7 @@ app.use('/api/', limiter);
 
 // Request ID middleware
 app.use((req, res, next) => {
-  req.id = require('crypto').randomUUID();
+  req.id = crypto.randomUUID();
   res.setHeader('X-Request-ID', req.id);
   next();
 });

@@ -530,6 +530,12 @@ function cancelCurrentOperation() {
 
 // Lifecycle
 onMounted(() => {
+  // 已登录用户自动跳转到主页
+  const token = localStorage.getItem('token');
+  if (token) {
+    router.push('/home');
+    return;
+  }
   runBootSequence();
   nextTick(() => focusInput());
 });

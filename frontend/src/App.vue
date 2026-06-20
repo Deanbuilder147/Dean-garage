@@ -1,45 +1,65 @@
 <template>
   <div class="app-container">
-    <!-- CRT扫描线叠加层（非终端页面才显示） -->
-    <div v-if="!isTerminalPage" class="scanline-overlay flicker" style="opacity: 0.4;"></div>
-    <router-view />
+    <TheSidebar v-if="showSidebar" />
+    <main :class="['main-content', { 'with-sidebar': showSidebar }]">
+      <header v-if="showSidebar" class="mobile-header">
+        <span class="mobile-brand">机甲战术</span>
+      </header>
+      <router-view />
+    </main>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import { provide, ref } from 'vue'
+import TheSidebar from './components/layout/TheSidebar.vue'
 
-const route = useRoute();
-const isTerminalPage = computed(() => route.path === '/');
+// Routes that should NOT show sidebar
+const NO_SIDEBAR_ROUTES = ['/', '/login', '/register', '/terminal']
+
+const route = useRoute()
+const showSidebar = computed(() => !NO_SIDEBAR_ROUTES.includes(route.path))
+
+// Provide shared actionLog for battle pages
+const sidebarActionLog = ref([])
+provide('sidebarActionLog', sidebarActionLog)
 </script>
 
 <style>
 @import './styles/variables.css';
-@import './styles/utilities.css';
-@import './styles/components.css';
-@import './styles/legacy-compat.css';
 
 .app-container {
   min-height: 100vh;
-  background: var(--surface);
-  color: var(--on-surface);
-  font-family: 'Space Grotesk', 'Courier New', monospace, sans-serif;
-  image-rendering: pixelated;
+  background: #001620;
+  color: #c1e8ff;
+  font-family: 'Noto Sans SC', 'Space Grotesk', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
+  display: flex;
 }
 
-/* CRT扫描线动画 */
-@keyframes flicker {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.95; }
-  75% { opacity: 0.9; }
+.main-content {
+  flex: 1;
+  min-height: 100vh;
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@keyframes jitter {
-  0%, 100% { transform: translate(0, 0); }
-  25% { transform: translate(1px, -1px); }
-  50% { transform: translate(-1px, 1px); }
-  75% { transform: translate(1px, 1px); }
+.main-content.with-sidebar {
+  margin-left: 240px;
+}
+
+.mobile-header {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .main-content.with-sidebar {
+    margin-left: 0;
+    padding-top: 60px;
+  }
+  .mobile-header {
+    display: flex;
+  }
 }
 </style>
