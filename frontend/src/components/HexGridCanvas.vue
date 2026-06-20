@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
   HEX_WIDTH, HEX_HEIGHT, HEX_RADIUS, HEX_APOTHEM,
   DEFAULT_SPACING_H, DEFAULT_SPACING_V,
@@ -40,6 +40,9 @@ const props = defineProps({
   isoShearX: { type: Number, default: ISO_DEFAULTS.shearX },
   /** 等距矩阵 shearY (3D 视角 Y 轴倾斜) — 父层可动态绑定滑块 */
   isoShearY: { type: Number, default: ISO_DEFAULTS.shearY },
+  /** ISO 旋转角 (保留兼容，实际旋转由 computed 自动计算) */
+  isoRotation: { type: Number, default: undefined },
+
 })
 
 const emit = defineEmits([
@@ -63,6 +66,11 @@ const offsetY = ref(60)
 const hoverCoord = ref('')
 // ISO 矩阵参数 — 使用 reactive 以支持父层通过 props 动态调节 3D 视角
 const ISO = reactive({ ...ISO_DEFAULTS })
+
+// Phase9: R=0 水平死锁 — 旋转角度补偿
+// Phase9: R=0 水平死锁 — 旋转角动态计算: atan2(-shearY, scaleX) 确保 R=0 排永远水平
+const rotationAngle = computed(() => Math.atan2(-ISO.shearY, ISO.scaleX) * 180 / Math.PI)
+
 
 // ================================================================
 //  内部可变状态 (非响应式 — 仅驱动内部逻辑)
@@ -126,7 +134,13 @@ function canvasPosToWorld(cx, cy) {
   const det = ISO.scaleX * ISO.scaleY - ISO.shearX * ISO.shearY
   const flatX = (ISO.scaleY * worldX - ISO.shearX * worldY) / det
   const flatY = (-ISO.shearY * worldX + ISO.scaleX * worldY) / det
-  return { x: flatX, y: flatY, wx: worldX, wy: worldY }
+  // Phase9: undo rotation (R=0 deadlock compensation)
+  const rotRadRev = -rotationAngle.value * Math.PI / 180
+  const cosR = Math.cos(rotRadRev)
+  const sinR = Math.sin(rotRadRev)
+  const finalX = cosR * flatX - sinR * flatY
+  const finalY = sinR * flatX + cosR * flatY
+  return { x: finalX, y: finalY, wx: worldX, wy: worldY }
 }
 
 /** 鼠标事件 → 世界坐标 (含 getBoundingClientRect 缩放补偿) */
@@ -152,8 +166,15 @@ function centerGrid() {
   const canvas = mapCanvas.value
   if (!canvas) return
   const midGrid = hexToPixel(Math.floor(props.gridWidth / 2), Math.floor(props.gridHeight / 2))
-  const isoCenterX = midGrid.x * ISO.scaleX + midGrid.y * ISO.shearX
-  const isoCenterY = midGrid.x * ISO.shearY + midGrid.y * ISO.scaleY
+  // R=0 死锁旋转补偿: 确保棋盘中心在旋转后依然居中
+  const rotRadC = rotationAngle.value * Math.PI / 180
+  const cosRC = Math.cos(rotRadC)
+  const sinRC = Math.sin(rotRadC)
+  const rotMidX = midGrid.x * cosRC - midGrid.y * sinRC
+  const rotMidY = midGrid.x * sinRC + midGrid.y * cosRC
+  const isoCenterX = rotMidX * ISO.scaleX + rotMidY * ISO.shearX
+  const isoCenterY = rotMidX * ISO.shearY + rotMidY * ISO.scaleY
+
   offsetX.value = canvas.width / 2 - isoCenterX * scale.value
   offsetY.value = canvas.height / 2 - isoCenterY * scale.value
 }
@@ -211,6 +232,10 @@ function draw() {
   // === CTM: 平移 → 缩放 → 等距矩阵压扁 ===
   ctx.translate(offsetX.value, offsetY.value)
   ctx.scale(scale.value, scale.value)
+  // Phase9: R=0 水平死锁 — 先旋转补偿再等距压扁
+  // 旋转角 = atan(-shearY/scaleX) ≈ -24°, 抵消 R=0 行因 shearY 产生的倾斜
+  const rotRad = rotationAngle.value * Math.PI / 180
+  ctx.rotate(rotRad)
   ctx.transform(ISO.scaleX, ISO.shearY, ISO.shearX, ISO.scaleY, 0, 0)
 
   // 调用父层绘制函数 (ctx 已应用 CTM)
@@ -462,6 +487,10 @@ watch(() => props.isoShearY, (v) => {
   draw()
 })
 
+// isoRotation 已由 computed 自动计算; prop 保留用于向后兼容
+watch(() => props.isoRotation, () => { draw() })
+
+
 // ================================================================
 //  暴露给父层 (template ref 可访问)
 // ================================================================
@@ -484,6 +513,7 @@ defineExpose({
   zoomReset,
   redraw,
   draw,
+  rotationAngle,
 })
 </script>
 
