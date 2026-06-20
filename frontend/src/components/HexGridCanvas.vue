@@ -119,22 +119,19 @@ function formatCoord(q, r) {
 // ================================================================
 
 /**
- * canvas 像素坐标 → 世界坐标 (含 ISO 逆矩阵)
+ * Phase 9.7: canvas 像素坐标 → 2D 世界坐标 (含 ISO 逆矩阵)
+ *
+ * 用途: 缩放锚点 (zoomIn/zoomOut/wheel) 和 zoomReset 居中对齐
+ * 注意: 拾取 Q,R 请使用 canvasPosToHex() 做原子化刚性逆推
  *
  * 正向 CTM: translate → scale → transform(scaleX, 0, shearX, scaleY, 0, 0)
  *   即: screenX = offsetX + scale * (scaleX * flatX + shearX * flatY)
  *       screenY = offsetY + scale * (scaleY * flatY)
  *
- * 性质:
- *   - R=0 行: flatY=0 → screenY=offsetY (绝对水平地平线)
- *   - shearX 驱动 X 轴倾斜 (flatY 越大, X 偏移越多 → 标准等距纵深感)
- *
  * 逆矩阵管线 (严格成对倒数):
- *   1) relX = cx - offsetX, relY = cy - offsetY
- *   2) worldX = relX / scale, worldY = relY / scale
- *   3) flatY = worldY / scaleY
- *   4) flatX = (worldX - shearX * flatY) / scaleX
- *         = (worldX - shearX * worldY / scaleY) / scaleX
+ *   1) worldX = (cx - offsetX) / scale, worldY = (cy - offsetY) / scale
+ *   2) flatY = worldY / scaleY
+ *   3) flatX = (worldX - shearX * flatY) / scaleX
  */
 function canvasPosToWorld(cx, cy) {
   // 1) 减去相机平移量
@@ -147,6 +144,64 @@ function canvasPosToWorld(cx, cy) {
   const flatY = worldY / ISO.scaleY
   const flatX = (worldX - ISO.shearX * flatY) / ISO.scaleX
   return { x: flatX, y: flatY, wx: worldX, wy: worldY }
+}
+
+/**
+ * Phase 9.7: 原子化屏幕像素 → 六角格 (Q,R) 刚性逆变换
+ *
+ * 正向管道 (Even-R 拓扑步长):
+ *   1) flatY = 1.5 * r * size * spacingV   ← 严格步长, 不可变
+ *   2) worldY = scaleY * flatY               ← CTM
+ *   3) screenY = offsetY + scale * worldY
+ *
+ * 正向管道 (X 轴):
+ *   1) flatX = sqrt(3)*q*size*spacingH + evenOffset(r)*spacingH
+ *   2) worldX = scaleX * flatX + shearX * flatY
+ *   3) screenX = offsetX + scale * worldX
+ *
+ * 逆向 (本函数, 严格成对倒数):
+ *   1) worldY  = (screenY - offsetY) / scale
+ *   2) flatY   = worldY / scaleY
+ *   3) r       = round(flatY / (1.5 * size * spacingV))   ← ① 刚性除法
+ *   4) worldX  = (screenX - offsetX) / scale
+ *   5) flatX   = (worldX - shearX * flatY) / scaleX       ← ② shearX 回代
+ *   6) q       = round((flatX/spacingH - evenOffset(r)) / (sqrt(3)*size)) ← ③
+ *
+ * 锁定性质:
+ *   - ①②③ 三连击 = 正向完整逆, 一次性原子求 Q,R
+ *   - R=0 行: flatY=0 → r=round(0)=0 ✓
+ *   - 1.5*size 双端对称, 乘除互消 (非两步走, 无累积偏差)
+ *   - shearX 消去: flatX 推导基于刚性 r-backed flatY
+ */
+function canvasPosToHex(cx, cy) {
+  const v = props.spacingV
+  const h = props.spacingH
+  // ① Y 轴: Even-R 步长 1.5*size 刚性逆推
+  const worldY = (cy - offsetY.value) / scale.value
+  const flatY = worldY / ISO.scaleY
+  const r = Math.round(flatY / (1.5 * HEX_RADIUS * v))
+
+  // ② X 轴: 消去 shearX 回代 → flatX
+  const worldX = (cx - offsetX.value) / scale.value
+  const flatX = (worldX - ISO.shearX * flatY) / ISO.scaleX
+
+  // ③ Even-R 偏移 → Q
+  const evenOffset = (r % 2 === 0) ? (HEX_RADIUS * Math.sqrt(3) / 2) : 0
+  const q = Math.round((flatX / h - evenOffset) / (HEX_RADIUS * Math.sqrt(3)))
+
+  return { q, r }
+}
+
+/** 鼠标事件 → 六角格 (Q,R): 封装 getBoundingClientRect 缩放补偿 → canvasPosToHex */
+function getHexAtEvent(e) {
+  const canvas = mapCanvas.value
+  if (!canvas) return { q: -1, r: -1 }
+  const rect = canvas.getBoundingClientRect()
+  const sx = canvas.width / rect.width
+  const sy = canvas.height / rect.height
+  const cx = (e.clientX - rect.left) * sx
+  const cy = (e.clientY - rect.top) * sy
+  return canvasPosToHex(cx, cy)
 }
 
 /** 鼠标事件 → 世界坐标 (含 getBoundingClientRect 缩放补偿) */
@@ -285,8 +340,7 @@ function setupEvents() {
   // ---- click (左键点击) ----
   canvas.addEventListener('click', (e) => {
     if (isDragging) return
-    const wp = getWorldPos(e)
-    const hex = pixelToHex(wp.x, wp.y)
+    const hex = getHexAtEvent(e)
     if (hex.q >= 0 && hex.q < props.gridWidth && hex.r >= 0 && hex.r < props.gridHeight) {
       emit('hex-click', { q: hex.q, r: hex.r, event: e })
     }
@@ -296,8 +350,7 @@ function setupEvents() {
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     if (isDragging) return
-    const wp = getWorldPos(e)
-    const hex = pixelToHex(wp.x, wp.y)
+    const hex = getHexAtEvent(e)
     if (hex.q >= 0 && hex.q < props.gridWidth && hex.r >= 0 && hex.r < props.gridHeight) {
       emit('hex-contextmenu', { q: hex.q, r: hex.r, event: e })
     }
@@ -343,8 +396,7 @@ function setupEvents() {
   // ---- mousemove (hover, 拖拽由 window handler 处理) ----
   canvas.addEventListener('mousemove', (e) => {
     if (isDragging) return
-    const wp = getWorldPos(e)
-    const hex = pixelToHex(wp.x, wp.y)
+    const hex = getHexAtEvent(e)
     if (hex.q >= 0 && hex.q < props.gridWidth && hex.r >= 0 && hex.r < props.gridHeight) {
       hlQ = hex.q
       hlR = hex.r
@@ -436,8 +488,8 @@ function zoomReset() {
   const fitScale = Math.min((viewW - pad * 2) / cw, (viewH - pad * 2) / ch)
   const ns = Math.max(0.2, Math.min(3, fitScale))
   const worldCenter = canvasPosToWorld(canvas.width / 2, canvas.height / 2)
-  offsetX.value += (scale.value - ns) * worldCenter.x
-  offsetY.value += (scale.value - ns) * worldCenter.y
+  offsetX.value += (scale.value - ns) * worldCenter.wx
+  offsetY.value += (scale.value - ns) * worldCenter.wy
   scale.value = ns
   draw()
 }

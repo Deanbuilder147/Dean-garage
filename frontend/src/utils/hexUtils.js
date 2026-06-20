@@ -108,7 +108,7 @@ export function flatTopCenter(q, r, size, spacingH = 1, spacingV = 1) {
  * 尖顶六边形 Even-R Offset: 2D 俯视中心坐标
  * Even-R: 双数行整体向右错位半格 (r % 2 === 0)
  *   x = size * sqrt(3) * q     +  (r%2===0 ? size * sqrt(3) / 2 : 0)
- *   y = size * 1.5 * r
+ *   y = size * 1.5 * r                ← Even-R 刚性步长 (1.5*size 不可变)
  * @param {number} q - 列坐标
  * @param {number} r - 行坐标
  * @param {number} size - 六边形外接圆半径
@@ -210,7 +210,7 @@ export function flatTopToHex(flatX, flatY, size, spacingH = 1, spacingV = 1) {
 /**
  * 尖顶 Even-R Offset: 像素坐标 → 六边形 (q, r)
  * 逆推:
- *   1) r = round( flatY / (spacingV * 1.5 * size) )
+ *   1) r = round( flatY / (spacingV * 1.5 * size) )  ← 1.5*size Even-R 刚性步长
  *   2) 若 r 为偶数: flatX' = flatX - size * sqrt(3) / 2 * spacingH
  *   3) q = round( flatX' / (spacingH * size * sqrt(3)) )
  * @param {number} flatX
