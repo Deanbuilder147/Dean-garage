@@ -7,61 +7,44 @@ import rateLimit from 'express-rate-limit';
 
 // 加载环境变量（必须在读取 process.env 之前调用）
 
-import { initDatabase } from './database/db.js';
+import db, { initDatabase } from './database/db.js';
 import config from './config/index.js';
 
 const app = express();
-// Phase 13: 地图列表接口 — 扫描 data 目录返回所有 .json 地图文件
-import fs from 'fs';
-import path from 'path';
-
+// Phase 13: 地图列表接口 — 查询 SQLite 数据库返回所有战场地图
 app.get('/api/map/list', (req, res) => {
   try {
-    // Phase 13: 支持 ?file=filename.json 加载具体地图文件
-    const requestedFile = req.query.file;
-    if (requestedFile) {
-      const safeName = path.basename(requestedFile); // 防止路径遍历
-      const filePath = path.join(dataDir, safeName);
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ error: '地图文件不存在', filename: safeName });
+    const requestedId = req.query.id;
+    if (requestedId) {
+      const stmt = db.prepare('SELECT * FROM battlefields WHERE id = ?');
+      const map = stmt.get(parseInt(requestedId));
+      if (!map) {
+        return res.status(404).json({ error: '地图不存在', id: requestedId });
       }
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const data = JSON.parse(raw);
+      let terrainData = {};
+      try { terrainData = JSON.parse(map.terrain || '{}'); } catch(e) {}
       return res.json({
-        filename: safeName,
-        battlefield: data.battlefield || data,
-        map: data.battlefield || data,
-        name: data.battlefield?.name || data.name || safeName.replace('.json', ''),
+        id: map.id, name: map.name,
+        width: map.width, height: map.height,
+        terrain: terrainData,
+        type: map.type, createdAt: map.created_at
       });
     }
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      return res.json({ maps: [] });
-    }
-    const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.json'));
-    const maps = files.map(f => {
-      const filePath = path.join(dataDir, f);
+    const stmt2 = db.prepare('SELECT * FROM battlefields ORDER BY created_at DESC');
+    const maps = stmt2.all();
+    const mapList = maps.map(m => {
+      let terrainCount = 0;
       try {
-        const raw = fs.readFileSync(filePath, 'utf-8');
-        const data = JSON.parse(raw);
-        return {
-          filename: f,
-          name: data.battlefield?.name || data.name || f.replace('.json', ''),
-          width: data.battlefield?.width || data.width || 15,
-          height: data.battlefield?.height || data.height || 10,
-          terrainCount: data.battlefield?.terrainCount ||
-            (data.battlefield?.terrainData ? Object.keys(data.battlefield.terrainData).length : 0),
-          exportDate: data.exportDate || null,
-        };
-      } catch (parseErr) {
-        return { filename: f, name: f.replace('.json', ''), error: 'parse_failed' };
-      }
+        const terrain = JSON.parse(m.terrain || '{}');
+        terrainCount = Object.keys(terrain).length;
+      } catch(e) {}
+      return {
+        id: m.id, name: m.name,
+        width: m.width, height: m.height,
+        terrainCount, type: m.type, createdAt: m.created_at
+      };
     });
-    maps.sort((a, b) => {
-      if (a.exportDate && b.exportDate) return b.exportDate.localeCompare(a.exportDate);
-      return a.name.localeCompare(b.name);
-    });
-    res.json({ maps });
+    res.json({ maps: mapList });
   } catch (error) {
     console.error('[Map List] Error:', error);
     res.status(500).json({ error: '获取地图列表失败' });

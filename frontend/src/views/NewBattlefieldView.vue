@@ -22,8 +22,8 @@
         <div class="map-load-group">
           <select v-model="selectedMapFile" @change="onSelectMapFile" class="map-load-select">
             <option value="">🗺️ 加载旧地图...</option>
-            <option v-for="m in mapFileList" :key="m.filename" :value="m.filename">
-              {{ m.name }} ({{ m.width }}×{{ m.height }})
+            <option v-for="m in mapFileList" :key="m.filename" :value="m.id">
+              {{ m.name }} [{{ m.terrainCount }}格]
             </option>
           </select>
           <span v-if="mapLoadStatus" class="map-load-status">{{ mapLoadStatus }}</span>
@@ -503,12 +503,12 @@ async function onSelectMapFile() {
   if (!filename) return
   mapLoadStatus.value = '加载中...'
   try {
-    const res = await fetch(`/api/map/list?file=${encodeURIComponent(filename)}`)
+    const res = await fetch(`/api/map/list?id=${encodeURIComponent(filename)}`)
     if (!res.ok && res.status === 404) {
       // 回退: 使用原有 getBattlefields 加载
       const { data } = await mapAPI.getBattlefields()
       const maps = data?.battlefields || data?.maps || []
-      const found = maps.find(m => m.filename === filename || m.name === filename.replace('.json', ''))
+      const found = maps.find(m => String(m.id) === filename || m.name === filename.replace('.json', ''))
       if (found) {
         await loadMapData(found)
         mapLoadStatus.value = `✓ 已加载: ${found.name || filename}`
@@ -520,9 +520,9 @@ async function onSelectMapFile() {
       return
     }
     const data = await res.json()
-    if (data.battlefield || data.map) {
-      await loadMapData(data.battlefield || data.map)
-      mapLoadStatus.value = `✓ 已加载: ${(data.battlefield || data.map).name || filename}`
+    if (data) {
+      await loadMapData(data)
+      mapLoadStatus.value = `✓ 已加载: ${(data).name || filename}`
       setTimeout(() => { mapLoadStatus.value = '' }, 3000)
     }
   } catch (e) {
