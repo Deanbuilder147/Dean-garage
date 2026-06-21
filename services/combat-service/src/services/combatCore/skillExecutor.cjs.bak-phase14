@@ -1,0 +1,914 @@
+/**
+ * skillExecutor.cjs — 技能执行器 v5.0 (Phase 10 万能语法战斗中枢)
+ *
+ * 核心设计原则:
+ *   - 废除所有技能名称硬编码分支，改为 "只认通用句式、不认特定技能名"
+ *   - 引入【主谓宾定状补】语法插槽：subject/predicate/object/attribute/adverbial/complement
+ *   - 所有技能通过 glossary-skill-config.json 的通用字段驱动
+ *   - 泛化累加器: 不判断类型名，凡有 bonus_value 即无条件累加
+ *   - 100% 向后兼容：9 大技能数据反填即可完美跑通
+ *
+ * 语法插槽:
+ *   Subject    (主语·状态):  requires_unmoved, requires_stealth, requires_hp_above_percent
+ *   Predicate  (谓语·动作):  action_type (attack/heal/buff/debuff/passive)
+ *   Object     (宾语·范围):  target_filter, cast_range, min_cast_range, aoe_radius, sector_angle
+ *   Attribute  (定语·属性):  damage_kind, attack_stat, accuracy_mod, evasion_mod
+ *   Adverbial  (状语·干预):  height_bonus_per_diff, dice_type, success_line, success_bonus_damage, is_manual_roll
+ *   Complement (补语·结果):  base_damage, reduction, bonus, bonus_value, status_effects, post_effects
+ */
+
+const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./configLoader.cjs');
+
+
+class SkillExecutor {
+    constructor() {
+        // 稳定技能每局使用状态追踪：key = unit.id
+        this.stableUsedInBattle = new Map();
+        this.config = getGlossaryConfig();
+        // Phase 10: 万能语法模式（始终启用）
+        this.universalMode = true;
+    }
+
+    // ============================================================
+    // Phase 10: 万能语法字段获取
+    // ============================================================
+
+    /**
+     * 获取技能的全部通用结构化属性 (v5.0 主谓宾定状补)
+     * @param {string} skillType - 技能KEY 或 skillCfg 对象
+     * @returns {Object} 完整的语法插槽字典
+     */
+    _getUniversalFields(skillType) {
+        const cfg = typeof skillType === 'string' ? getSkillConfig(skillType) : skillType;
+        if (!cfg) return this._defaultUniversalFields();
+
+        return {
+            // Phase 5: 基础通用字段
+            type: cfg.type || 'active',
+            label: cfg.label || skillType,
+            category: cfg.category || 'melee',
+            description: cfg.description || '',
+            deterministic: cfg.deterministic !== false,
+            trigger: cfg.trigger || '',
+            mode: cfg.mode || '',
+
+            // 宾语 Object（范围）
+            target_filter: cfg.target_filter ?? 'enemy',
+            cast_range: cfg.cast_range ?? 1,
+            min_cast_range: cfg.min_cast_range ?? (cfg.min_range ?? 0),
+            aoe_radius: cfg.aoe_radius ?? 0,
+            sector_angle: cfg.sector_angle ?? 60,
+            max_range: cfg.max_range ?? cfg.cast_range ?? 1,
+            min_range: cfg.min_range ?? 0,
+            aoe_range: cfg.aoe_range ?? 0,
+
+            // 属性 Attribute（分流）
+            damage_kind: cfg.damage_kind ?? 'kinetic',
+            attack_stat: cfg.attack_stat ?? 'melee',
+            accuracy_mod: cfg.accuracy_mod ?? 0,
+            evasion_mod: cfg.evasion_mod ?? 0,
+
+            // 状语 Adverbial（环境与随机干预）
+            height_bonus_per_diff: cfg.height_bonus_per_diff ?? 0,
+            dice_type: cfg.dice_type || '1d6',
+            success_line: cfg.success_line ?? 4,
+            success_bonus_damage: cfg.success_bonus_damage ?? 0,
+            is_manual_roll: cfg.is_manual_roll || false,
+
+            // 谓语 Predicate（动作类型）
+            action_type: cfg.action_type ?? 'attack',
+            effect: cfg.effect ?? '',
+            requires: cfg.requires ?? '',
+
+            // 主语 Subject（施放条件）
+            requires_unmoved: cfg.requires_unmoved ?? false,
+            requires_stealth: cfg.requires_stealth ?? false,
+            hp_threshold_percent: cfg.hp_threshold_percent ?? 0,
+            condition: cfg.condition ?? '',
+            stat_comparison: cfg.stat_comparison ?? '',
+            no_consecutive: cfg.no_consecutive ?? false,
+
+            // 补语 Complement（结果值）
+            base_damage: cfg.base_damage ?? 0,
+            reduction: cfg.reduction ?? 0,
+            bonus: cfg.bonus ?? 0,
+            value: cfg.value ?? 0,
+            damage_modifier_precise: cfg.damage_modifier_precise ?? 0,
+            damage_multiplier: cfg.damage_multiplier ?? 1.0,
+            status_effects: cfg.status_effects || [],
+            action: cfg.action ?? '',
+        };
+    }
+
+    _defaultUniversalFields() {
+        return {
+            type: 'active', label: 'unknown', category: 'melee', description: '',
+            deterministic: true, trigger: '', mode: '',
+            target_filter: 'enemy', cast_range: 1, min_cast_range: 0,
+            aoe_radius: 0, sector_angle: 60, max_range: 1, min_range: 0, aoe_range: 0,
+            damage_kind: 'kinetic', attack_stat: 'melee', accuracy_mod: 0, evasion_mod: 0,
+            height_bonus_per_diff: 0,
+            dice_type: '1d6', success_line: 4, success_bonus_damage: 0, is_manual_roll: false,
+            action_type: 'attack', effect: '', requires: '',
+            requires_unmoved: false, requires_stealth: false,
+            hp_threshold_percent: 0, condition: '', stat_comparison: '',
+            no_consecutive: false,
+            base_damage: 0, reduction: 0, bonus: 0, value: 0,
+            damage_modifier_precise: 0, damage_multiplier: 1.0,
+            status_effects: [], action: '',
+        };
+    }
+
+    // ============================================================
+    // Phase 10: 万能语法调度器 — 核心入口
+    // ============================================================
+
+    /**
+     * 万能技能执行入口
+     * 根据词条配置的 action_type 自动路由到对应处理器
+     *
+     * @param {string} skillType - 技能KEY
+     * @param {Object} unit - 施放单位
+     * @param {Object} target - 目标单位/格子
+     * @param {Object} context - 额外上下文 { allUnits, battleState, skillRange }
+     * @returns {Object} 统一执行结果
+     */
+    executeUniversalSkill(skillType, unit, target, context = {}) {
+        const cfg = getSkillConfig(skillType);
+        const uf = this._getUniversalFields(skillType);
+
+        if (!cfg) {
+            return { triggered: false, message: `技能 ${skillType} 未在词条库中定义` };
+        }
+
+        // === 主语检查 (Subject Checks) ===
+        if (uf.requires_unmoved && unit.has_moved) {
+            return { triggered: false, message: `${uf.label} 需要本回合未移动` };
+        }
+        if (uf.requires_stealth && !unit.stealth) {
+            return { triggered: false, message: `${uf.label} 需要隐身状态` };
+        }
+
+        // === 宾语距离检查 (Object Range Check) ===
+        if (target && uf.target_filter !== 'self') {
+            const dist = this._hexDistance(unit, target);
+            const minR = uf.min_cast_range || uf.min_range || 1; // 默认最小距离1（排除自身）
+            const maxR = uf.cast_range || uf.max_range || 1;
+            if (dist < minR || dist > maxR) {
+                return {
+                    triggered: false, out_of_range: true,
+                    min: minR, max: maxR, actual: dist,
+                    message: `${uf.label} 需要 ${minR}~${maxR} 格距离（当前 ${dist} 格）`
+                };
+            }
+        }
+
+        // === 定语·高地差 (Attribute - Height Bonus) ===
+        let heightBonus = 0;
+        let heightDiff = 0;
+        if (target && uf.height_bonus_per_diff > 0) {
+            const attZ = unit.z ?? unit.height ?? 0;
+            const defZ = target.z ?? target.height ?? 0;
+            heightDiff = attZ - defZ;
+            if (heightDiff > 0) {
+                heightBonus = Math.floor(heightDiff * uf.height_bonus_per_diff);
+            }
+        }
+
+        // === 状语·骰子判定 (Adverbial - Dice) ===
+        const dice = this._evaluateDice(cfg);
+        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+
+        // === 谓语路由 (Predicate Routing) ===
+        switch (uf.action_type) {
+            case 'attack':
+                return this._executeAttackSkill(skillType, unit, target, uf, cfg, dice, heightBonus, heightDiff, context);
+            case 'heal':
+                return this._executeHealSkill(skillType, unit, target, uf, cfg, dice, context);
+            case 'buff':
+                return this._executeBuffSkill(skillType, unit, target, uf, cfg, dice, context);
+            case 'debuff':
+                return this._executeDebuffSkill(skillType, unit, target, uf, cfg, dice, context);
+            case 'passive':
+                return this._executePassiveSkill(skillType, unit, target, uf, cfg, dice, context);
+            default:
+                return {
+                    triggered: true, type: skillType,
+                    action_type: uf.action_type,
+                    damage_kind: uf.damage_kind,
+                    bonus_value: uf.base_damage + diceBonus + heightBonus,
+                    dice, height_bonus: heightBonus,
+                    message: `${uf.label}: 基础${uf.base_damage} + 骰子${diceBonus} + 高地${heightBonus}`
+                };
+        }
+    }
+
+    // ============================================================
+    // 谓语处理器 (Predicate Handlers)
+    // ============================================================
+
+    _executeAttackSkill(skillType, unit, target, uf, cfg, dice, heightBonus, heightDiff, context) {
+        const baseDamage = uf.base_damage || uf.damage_modifier_precise || 0;
+        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+        const finalDamage = baseDamage + diceBonus + heightBonus;
+        const attackType = uf.attack_stat === 'ranged' ? 'ranged' : 'melee';
+
+        const result = {
+            triggered: true,
+            type: skillType,
+            action_type: 'attack',
+            attack_type: attackType,
+            attack_stat: uf.attack_stat,
+            damage_kind: uf.damage_kind,
+            active: true,
+            base_damage: baseDamage,
+            dice,
+            height_bonus: heightBonus,
+            height_diff: heightDiff,
+            final_damage: finalDamage,
+            bonus_value: finalDamage,
+            accuracy_mod: uf.accuracy_mod,
+            evasion_mod: uf.evasion_mod,
+            status_effects: uf.status_effects,
+        };
+
+        // 构建消息
+        let msgParts = [`${uf.label}`];
+        if (dice.roll > 0) msgParts.push(`掷${dice.diceType}=${dice.roll}${dice.isSuccess ? '>=' + dice.successLine : '<' + dice.successLine}`);
+        if (heightBonus > 0) msgParts.push(`高地+${heightBonus}`);
+        msgParts.push(`伤害${finalDamage}`);
+        result.message = msgParts.join(', ');
+
+        // 定语修正注入 context
+        if (context) {
+            if (uf.accuracy_mod) context.accuracy_mod = (context.accuracy_mod || 0) + uf.accuracy_mod;
+            if (uf.evasion_mod) context.evasion_mod = (context.evasion_mod || 0) + uf.evasion_mod;
+        }
+
+        return result;
+    }
+
+    _executeHealSkill(skillType, unit, target, uf, cfg, dice, context) {
+        const healStat = uf.attack_stat === 'ranged'
+            ? (unit.ranged || unit.attack || 10)
+            : (unit.melee || unit.attack || 10);
+        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+        const healAmount = (uf.base_damage || healStat) + diceBonus;
+
+        if (target) {
+            const dist = this._hexDistance(unit, target);
+            if (dist > uf.cast_range || dist === 0) {
+                return {
+                    heal_amount: 0, out_of_range: true,
+                    min: 1, max: uf.cast_range, actual: dist,
+                    message: `${uf.label} 仅对范围 ${uf.cast_range} 内友军有效`
+                };
+            }
+        }
+
+        return {
+            triggered: true,
+            type: skillType,
+            action_type: 'heal',
+            active: true,
+            heal_amount: healAmount,
+            bonus_value: healAmount,
+            dice,
+            message: dice.roll > 0
+                ? `${uf.label}: 回复 ${healAmount} HP [掷${dice.diceType}=${dice.roll}]`
+                : `${uf.label}: 回复 ${healAmount} 点 HP`
+        };
+    }
+
+    _executeBuffSkill(skillType, unit, target, uf, cfg, dice, context) {
+        const buffValue = uf.base_damage || uf.bonus || uf.value || 0;
+        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+        const finalValue = buffValue + diceBonus;
+
+        return {
+            triggered: true,
+            type: skillType,
+            action_type: 'buff',
+            active: true,
+            buff_value: finalValue,
+            bonus_value: finalValue,
+            dice,
+            message: dice.roll > 0
+                ? `${uf.label}: +${finalValue} [掷${dice.diceType}=${dice.roll}]`
+                : `${uf.label}: +${finalValue}`
+        };
+    }
+
+    _executeDebuffSkill(skillType, unit, target, uf, cfg, dice, context) {
+        const debuffValue = uf.base_damage || uf.value || 0;
+        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+        const finalValue = debuffValue + diceBonus;
+        const statusEffects = uf.status_effects || [];
+
+        return {
+            triggered: true,
+            type: skillType,
+            action_type: 'debuff',
+            active: true,
+            debuff_value: finalValue,
+            bonus_value: finalValue,
+            aoe_radius: uf.aoe_radius || uf.aoe_range || 0,
+            status_effects: statusEffects,
+            dice,
+            message: dice.roll > 0
+                ? `${uf.label}: 增伤+${finalValue} [掷${dice.diceType}=${dice.roll}]`
+                : `${uf.label}: 目标周围 ${uf.aoe_range || uf.aoe_radius} 格内所有目标下次伤害 +${finalValue}`
+        };
+    }
+
+    _executePassiveSkill(skillType, unit, target, uf, cfg, dice, context) {
+        const result = {
+            triggered: true,
+            type: skillType,
+            action_type: 'passive',
+            active: true,
+            damage_kind: uf.damage_kind,
+            bonus_value: (uf.reduction || uf.base_damage || uf.bonus || 0) + (dice.isSuccess ? 1 : 0),
+            dice,
+            message: `${uf.label} 触发`
+        };
+
+        // 特殊被动效果：斩杀 / 决斗 / 抢夺 / 幸运 / 再动
+        if (uf.condition === 'damage_greater_than_target_weapon_attack' || cfg.condition === 'damage_greater_than_target_weapon_attack') {
+            return {
+                ...result,
+                snatch_mode: true,
+                damage_multiplier: uf.damage_multiplier || 0.5,
+                message: '抢夺判定待触发'
+            };
+        }
+
+        if (uf.stat_comparison === 'max_attack' || cfg.stat_comparison === 'max_attack') {
+            return {
+                ...result,
+                duel_mode: true,
+                message: '决斗判定待触发'
+            };
+        }
+
+        return result;
+    }
+
+    // ============================================================
+    // 骰子系统 (Phase 8)
+    // ============================================================
+
+    _parseDice(diceStr) {
+        const m = String(diceStr || '1d6').match(/^(\d+)d(\d+)$/i);
+        if (!m) return { count: 1, sides: 6 };
+        return { count: parseInt(m[1]), sides: parseInt(m[2]) };
+    }
+
+    _rollDice(diceStr) {
+        const { count, sides } = this._parseDice(diceStr);
+        let total = 0;
+        for (let i = 0; i < count; i++) {
+            total += Math.floor(Math.random() * sides) + 1;
+        }
+        return total;
+    }
+
+    _evaluateDice(skillCfg) {
+        if (!skillCfg) return { roll: 0, diceType: '1d6', successLine: 4, isSuccess: false, bonusDamage: 0 };
+        const diceType = skillCfg.dice_type || '1d6';
+        const successLine = skillCfg.success_line ?? 4;
+        const bonusDamage = skillCfg.success_bonus_damage ?? 0;
+        const roll = this._rollDice(diceType);
+        const isSuccess = roll >= successLine;
+        return {
+            roll,
+            diceType,
+            successLine,
+            isSuccess,
+            bonusDamage: isSuccess ? bonusDamage : 0
+        };
+    }
+
+    _applyDiceToDamage(skillCfg, baseDamageOverride) {
+        const cfg = typeof skillCfg === 'string' ? getSkillConfig(skillCfg) : skillCfg;
+        const baseDamage = baseDamageOverride ?? (cfg?.base_damage ?? 0);
+        if (!cfg || !cfg.dice_type || cfg.dice_type === 'none') {
+            return { damage: baseDamage, dice: null };
+        }
+        const dice = this._evaluateDice(cfg);
+        const finalDamage = baseDamage + dice.bonusDamage;
+        return { damage: finalDamage, dice };
+    }
+
+    // ============================================================
+    // Phase 10: 手动摇骰状态机钩子
+    // ============================================================
+
+    /**
+     * 手动摇骰判定 (Phase 10 状态机接入点)
+     * 当前为自动模拟，实际使用时挂起状态机等待玩家前台拍空格
+     */
+    evaluateManualRoll(skillCfg, externalResult = null) {
+        if (!skillCfg || !skillCfg.is_manual_roll) {
+            return { manual: false, bonus: 0 };
+        }
+
+        let dice;
+        if (externalResult && externalResult.roll !== undefined) {
+            // Phase 11: 使用外部传入的掷骰结果 (来自 WebSocket 手动摇骰)
+            dice = {
+                roll: externalResult.roll,
+                diceType: externalResult.diceType || skillCfg.dice_type || '1d6',
+                successLine: externalResult.successLine ?? skillCfg.success_line ?? 4,
+                isSuccess: externalResult.isSuccess ?? (externalResult.roll >= (externalResult.successLine ?? skillCfg.success_line ?? 4))
+            };
+        } else {
+            // 回退: 自动模拟掷骰
+            dice = this._evaluateDice(skillCfg);
+        }
+
+        const bonus = dice.isSuccess ? (skillCfg.success_bonus_damage ?? 0) : 0;
+        return {
+            manual: true,
+            roll: dice.roll,
+            diceType: dice.diceType,
+            successLine: dice.successLine,
+            isSuccess: dice.isSuccess,
+            bonus,
+            message: dice.isSuccess
+                ? `[手动摇骰 SUCCESS] 掷${dice.diceType}=${dice.roll} >= ${dice.successLine}, 追加+${bonus}`
+                : `[手动摇骰 FAIL] 掷${dice.diceType}=${dice.roll} < ${dice.successLine}`
+        };
+    }
+
+    // ============================================================
+    // 向后兼容：保留原有技能方法（内部调用万能调度器）
+    // ============================================================
+
+    getSkillRange(skillType) {
+        const uf = this._getUniversalFields(skillType);
+        const cr = uf.cast_range;
+        return { min: uf.min_cast_range, max: cr };
+    }
+
+    getAoeRadius(skillType) {
+        const uf = this._getUniversalFields(skillType);
+        return uf.aoe_radius;
+    }
+
+    resetStableForBattle() {
+        this.stableUsedInBattle.clear();
+    }
+
+    // ---- 近战技能 ----
+
+    executeCounter(unit, attacker, skillRange) {
+        const cfg = getSkillConfig('counter');
+        const uf = this._getUniversalFields('counter');
+        const range = skillRange ?? uf.cast_range;
+        const dist = this._hexDistance(unit, attacker);
+        if (dist > range) return { triggered: false };
+
+        const dice = this._evaluateDice(cfg);
+        const baseBonus = uf.bonus || uf.base_damage || 2;
+        const bonus = baseBonus + (dice.isSuccess ? uf.success_bonus_damage : 0);
+        return {
+            triggered: true, type: 'counter', attack_type: 'melee', active: true,
+            bonus, bonus_value: bonus, damage_kind: uf.damage_kind, dice,
+            message: dice.roll > 0
+                ? `反击！掷${dice.diceType}=${dice.roll}, 伤害+${bonus}`
+                : `反击触发！伤害 +${bonus}`
+        };
+    }
+
+    executeBlock() {
+        const cfg = getSkillConfig('block');
+        const uf = this._getUniversalFields('block');
+        const reduction = uf.reduction || 2;
+        const dice = this._evaluateDice(cfg);
+        const effReduction = reduction + (dice.isSuccess ? 1 : 0);
+        return {
+            triggered: true, blocked: true,
+            reduction: effReduction, bonus_value: effReduction, dice,
+            message: dice.roll > 0
+                ? `格挡！伤害 -${effReduction} [掷${cfg.dice_type}=${dice.roll}${dice.isSuccess ? '>=success' : '<success'}]`
+                : `格挡成功！伤害 -${effReduction}`
+        };
+    }
+
+    getPolearmExtraRange(unit, target) {
+        const sameQ = (unit.q || 0) === (target.q || 0);
+        const sameR = (unit.r || 0) === (target.r || 0);
+        if (sameQ || sameR) return 1;
+        return 0;
+    }
+
+    executeSupply(unit, target) {
+        const uf = this._getUniversalFields('supply');
+        if (target) {
+            const dist = this._hexDistance(unit, target);
+            if (dist > uf.cast_range || dist === 0) {
+                return {
+                    heal_amount: 0, out_of_range: true,
+                    min: 1, max: uf.cast_range, actual: dist,
+                    message: `补给仅对范围 ${uf.cast_range} 内友军有效（当前距离 ${dist} 格）`
+                };
+            }
+        }
+        const melee = unit.melee || unit.attack || 10;
+        const cfg = getSkillConfig('supply');
+        const dice = this._evaluateDice(cfg);
+        const healAmount = melee + (dice.isSuccess ? (uf.success_bonus_damage) : 0);
+        return {
+            heal_amount: healAmount, bonus_value: healAmount, dice,
+            message: dice.roll > 0
+                ? `补给：回复 ${healAmount} HP [掷${dice.diceType}=${dice.roll}]`
+                : `补给：回复 ${healAmount} 点 HP`
+        };
+    }
+
+    // ---- 远程技能 ----
+
+    executeSweep(unit, target, allUnits) {
+        const cfg = getSkillConfig('sweep');
+        const uf = this._getUniversalFields('sweep');
+        const sectorAngle = uf.sector_angle;
+        const maxRange = uf.cast_range || uf.max_range;
+
+        if (target && !this._isInSector(unit, target, maxRange, sectorAngle)) {
+            return { mode: 'out_of_range', message: `扫射需要目标在扇形${maxRange}格范围内（当前超出范围）` };
+        }
+
+        const { damage: finalDmg, dice } = this._applyDiceToDamage(cfg);
+        return {
+            mode: 'precise', attack_type: 'ranged', active: true,
+            targets: [target],
+            base_damage: uf.base_damage || uf.damage_modifier_precise || -2,
+            final_damage: finalDmg, damage_kind: uf.damage_kind,
+            bonus_value: finalDmg, dice,
+            message: dice?.roll > 0
+                ? `扫射！掷${dice.diceType}=${dice.roll}${dice.isSuccess ? '>=success' : '<success'}, 伤害${finalDmg}`
+                : `扫射精准命中！伤害 ${finalDmg}`
+        };
+    }
+
+    executeThrow(unit, target) {
+        const cfg = getSkillConfig('throw');
+        const uf = this._getUniversalFields('throw');
+        const minRange = uf.min_cast_range || uf.min_range || 1;
+        const maxRange = uf.cast_range || uf.max_range;
+
+        if (target) {
+            const dist = this._hexDistance(unit, target);
+            if (dist < minRange || dist > maxRange) {
+                return {
+                    mode: 'out_of_range',
+                    min: minRange, max: maxRange, actual: dist,
+                    message: `投掷需要 ${minRange}~${maxRange} 格距离（当前 ${dist} 格）`
+                };
+            }
+        }
+
+        const dice = this._evaluateDice(cfg);
+        const baseAmp = uf.value || uf.base_damage || 5;
+        const ampValue = baseAmp + (dice.isSuccess ? uf.success_bonus_damage : 0);
+        return {
+            mode: 'debuff', effect: 'damage_amp',
+            value: ampValue, bonus_value: ampValue,
+            aoe_radius: uf.aoe_radius || uf.aoe_range || 2,
+            dice,
+            message: dice.roll > 0
+                ? `投掷！增伤+${ampValue} [掷${dice.diceType}=${dice.roll}]`
+                : `投掷：目标周围 2 格内所有目标下次伤害 +${ampValue}`
+        };
+    }
+
+    executeStable(unit, target) {
+        const uf = this._getUniversalFields('stable');
+        const unitKey = unit.id || unit.unit_id;
+        if (this.stableUsedInBattle.get(unitKey)) {
+            return { triggered: false, message: '稳定已在本次战斗中使用过' };
+        }
+
+        if (target) {
+            const dist = this._hexDistance(unit, target);
+            if (dist < 1 || dist > 4) {
+                return {
+                    triggered: false, out_of_range: true,
+                    min: 1, max: 4, actual: dist,
+                    message: `稳定需要 1~4 格距离（当前 ${dist} 格）`
+                };
+            }
+        }
+
+        this.stableUsedInBattle.set(unitKey, true);
+        const ff = this.executeFocusedFire();
+
+        return {
+            triggered: true, type: 'stable', active: true,
+            focused_fire: ff, bonus: ff.bonus, bonus_value: ff.bonus,
+            message: `稳定触发！${ff.message}`
+        };
+    }
+
+    canSniper(unit, target) {
+        const cfg = getSkillConfig('sniper');
+        const uf = this._getUniversalFields('sniper');
+        if (unit.has_moved) {
+            return { triggered: false, message: '狙击需要舍弃本回合移动' };
+        }
+        if (!target) {
+            return { triggered: false, message: '狙击需要目标' };
+        }
+        const minRange = uf.min_cast_range || uf.min_range || 4;
+        const maxRange = uf.cast_range || uf.max_range || 6;
+        const dist = this._hexDistance(unit, target);
+        if (dist < minRange || dist > maxRange) {
+            return {
+                triggered: false, out_of_range: true,
+                min: minRange, max: maxRange, actual: dist,
+                message: `狙击需要 ${minRange}~${maxRange} 格距离（当前 ${dist} 格）`
+            };
+        }
+        const dice = this._evaluateDice(cfg);
+        const mobReduce = 2 + (dice.isSuccess ? uf.success_bonus_damage : 0);
+        return {
+            triggered: true, type: 'sniper', attack_type: 'ranged', active: true,
+            mobility_reduction: mobReduce, bonus_value: mobReduce, dice,
+            damage_kind: uf.damage_kind,
+            message: dice.roll > 0
+                ? `狙击！掷${dice.diceType}=${dice.roll}, 目标机动值-${mobReduce}`
+                : `狙击：舍弃移动，目标机动值 -${mobReduce}`
+        };
+    }
+
+    // ---- 自动化技能 ----
+
+    executeAssist(unit, increment = true) {
+        const uf = this._getUniversalFields('assist');
+        if (!unit || !unit.skills) return { triggered: false };
+        const hasAssist = unit.skills.some(s => s && s.type === 'assist' && s.active);
+        if (!hasAssist) return { triggered: false };
+
+        if (increment) unit.assist_counter = (unit.assist_counter || 0) - 1;
+        if ((unit.assist_counter || 0) <= 0) {
+            unit.assist_counter = 0;
+            return { triggered: false, message: '助攻效果已耗尽' };
+        }
+
+        const bonus = uf.bonus || uf.base_damage || 3;
+        return {
+            triggered: true, type: 'assist', active: true,
+            bonus, bonus_value: bonus,
+            remaining: unit.assist_counter,
+            message: `助攻：伤害 +${bonus}（剩余 ${unit.assist_counter} 次）`
+        };
+    }
+
+    executeGuard(unit, increment = true) {
+        const uf = this._getUniversalFields('guard');
+        if (!unit || !unit.skills) return { triggered: false };
+        const hasGuard = unit.skills.some(s => s && s.type === 'guard' && s.active);
+        if (!hasGuard) return { triggered: false };
+
+        if (increment) unit.guard_counter = (unit.guard_counter || 0) - 1;
+        if ((unit.guard_counter || 0) <= 0) {
+            unit.guard_counter = 0;
+            return { triggered: false, message: '守护效果已耗尽' };
+        }
+
+        const reduction = uf.reduction || 5;
+        return {
+            triggered: true, type: 'guard', active: true,
+            reduction, bonus_value: reduction,
+            remaining: unit.guard_counter,
+            message: `守护：伤害 -${reduction}（剩余 ${unit.guard_counter} 次）`
+        };
+    }
+
+    executeBlockade(unit, target, increment = true) {
+        const uf = this._getUniversalFields('blockade');
+        if (!unit || !unit.skills) return { triggered: false };
+        const hasBlockade = unit.skills.some(s => s && s.type === 'blockade' && s.active);
+        if (!hasBlockade) return { triggered: false };
+
+        if (increment) unit.blockade_counter = (unit.blockade_counter || 0) - 1;
+        if ((unit.blockade_counter || 0) <= 0) {
+            unit.blockade_counter = 0;
+            return { triggered: false, message: '阻碍效果已耗尽' };
+        }
+
+        const mobReduce = uf.value || uf.reduction || 5;
+        return {
+            triggered: true, type: 'blockade', active: true,
+            mobility_reduction: mobReduce, bonus_value: mobReduce,
+            remaining: unit.blockade_counter,
+            message: `阻碍：对方机动值 -${mobReduce}（剩余 ${unit.blockade_counter} 次）`
+        };
+    }
+
+    initAssistCounter(unit) { unit.assist_counter = 5; }
+    initGuardCounter(unit) { unit.guard_counter = 3; }
+    initBlockadeCounter(unit) { unit.blockade_counter = 3; }
+
+    executeScout(unit, ally) {
+        const uf = this._getUniversalFields('scout');
+        const scoutRange = unit.ranged || unit.attack || 10;
+        if (!ally) return { triggered: false };
+        const dist = this._hexDistance(unit, ally);
+        if (dist > scoutRange || unit.faction !== ally.faction) return { triggered: false };
+        return {
+            triggered: true, type: 'scout', active: true,
+            evasion_bonus: uf.evasion_mod || 2,
+            bonus_value: uf.evasion_mod || 2,
+            scout_range: scoutRange,
+            message: `侦察：友军闪避值 +${uf.evasion_mod || 2}（侦察范围 ${scoutRange} 格）`
+        };
+    }
+
+    // ---- 特殊词条 ----
+
+    executeExecute(target) {
+        const uf = this._getUniversalFields('execute');
+        const hp = target.hp || 0;
+        const maxHp = target.max_hp || target.hp || 1;
+        const thresholdPercent = uf.hp_threshold_percent || 10;
+        const threshold = Math.max(1, Math.floor(maxHp * thresholdPercent / 100));
+
+        if (hp <= 0 || hp > threshold) {
+            return { executed: false, message: `HP=${hp} > 斩杀阈值 ${threshold}` };
+        }
+        return {
+            executed: true, threshold,
+            message: `斩杀！HP=${hp} ≤ 阈值${threshold} (${thresholdPercent}% maxHP)，目标直接阵亡`
+        };
+    }
+
+    executeDuel(unitA, unitB) {
+        const uf = this._getUniversalFields('duel');
+        const maxA = Math.max(unitA.melee || unitA.attack || 10, unitA.ranged || 0);
+        const maxB = Math.max(unitB.melee || unitB.attack || 10, unitB.ranged || 0);
+
+        if (unitA.hp >= maxB || unitB.hp >= maxA) return { triggered: false };
+        const dist = this._hexDistance(unitA, unitB);
+        if (dist > 1) return { triggered: false };
+
+        if (maxA === maxB) {
+            return {
+                triggered: true, draw: true,
+                statA: maxA, statB: maxB,
+                message: `决斗同归于尽！双方 max_attack=${maxA}`
+            };
+        }
+
+        const winner = maxA > maxB ? 'attacker' : 'defender';
+        return {
+            triggered: true, draw: false, winner,
+            statA: maxA, statB: maxB,
+            message: `决斗！${winner === 'attacker' ? '攻击方' : '防御方'} 获胜 (max_attack: ${maxA} vs ${maxB})`
+        };
+    }
+
+    executeSnatch(damageDealt, defenderWeaponAttack) {
+        const uf = this._getUniversalFields('snatch');
+        if (damageDealt <= defenderWeaponAttack) return { triggered: false };
+        return {
+            triggered: true, success: true,
+            damage_reduced: Math.floor(damageDealt * (uf.damage_multiplier || 0.5)),
+            message: `抢夺成功！获得武器，伤害减半为 ${Math.floor(damageDealt * (uf.damage_multiplier || 0.5))}`
+        };
+    }
+
+    executeFocusedFire() {
+        const cfg = getSkillConfig('focused_fire');
+        const uf = this._getUniversalFields('focused_fire');
+        const baseBonus = uf.base_damage || uf.bonus || 4;
+        const dice = this._evaluateDice(cfg);
+        const bonus = baseBonus + (dice.isSuccess ? uf.success_bonus_damage : 0);
+        return {
+            bonus, bonus_value: bonus, dice,
+            message: dice.roll > 0
+                ? `专注射击：掷${dice.diceType}=${dice.roll}, 伤害+${bonus}`
+                : `专注射击：伤害 +${bonus}`
+        };
+    }
+
+    executeLucky() {
+        const cfg = getSkillConfig('lucky');
+        const uf = this._getUniversalFields('lucky');
+        const action = uf.action || 'remove_and_attack';
+        return {
+            action, bonus_value: 0,
+            message: '幸运触发：再次移动并攻击'
+        };
+    }
+
+    canReactivate(killConfirmed, lastReactivation) {
+        return killConfirmed && !lastReactivation;
+    }
+
+    // ============================================================
+    // 工具方法
+    // ============================================================
+
+    _hexDistance(a, b) {
+        if (!a || !b) return 999;
+        const dq = Math.abs((a.q || 0) - (b.q || 0));
+        const dr = Math.abs((a.r || 0) - (b.r || 0));
+        const ds = Math.abs(((a.q || 0) - (b.q || 0)) + ((a.r || 0) - (b.r || 0)));
+        return Math.max(dq, dr, ds);
+    }
+
+    _isInSector(unit, target, maxDist = 2, sectorAngle = 60) {
+        if (!unit || !target) return false;
+        const dist = this._hexDistance(unit, target);
+        if (dist > maxDist || dist === 0) return false;
+
+        const dq = (target.q || 0) - (unit.q || 0);
+        const dr = (target.r || 0) - (unit.r || 0);
+
+        const x = dq + dr * 0.5;
+        const y = dr * 0.866;
+
+        const angle = Math.atan2(y, x) * 180 / Math.PI;
+        const facing = unit.facing || 0;
+
+        let diff = Math.abs(angle - facing);
+        if (diff > 180) diff = 360 - diff;
+        return diff <= sectorAngle;
+    }
+
+    // ============================================================
+    // Phase9: 可破坏地形管道
+    // ============================================================
+
+    _getTerrainConfig() {
+        try {
+            const cfg = getGlossaryConfig();
+            return cfg?.terrains || {};
+        } catch (e) { return {}; }
+    }
+
+    _applyTerrainDamage(unit, targetCell, damage, battleState) {
+        if (!targetCell || !battleState) return { terrainDestroyed: false, newTerrain: null, message: '' };
+        const terrains = this._getTerrainConfig();
+        const key = targetCell.q + ',' + targetCell.r;
+        const currentTerrainId = (battleState.terrain && battleState.terrain[key]) || 'moon';
+        const terrainDef = terrains[currentTerrainId];
+        if (!terrainDef || !terrainDef.is_destructible) {
+            return { terrainDestroyed: false, newTerrain: null, message: '' };
+        }
+        if (!battleState.terrain_hp) battleState.terrain_hp = {};
+        if (battleState.terrain_hp[key] === undefined) {
+            battleState.terrain_hp[key] = terrainDef.max_hp;
+        }
+        battleState.terrain_hp[key] -= damage;
+        if (battleState.terrain_hp[key] <= 0) {
+            const transformTo = terrainDef.destroyed_transform_to || 'moon';
+            battleState.terrain[key] = transformTo;
+            delete battleState.terrain_hp[key];
+            return {
+                terrainDestroyed: true,
+                newTerrain: transformTo,
+                message: terrainDef.name + ' 被摧毁！'
+            };
+        }
+        return {
+            terrainDestroyed: false,
+            newTerrain: null,
+            message: terrainDef.name + ' 受损: ' + battleState.terrain_hp[key] + '/' + terrainDef.max_hp
+        };
+    }
+
+    _getTerrainDefenseBonus(cellQ, cellR, terrainMap) {
+        if (!terrainMap) return 0;
+        const terrains = this._getTerrainConfig();
+        const tid = terrainMap[cellQ + ',' + cellR] || 'moon';
+        const def = terrains[tid];
+        return def?.defense_bonus ?? 0;
+    }
+
+    _getTerrainMoveCost(cellQ, cellR, terrainMap) {
+        if (!terrainMap) return 1;
+        const terrains = this._getTerrainConfig();
+        const tid = terrainMap[cellQ + ',' + cellR] || 'moon';
+        const def = terrains[tid];
+        return def?.move_cost ?? 1;
+    }
+}
+
+
+/**
+ * Phase9: 全局地形实用函数 (无状态, 可外部调用)
+ */
+function getTerrainConfig() {
+    try { return getGlossaryConfig()?.terrains || {}; }
+    catch (e) { return {}; }
+}
+
+function evaluateTerrainDestruction(cellQ, cellR, damage, battleState) {
+    const exec = new SkillExecutor();
+    return exec._applyTerrainDamage(null, { q: cellQ, r: cellR }, damage, battleState);
+}
+
+module.exports = SkillExecutor;
