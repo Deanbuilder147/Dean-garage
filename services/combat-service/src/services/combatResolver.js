@@ -287,7 +287,9 @@ class CombatResolver {
             dice_type: skillUf.dice_type || '1d6',
             success_line: skillUf.success_line ?? 4,
             success_bonus_damage: skillUf.success_bonus_damage ?? 0,
-            height_bonus_per_diff: skillUf.height_bonus_per_diff ?? 0
+            height_bonus_per_diff: skillUf.height_bonus_per_diff ?? 0,
+            // Phase 11: 外部掷骰结果 (WebSocket 手动摇骰)
+            external_roll_result: options.external_roll_result || null
         });
 
         result.totalDamage += damageResult.final_damage;
@@ -375,6 +377,39 @@ class CombatResolver {
         this.fireCoverageUsed = false;
         this.durability.reset();
         this.skillExecutor.resetStableForBattle();
+        // Phase 11: 清理手动摇骰挂起队列
+        if (this.manualRollPending) {
+            this.manualRollPending.forEach(({ reject, timeout }) => {
+                clearTimeout(timeout);
+                reject(new Error('战斗重置'));
+            });
+            this.manualRollPending.clear();
+        }
+    }
+
+    /**
+     * Phase 11: 处理外部手动摇骰结果
+     * @param {string} turnId - 战斗回合 ID
+     * @param {Object} rollResult
+     */
+    processManualRollResult(turnId, rollResult) {
+        const pending = this.manualRollPending.get(turnId);
+        if (!pending) {
+            console.warn(`[Phase11] 未找到挂起的手动摇骰 turnId=${turnId}`);
+            return false;
+        }
+        clearTimeout(pending.timeout);
+        this.manualRollPending.delete(turnId);
+        const isSuccess = rollResult.roll >= (rollResult.successLine ?? 4);
+        const bonus = isSuccess ? (rollResult.bonus_damage ?? rollResult.bonus ?? 0) : 0;
+        pending.resolve({
+            roll: rollResult.roll,
+            diceType: rollResult.dice_type || '1d6',
+            successLine: rollResult.success_line ?? 4,
+            isSuccess,
+            bonus
+        });
+        return true;
     }
 }
 

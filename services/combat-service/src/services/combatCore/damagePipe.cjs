@@ -348,20 +348,27 @@ class DamagePipe {
     static _applyManualRollBonus(config) {
         if (!config.is_manual_roll) return { manual: false, bonus: 0 };
 
-        // TODO: Phase 10 - state machine hook for manual roll input
-        // 当前自动掷骰模拟
+        // Phase 11: 优先使用外部传入的掷骰结果 (WebSocket 手动摇骰)
+        const externalResult = config.external_roll_result;
         const diceType = config.dice_type || '1d6';
         const successLine = config.success_line ?? 4;
         const bonusDamage = config.success_bonus_damage ?? 0;
 
-        // 解析骰子字符串
-        const m = String(diceType).match(/^(\d+)d(\d+)$/i);
-        const count = m ? parseInt(m[1]) : 1;
-        const sides = m ? parseInt(m[2]) : 6;
-        let roll = 0;
-        for (let i = 0; i < count; i++) roll += Math.floor(Math.random() * sides) + 1;
+        let roll, isSuccess;
+        if (externalResult && externalResult.roll !== undefined) {
+            // 使用外部掷骰结果
+            roll = externalResult.roll;
+            isSuccess = externalResult.isSuccess ?? (roll >= successLine);
+        } else {
+            // 回退: 自动模拟掷骰
+            const m = String(diceType).match(/^(\d+)d(\d+)$/i);
+            const count = m ? parseInt(m[1]) : 1;
+            const sides = m ? parseInt(m[2]) : 6;
+            roll = 0;
+            for (let i = 0; i < count; i++) roll += Math.floor(Math.random() * sides) + 1;
+            isSuccess = roll >= successLine;
+        }
 
-        const isSuccess = roll >= successLine;
         const bonus = isSuccess ? bonusDamage : 0;
         return {
             manual: true,

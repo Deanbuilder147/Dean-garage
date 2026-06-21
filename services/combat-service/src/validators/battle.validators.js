@@ -99,6 +99,8 @@ export const deploymentSchema = z.object({
   q: z.number().int().min(0, '部署 Q 坐标不能小于 0').max(99, '部署 Q 坐标不能大于 99'),
   r: z.number().int().min(0, '部署 R 坐标不能小于 0').max(99, '部署 R 坐标不能大于 99'),
   unit_data: z.object({}).optional() // 前端可传完整棋子快照（自包含部署）
+,
+  unit_data: z.object({}).optional() // 前端可传完整棋子快照（自包含部署）
 });
 
 // 机甲配置 Schema

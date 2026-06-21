@@ -111,11 +111,7 @@
           {{ starting ? '启动中...' : '出击' }}
         </button>
       </div>
-    </main>
-
-    <footer class="footer"><div class="footer-left"><span>[ 系统稳定 // 12:04:99 ]</span></div><div class="footer-right"><span class="good">同步率: 98.4%</span><span class="muted">坐标: 35.6895 N</span><span class="muted">状态: 最佳</span></div></footer>
-  
-</template>
+    </main></template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
@@ -225,6 +221,24 @@ async function startBattle() {
     localStorage.setItem('factionRoles', JSON.stringify({...factionRoles}))
     localStorage.setItem('aceSelections', JSON.stringify({...aceSelections}))
   let battleId = room.value?.room?.battle_id || room.value?.battle_id
+
+  // P12: 将选中的棋子完整数据传给后端部署池
+  try {
+    const selectedUnits = availableUnits.value.filter(u => selectedIds.value.includes(u.id))
+    const token = localStorage.getItem('token')
+    await fetch(`/api/combat/${battleId}/pending-units`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
+      },
+      body: JSON.stringify({ units: selectedUnits })
+    })
+    console.log(`[startBattle] 已上传 ${selectedUnits.length} 个棋子到后端部署池`)
+  } catch (e) {
+    console.warn('[startBattle] 部署池上传失败（将回退到 localStorage）:', e.message)
+  }
+
   if (roomId) {
     try { await commAPI.sendMessage(roomId, { type: 'start', units: selectedIds.value }) } catch (e) {}
   }

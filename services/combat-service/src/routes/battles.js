@@ -186,11 +186,11 @@ router.post('/', authenticate, async (req, res) => {
         battlefield = await mapResponse.json();
       } else {
         console.warn(`[Battles] Map Service 返回 ${mapResponse.status}，使用默认战场`);
-        battlefield = { id: battlefield_id, width: 10, height: 10, terrain: {} };
+        battlefield = { id: battlefield_id, width: 10, height: 10, terrain: {}, terrain_hp: {} };
       }
     } catch (error) {
       console.warn(`[Battles] 无法连接 Map Service: ${error.message}，使用默认战场`);
-      battlefield = { id: battlefield_id, width: 10, height: 10, terrain: {} };
+      battlefield = { id: battlefield_id, width: 10, height: 10, terrain: {}, terrain_hp: {} };
     }
 
     // 如果有room_id，从房间创建战斗
@@ -913,6 +913,65 @@ router.post('/:id/pending-units', authenticate, async (req, res) => {
   }
 });
 
+// ===== 部署池管理 =====
+// GET /:id/deploy-pool - 返回可部署的棋子快照列表
+router.get('/:id/deploy-pool', authenticate, async (req, res) => {
+  try {
+    const state = await getBattleState(req.params.id);
+    if (!state) return res.status(404).json({ error: 'Battle not found' });
+
+    const pool = state.pending_deploy_units
+      ? Object.values(state.pending_deploy_units)
+      : [];
+
+    // 过滤掉已部署的单位
+    const deployedIds = new Set((state.units || []).map(u => u.id));
+    const available = pool.filter(u => !deployedIds.has(u.id));
+
+    res.json({ units: available });
+  } catch (e) {
+    console.error('[deploy-pool] 错误:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /:id/pending-units - 接收准备室传来的棋子完整数据
+router.post('/:id/pending-units', authenticate, async (req, res) => {
+  try {
+    const { units } = req.body;
+    if (!units || !Array.isArray(units)) {
+      return res.status(400).json({ error: 'units array required' });
+    }
+
+    const state = await getBattleState(req.params.id);
+    if (!state) return res.status(404).json({ error: 'Battle not found' });
+
+    state.pending_deploy_units = {};
+    for (const unit of units) {
+      if (unit && unit.id) {
+        state.pending_deploy_units[unit.id] = unit;
+      }
+    }
+
+    // 持久化
+    try {
+      const db = req.app.get('db');
+      await db.execute(
+        'UPDATE battle_sessions SET units_state = $1 WHERE id = $2',
+        [JSON.stringify(state), req.params.id]
+      );
+    } catch (e) {
+      console.warn('[pending-units] 持久化失败（非致命）:', e.message);
+    }
+
+    console.log(`[pending-units] 已存储 ${Object.keys(state.pending_deploy_units).length} 个棋子`);
+    res.json({ ok: true, count: Object.keys(state.pending_deploy_units).length });
+  } catch (e) {
+    console.error('[pending-units] 错误:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.post('/:id/deploy-unit', authenticate, async (req, res) => {
   try {
     // Validate request with Zod
@@ -974,6 +1033,11 @@ router.post('/:id/deploy-unit', authenticate, async (req, res) => {
         console.log('[deploy-unit:DEBUG] converted.mobility:', converted.mobility);
         state.units.push(converted);
 
+        // 从部署池中移除已部署单位
+        if (state.pending_deploy_units && state.pending_deploy_units[unit_id]) {
+          delete state.pending_deploy_units[unit_id];
+        }
+
         // 注入部署格子的地形
         injectTerrain(state, converted);
 
@@ -1024,6 +1088,14 @@ router.post('/:id/end-deployment', authenticate, async (req, res) => {
     
     const state = JSON.parse(battle.units_state || '{}');
     state.phase = 'tactical';
+
+    // P15: 初始化所有单位的技能计数器（助攻/守护/阻碍）
+    try {
+      CombatResolver.init(state.battlefield_state, state.units || []);
+      console.log('[end-deployment] 技能计数器已初始化');
+    } catch (e) {
+      console.warn('[end-deployment] 技能计数器初始化失败:', e.message);
+    }
     
     await db.execute('UPDATE battle_sessions SET units_state = $1, phase = $2 WHERE id = $3', [JSON.stringify(state), state.phase, req.params.id]);
     

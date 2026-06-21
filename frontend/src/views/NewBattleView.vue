@@ -58,6 +58,36 @@
         </div>
         </template>
       </HexGridCanvas>
+      <!-- Phase8: Manual Dice Roll Overlay -->
+      <div v-if="diceRollState.active" class="dice-overlay" @click.self="cancelDiceRoll">
+        <div class="dice-panel">
+          <div class="dice-title">{{ diceRollState.skillName }}</div>
+          <div class="dice-info">{{ diceRollState.diceType }} | Success: {{ diceRollState.successLine }}+</div>
+          <div class="dice-result-area">
+            <div v-if="diceRollState.animationPhase === 'idle'" class="dice-prompt">
+              Click dice or press <kbd>Space</kbd> to roll
+            </div>
+            <div v-else-if="diceRollState.animationPhase === 'rolling'" class="dice-rolling">
+              <span class="dice-number">{{ diceRollState.rollResult }}</span>
+            </div>
+            <div v-else class="dice-result">
+              <div class="dice-number final">{{ diceRollState.rollResult }}</div>
+              <div :class="diceRollState.isSuccess ? 'result-success' : 'result-fail'">
+                {{ diceRollState.isSuccess ? 'SUCCESS' : 'FAIL' }}
+              </div>
+              <div v-if="diceRollState.isSuccess" class="bonus-info">
+                +{{ diceRollState.bonusDamage }} Bonus Damage
+              </div>
+            </div>
+          </div>
+          <div class="dice-actions">
+            <button v-if="diceRollState.animationPhase === 'idle'" class="dice-btn roll" @click="startDiceRoll">Roll Dice</button>
+            <button v-if="diceRollState.animationPhase === 'result'" class="dice-btn confirm" @click="resolveDiceRoll">Confirm Attack</button>
+            <button class="dice-btn cancel" @click="cancelDiceRoll">Cancel</button>
+          </div>
+        </div>
+      </div>
+
 
       <!-- Faction Boxes (bottom) -->
       <div class="faction-boxes">
@@ -266,11 +296,15 @@
                 <span class="sk-durability-label" v-if="group.durability !== undefined">耐久 <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b></span>
               </div>
               <div class="sk-desc" v-if="skill.description">{{ skill.description }}</div>
-              <div class="sk-tags" v-if="skill.guaranteed_hit || skill.crit_boost || skill.pierce || skill.lifesteal">
+              <div class="sk-tags">
                 <span v-if="skill.guaranteed_hit" class="sk-tag tag-hit">必中</span>
                 <span v-if="skill.crit_boost" class="sk-tag tag-crit">暴击</span>
                 <span v-if="skill.pierce" class="sk-tag tag-pierce">穿透</span>
                 <span v-if="skill.lifesteal" class="sk-tag tag-leech">吸血</span>
+                <!-- Phase 11: 万能语法标签 -->
+                <span v-if="getSkillPhase10Tags(skill).length > 0" class="sk-tags-group">
+                  <span v-for="tag in getSkillPhase10Tags(skill)" :key="tag.key" class="sk-tag" :class="tag.cssClass">{{ tag.label }}</span>
+                </span>
               </div>
             </button>
           </template>
@@ -332,7 +366,7 @@
 </template>
 
 <script setup>
-import { ref, inject, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, drawHexPath, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection } from '../utils/hexUtils.js'
 import HexGridCanvas from '../components/HexGridCanvas.vue'
 import { unitSpriteResolver } from '../resolvers/unitSpriteResolver.js'
@@ -365,28 +399,102 @@ function getPassiveSkillDesc(skill) {
   const gs = gc.skills[skill.type]
   if (!gs) return skill.description || ''
 
+  // Phase 11: 构建万能语法信息行
+  const phase10Info = getPhase10SkillInfo(gs)
+  let baseDesc = ''
   switch (skill.type) {
     case 'block':
-      return `被动：受到敌人攻击时伤害-${gs.reduction}`
+      baseDesc = `被动：受到敌人攻击时伤害-${gs.reduction}`
+      break
     case 'execute':
-      return `近战伤害结算后，目标HP<${gs.hp_threshold_percent}%最大HP时直接斩杀`
+      baseDesc = `近战伤害结算后，目标HP<${gs.hp_threshold_percent}%最大HP时直接斩杀`
+      break
     case 'focused_fire':
-      return `放弃移动，获得固定伤害加成+${gs.bonus}`
+      baseDesc = `放弃移动，获得固定伤害加成+${gs.bonus}`
+      break
     case 'throw':
-      return `主动：1~${gs.max_range}格，目标周围${gs.aoe_range}格所有目标下次伤害+${gs.value}`
+      baseDesc = `主动：1~${gs.max_range}格，目标周围${gs.aoe_range}格所有目标下次伤害+${gs.value}`
+      break
     case 'sweep':
-      return `主动：扇形${gs.max_range}格范围攻击，不进行机动值判定。精准命中单体造成伤害${gs.damage_modifier_precise}，范围攻击伤害由所有目标均摊`
+      baseDesc = `主动：扇形${gs.max_range}格范围攻击，不进行机动值判定。精准命中单体造成伤害${gs.damage_modifier_precise}，范围攻击伤害由所有目标均摊`
+      break
     case 'duel':
-      return `双方在攻击范围内且HP<对方${gs.stat_comparison}时触发，攻击力高者胜`
+      baseDesc = `双方在攻击范围内且HP<对方${gs.stat_comparison}时触发，攻击力高者胜`
+      break
     case 'snatch':
-      return `伤害值>被攻击者武器攻击值时触发，伤害减为×${gs.damage_multiplier}并获得武器`
+      baseDesc = `伤害值>被攻击者武器攻击值时触发，伤害减为×${gs.damage_multiplier}并获得武器`
+      break
     case 'lucky':
-      return `获得空投时可再次移动并攻击`
+      baseDesc = `获得空投时可再次移动并攻击`
+      break
     case 'reactivate':
-      return `击杀敌军时触发，额外一回合（不连续触发）`
+      baseDesc = `击杀敌军时触发，额外一回合（不连续触发）`
+      break
     default:
-      return skill.description || ''
+      baseDesc = skill.description || ''
+      break
   }
+  if (phase10Info) baseDesc += ' | ' + phase10Info
+  return baseDesc
+}
+
+/**
+ * Phase 11: 从词条库提取万能语法信息预览
+ * 返回格式化字符串显示 Phase 10 关键字段
+ */
+function getPhase10SkillInfo(gs) {
+  if (!gs) return ''
+  const parts = []
+  if (gs.action_type) parts.push(mapActionType(gs.action_type))
+  if (gs.damage_kind && gs.damage_kind !== 'kinetic') parts.push(mapDamageKind(gs.damage_kind))
+  if (gs.min_cast_range) parts.push(`最小${gs.min_cast_range}格`)
+  if (gs.accuracy_mod) parts.push(`命中${gs.accuracy_mod > 0 ? '+' : ''}${gs.accuracy_mod}`)
+  if (gs.evasion_mod) parts.push(`回避${gs.evasion_mod > 0 ? '+' : ''}${gs.evasion_mod}`)
+  if (gs.height_bonus_per_diff) parts.push(`高地×${gs.height_bonus_per_diff}`)
+  if (gs.is_manual_roll) parts.push('掷骰判定')
+  if (gs.requires_unmoved) parts.push('需未移动')
+  if (gs.requires_stealth) parts.push('需潜行')
+  return parts.join(' · ')
+}
+
+function mapActionType(type) {
+  const map = { attack: '攻击', heal: '治疗', buff: '增益', debuff: '减益', passive: '被动' }
+  return map[type] || type
+}
+
+function mapDamageKind(kind) {
+  const map = { kinetic: '动能', beam: '光束', explosive: '爆炸', corrosive: '腐蚀', thermal: '热熔' }
+  return map[kind] || kind
+}
+
+/**
+ * Phase 11: 生成技能卡片的万能语法标签
+ */
+function getSkillPhase10Tags(skill) {
+  const gc = glossaryConfig.value
+  if (!gc || !gc.skills) return []
+  const gs = gc.skills[skill.type]
+  if (!gs) return []
+  const tags = []
+  if (gs.damage_kind && gs.damage_kind !== 'kinetic') {
+    tags.push({ key: 'dk', label: mapDamageKind(gs.damage_kind), cssClass: 'tag-dkind' })
+  }
+  if (gs.action_type) {
+    tags.push({ key: 'at', label: mapActionType(gs.action_type), cssClass: 'tag-atype' })
+  }
+  if (gs.is_manual_roll) {
+    tags.push({ key: 'mr', label: '掷骰', cssClass: 'tag-dice' })
+  }
+  if (gs.height_bonus_per_diff) {
+    tags.push({ key: 'hb', label: `高地×${gs.height_bonus_per_diff}`, cssClass: 'tag-height' })
+  }
+  if (gs.min_cast_range) {
+    tags.push({ key: 'mcr', label: `≥${gs.min_cast_range}格`, cssClass: 'tag-range' })
+  }
+  if (gs.accuracy_mod) {
+    tags.push({ key: 'am', label: `命中${gs.accuracy_mod > 0 ? '+' : ''}${gs.accuracy_mod}`, cssClass: 'tag-acc' })
+  }
+  return tags
 }
 
 /** 给主动技能按钮动态生成 tooltip */
@@ -397,16 +505,24 @@ function getActiveSkillTooltip(skill) {
   const gs = gc.skills[skill.type]
   if (!gs) return skill.description || ''
 
+  const phase10Info = getPhase10SkillInfo(gs)
+  let base = ''
   switch (skill.type) {
     case 'focused_fire':
-      return `${skill.name}: 放弃移动，固定伤害加成 +${gs.bonus}`
+      base = `${skill.name}: 放弃移动，固定伤害加成 +${gs.bonus}`
+      break
     case 'sweep':
-      return `${skill.name}: 扇形${gs.max_range}格范围，精准伤害${gs.damage_modifier_precise}`
+      base = `${skill.name}: 扇形${gs.max_range}格范围，精准伤害${gs.damage_modifier_precise}`
+      break
     case 'throw':
-      return `${skill.name}: 1~${gs.max_range}格，AOE伤害+${gs.value}`
+      base = `${skill.name}: 1~${gs.max_range}格，AOE伤害+${gs.value}`
+      break
     default:
-      return skill.description || skill.name || ''
+      base = skill.description || skill.name || ''
+      break
   }
+  if (phase10Info) base += '\n' + phase10Info
+  return base
 }
 
 
@@ -525,7 +641,25 @@ const deploying = ref(false)
 // Unit selection & action system
 const selectedUnit = ref(null)
 const actionMode = ref(null)  // 'move' | 'tactical' | 'defend' | 'wait'
-const selectedAttackSkill = ref(null)  // skill selected for tactical action (null = normal attack)
+const selectedAttackSkill = ref(null)
+// Phase8: 手动掷骰拦截状态机
+const diceRollState = reactive({
+  active: false,
+  skillName: '',
+  skillConfig: null,
+  unitId: null,
+  targetId: null,
+  diceType: '1d6',
+  successLine: 4,
+  bonusDamage: 0,
+  animationPhase: 'idle',
+  rollResult: 0,
+  rollAnimTimer: null,
+  isSuccess: false,
+  pendingAttackPayload: null,
+})
+
+const glossarySkills = ref({})  // Phase8: 词条库技能配置缓存  // skill selected for tactical action (null = normal attack)
 const royroyDeployMode = ref(false)  // RoyRoy hex-click deployment mode
 const sidebarActionLog = inject('sidebarActionLog')
 
@@ -755,7 +889,25 @@ const battlefieldSize = computed(() => `${gridWidth.value}×${gridHeight.value}`
 
 async function loadDeployPool() {
   try {
-    const res = await hangarAPI.getUnits()
+      // 优先尝试后端部署池 API
+  try {
+    const token = localStorage.getItem('token')
+    const headers = token ? { 'Authorization': `Bearer ${token}` } : {}
+    const poolRes = await fetch(`/api/combat/${route.params.id}/deploy-pool`, { headers })
+    if (poolRes.ok) {
+      const poolData = await poolRes.json()
+      if (poolData.units && poolData.units.length > 0) {
+        deployPool.value = poolData.units
+        console.log('[loadDeployPool] 后端部署池返回棋子数:', deployPool.value.length)
+        return
+      }
+    }
+  } catch (e) {
+    console.warn('[loadDeployPool] 部署池API不可用，回退到 hangar API:', e.message || e)
+  }
+
+  // Fallback:
+  const res = await hangarAPI.getUnits()
     const allUnits = res.data?.units || res.data || []
     // Filter by units selected in preparation room
     try {
@@ -998,6 +1150,28 @@ function drawBattleScene(ctx, { hlQ = -1, hlR = -1 }) {
         drawHexPath(ctx, cx, cy)
         ctx.fill()
         ctx.strokeStyle = 'rgba(0,180,220,0.4)'
+        ctx.lineWidth = 2
+        drawHexPath(ctx, cx, cy)
+        ctx.stroke()
+      }
+
+      // Attack range highlight
+      if (attackRangeHexes.has(`${q},${r}`)) {
+        ctx.fillStyle = 'rgba(255,77,77,0.1)'
+        drawHexPath(ctx, cx, cy)
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,77,77,0.3)'
+        ctx.lineWidth = 2
+        drawHexPath(ctx, cx, cy)
+        ctx.stroke()
+      }
+
+      // Skill range highlight
+      if (skillRangeHexes.has(`${q},${r}`)) {
+        ctx.fillStyle = 'rgba(255,176,0,0.12)'
+        drawHexPath(ctx, cx, cy)
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,176,0,0.35)'
         ctx.lineWidth = 2
         drawHexPath(ctx, cx, cy)
         ctx.stroke()
@@ -1542,7 +1716,7 @@ function deployRoyroyAt(q, r) {
   const unit = selectedUnit.value
   combatAPI.action(route.params.id, {
     actionType: 'deploy_royroy',
-    params: { unit_id: String(unit.id), q, r }
+    params: { unit_id: String(unit.id), q, r, unit_data: unit }
   }).then(() => {
     addLog('deploy', `${unit.name} 部署 RoyRoy → ${formatCoord(q, r)}`)
     cancelAction()
@@ -1700,16 +1874,133 @@ async function executeAttack(target) {
   }
 }
 
+
+// ===== Phase8: 手动掷骰系统 =====
+function parseDiceType(diceStr) {
+  const m = String(diceStr || '1d6').match(/^(\d+)d(\d+)$/i)
+  return m ? { count: parseInt(m[1]), sides: parseInt(m[2]) } : { count: 1, sides: 6 }
+}
+
+function rollDice(diceStr) {
+  const { count, sides } = parseDiceType(diceStr)
+  let t = 0
+  for (let i = 0; i < count; i++) t += Math.floor(Math.random() * sides) + 1
+  return t
+}
+
+function maybeInterceptManualRoll(target, skill) {
+  const cfg = glossarySkills.value || {}
+  let skillCfg = null
+  for (const [k, v] of Object.entries(cfg)) {
+    if (v.label === skill.name || v.label === skill.label) { skillCfg = v; break }
+  }
+  if (!skillCfg || !skillCfg.is_manual_roll) return false
+  
+  diceRollState.active = true
+  diceRollState.skillName = skillCfg.label || skill.name
+  diceRollState.skillConfig = skillCfg
+  diceRollState.unitId = selectedUnit.value?.id
+  diceRollState.targetId = target.id
+  diceRollState.diceType = skillCfg.dice_type || '1d6'
+  diceRollState.successLine = skillCfg.success_line ?? 4
+  diceRollState.bonusDamage = skillCfg.success_bonus_damage ?? 0
+  diceRollState.animationPhase = 'idle'
+  diceRollState.rollResult = 0
+  diceRollState.isSuccess = false
+  diceRollState.pendingAttackPayload = { target, skill }
+  addLog('dice', `[掷骰拦截] ${skillCfg.label || skill.name} 需要手动摇骰！点击骰子或按空格`)
+  hexGrid.value?.redraw()
+  return true
+}
+
+function startDiceRoll() {
+  if (diceRollState.animationPhase !== 'idle') return
+  diceRollState.animationPhase = 'rolling'
+  let tick = 0
+  diceRollState.rollAnimTimer = setInterval(() => {
+    diceRollState.rollResult = rollDice(diceRollState.diceType)
+    tick++
+    if (tick >= 10) {
+      clearInterval(diceRollState.rollAnimTimer)
+      diceRollState.rollResult = rollDice(diceRollState.diceType)
+      diceRollState.isSuccess = diceRollState.rollResult >= diceRollState.successLine
+      diceRollState.animationPhase = 'result'
+      addLog('dice', `结果: ${diceRollState.rollResult} [${diceRollState.isSuccess ? 'SUCCESS' : 'FAIL'}] 成功线${diceRollState.successLine}`)
+    }
+  }, 50)
+}
+
+async function resolveDiceRoll() {
+  if (diceRollState.animationPhase === 'idle') { startDiceRoll(); return }
+  if (diceRollState.animationPhase === 'rolling') {
+    clearInterval(diceRollState.rollAnimTimer)
+    diceRollState.rollResult = rollDice(diceRollState.diceType)
+    diceRollState.isSuccess = diceRollState.rollResult >= diceRollState.successLine
+    diceRollState.animationPhase = 'result'
+    return
+  }
+  const { pendingAttackPayload, isSuccess, bonusDamage } = diceRollState
+  if (!pendingAttackPayload) return
+  const payload = {
+    attacker_id: String(selectedUnit.value?.id),
+    target_id: String(pendingAttackPayload.target.id),
+    attack_type: 'skill',
+    _dice_result: {
+      roll: diceRollState.rollResult,
+      dice_type: diceRollState.diceType,
+      success_line: diceRollState.successLine,
+      is_success: isSuccess,
+      bonus_damage: isSuccess ? bonusDamage : 0,
+    }
+  }
+  if (pendingAttackPayload.skill.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pendingAttackPayload.skill.id)) {
+    payload.skill_id = pendingAttackPayload.skill.id
+  }
+  try {
+    const result = await combatAPI.attack(route.params.id, payload)
+    const dmg = result.data?.combat_result?.final_damage ?? result.data?.combat_result?.damage ?? result.data?.damage ?? '?'
+    if (isSuccess) {
+      addLog('attack', `${selectedUnit.value?.name} [${diceRollState.skillName}] SUCCESS! 掷${diceRollState.rollResult}>=${diceRollState.successLine}, +${bonusDamage}加成 -> 伤害${dmg}`)
+    } else {
+      addLog('attack', `${selectedUnit.value?.name} [${diceRollState.skillName}] 掷${diceRollState.rollResult}<${diceRollState.successLine} -> 伤害${dmg}`)
+    }
+  } catch (e) {
+    addLog('error', `技能攻击失败: ${e.response?.data?.error || e.message}`)
+  }
+  diceRollState.active = false
+  diceRollState.animationPhase = 'idle'
+  diceRollState.pendingAttackPayload = null
+  actionMode.value = null
+  selectedAttackSkill.value = null
+  await refreshState()
+}
+
+function cancelDiceRoll() {
+  if (diceRollState.rollAnimTimer) clearInterval(diceRollState.rollAnimTimer)
+  diceRollState.active = false
+  diceRollState.animationPhase = 'idle'
+  diceRollState.pendingAttackPayload = null
+  hexGrid.value?.redraw()
+}
+
+async function loadGlossaryConfigForDice() {
+  try {
+    const res = await glossaryAPI.getConfig()
+    if (res.data?.skills) glossarySkills.value = res.data.skills
+  } catch (e) { /* silent */ }
+}
+
 async function executeSkillAttack(target, skill) {
   if (!selectedUnit.value) return
   const attacker = selectedUnit.value
+  // Phase8: 手动掷骰拦截
+  if (maybeInterceptManualRoll(target, skill)) return
   try {
     const attackPayload = {
       attacker_id: String(attacker.id),
       target_id: String(target.id),
       attack_type: 'skill',
     }
-    // Only include skill_id if it is a valid UUID (equipment-generated skills have non-UUID ids)
     if (skill.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(skill.id)) {
       attackPayload.skill_id = skill.id
     }
@@ -1790,7 +2081,7 @@ async function deployToHex(q, r) {
   deploying.value = true
   const unit = selectedDeployUnit.value
   try {
-    await combatAPI.deployUnit(route.params.id, { unit_id: String(unit.id), q, r })
+    await combatAPI.deployUnit(route.params.id, { unit_id: String(unit.id), q, r, unit_data: unit })
     addLog('deploy', `${unit.name} 部署到 ${formatCoord(q, r)}`)
     selectedDeployUnit.value = null
     await refreshState()
@@ -1817,8 +2108,10 @@ async function finishDeployment() {
 
 // ===== Init =====
 onMounted(async () => {
+    document.addEventListener('keydown', onDiceKeyDown)
     // 加载 3D 视角配置 (静默拉取，战场端不提供 UI 调节)
     loadViewConfig().catch(() => {})
+  loadGlossaryConfigForDice().catch(() => {})
   try {
     const { data } = await combatAPI.getBattleState(route.params.id)
     battleState.value = data.battle || data
@@ -1883,6 +2176,21 @@ onMounted(async () => {
 watch(() => battleState.value?.faction_turn, (val) => {
   if (val) phaseText.value = `行动中: ${getFactionLabel(val)}`
 })
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onDiceKeyDown)
+})
+
+// Phase8: 空格掷骰 / ESC取消
+function onDiceKeyDown(e) {
+  if (!diceRollState.active) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    if (diceRollState.animationPhase === 'idle') startDiceRoll()
+    else if (diceRollState.animationPhase === 'result') resolveDiceRoll()
+  }
+  if (e.code === 'Escape') cancelDiceRoll()
+}
 </script>
 
 <style scoped>
@@ -2843,4 +3151,53 @@ watch(() => battleState.value?.faction_turn, (val) => {
   font-size: 9px;
   color: rgba(0,180,220,0.6);
 }
+
+/* Phase8: Dice Roll Overlay */
+.dice-overlay {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.75); z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.dice-panel {
+  background: linear-gradient(135deg, #0a1628, #001620);
+  border: 2px solid #ffb000; border-radius: 8px;
+  padding: 32px 40px; min-width: 340px; text-align: center;
+  box-shadow: 0 0 40px rgba(255,176,0,0.15);
+}
+.dice-title { font-size: 18px; font-weight: 700; color: #ffb000; letter-spacing: 2px; margin-bottom: 8px; }
+.dice-info { font-size: 11px; color: rgba(193,232,255,0.5); margin-bottom: 24px; }
+.dice-result-area { min-height: 80px; margin-bottom: 20px; }
+.dice-prompt { font-size: 13px; color: rgba(193,232,255,0.4); }
+.dice-prompt kbd { background: rgba(255,176,0,0.15); border: 1px solid rgba(255,176,0,0.3); padding: 2px 8px; border-radius: 3px; color: #ffb000; font-family: inherit; }
+.dice-number { font-size: 48px; font-weight: 700; color: #ffd597; }
+.dice-number.final { animation: dicePop 0.3s ease-out; }
+@keyframes dicePop { 0% { transform: scale(1.5); opacity: 0.3; } 100% { transform: scale(1); opacity: 1; } }
+.dice-rolling .dice-number { animation: diceShake 0.05s infinite; }
+@keyframes diceShake { 0% { transform: translateX(-3px); } 50% { transform: translateX(3px); } 100% { transform: translateX(-3px); } }
+.result-success { font-size: 24px; font-weight: 900; color: #13ff43; letter-spacing: 4px; animation: dicePop 0.3s ease-out; text-shadow: 0 0 10px rgba(19,255,67,0.5); }
+.result-fail { font-size: 20px; font-weight: 700; color: #ff5252; }
+.bonus-info { font-size: 12px; color: #ffb000; margin-top: 4px; }
+.dice-actions { display: flex; gap: 10px; justify-content: center; }
+.dice-btn {
+  padding: 10px 24px; font-size: 12px; font-weight: 700; letter-spacing: 1px;
+  border: 1px solid rgba(159,142,120,0.3); cursor: pointer; font-family: inherit;
+  transition: all 0.2s;
+}
+.dice-btn.roll { background: rgba(255,176,0,0.15); border-color: #ffb000; color: #ffb000; }
+.dice-btn.roll:hover { background: rgba(255,176,0,0.25); box-shadow: 0 0 10px rgba(255,176,0,0.3); }
+.dice-btn.confirm { background: rgba(19,255,67,0.1); border-color: #13ff43; color: #13ff43; }
+.dice-btn.confirm:hover { background: rgba(19,255,67,0.2); box-shadow: 0 0 10px rgba(19,255,67,0.3); }
+.dice-btn.cancel { background: rgba(0,0,0,0.2); border-color: rgba(159,142,120,0.15); color: rgba(193,232,255,0.4); }
+.dice-btn.cancel:hover { border-color: rgba(255,82,82,0.3); color: #ff5252; }
+
+
+/* Phase 11: 万能语法标签 */
+.sk-tags-group { display: inline-flex; gap: 2px; flex-wrap: wrap; }
+.sk-tag.tag-dkind { background: rgba(255,176,0,0.15); color: #ffb000; }
+.sk-tag.tag-atype { background: rgba(0,180,220,0.15); color: #00b4dc; }
+.sk-tag.tag-dice { background: rgba(156,39,176,0.15); color: #ce93d8; }
+.sk-tag.tag-height { background: rgba(76,175,80,0.15); color: #81c784; }
+.sk-tag.tag-range { background: rgba(255,152,0,0.15); color: #ffb74d; }
+.sk-tag.tag-acc { background: rgba(63,81,181,0.15); color: #7986cb; }
 </style>

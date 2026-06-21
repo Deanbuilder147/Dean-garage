@@ -32,9 +32,7 @@
       <div v-else class="empty-state">
         <svg class="icon icon-xl" viewBox="0 0 24 24" style="color:#ffb000;opacity:0.3"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
         <p>暂无可用的战场地图</p>
-      </div>
-      <footer class="footer"><div class="footer-left"><span>[ 系统稳定 // 12:04:99 ]</span></div><div class="footer-right"><span class="good">同步率: 98.4%</span><span class="muted">坐标: 35.6895 N</span><span class="muted">状态: 最佳</span></div></footer>
-    </main>
+      </div></main>
   
 </template>
 

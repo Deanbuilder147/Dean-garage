@@ -408,11 +408,25 @@ class SkillExecutor {
      * 手动摇骰判定 (Phase 10 状态机接入点)
      * 当前为自动模拟，实际使用时挂起状态机等待玩家前台拍空格
      */
-    evaluateManualRoll(skillCfg) {
+    evaluateManualRoll(skillCfg, externalResult = null) {
         if (!skillCfg || !skillCfg.is_manual_roll) {
             return { manual: false, bonus: 0 };
         }
-        const dice = this._evaluateDice(skillCfg);
+
+        let dice;
+        if (externalResult && externalResult.roll !== undefined) {
+            // Phase 11: 使用外部传入的掷骰结果 (来自 WebSocket 手动摇骰)
+            dice = {
+                roll: externalResult.roll,
+                diceType: externalResult.diceType || skillCfg.dice_type || '1d6',
+                successLine: externalResult.successLine ?? skillCfg.success_line ?? 4,
+                isSuccess: externalResult.isSuccess ?? (externalResult.roll >= (externalResult.successLine ?? skillCfg.success_line ?? 4))
+            };
+        } else {
+            // 回退: 自动模拟掷骰
+            dice = this._evaluateDice(skillCfg);
+        }
+
         const bonus = dice.isSuccess ? (skillCfg.success_bonus_damage ?? 0) : 0;
         return {
             manual: true,

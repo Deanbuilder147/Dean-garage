@@ -125,6 +125,16 @@
             <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('left','结构',-1)">-</button><input type="number" v-model.number="form.left_结构" min="0" max="15"><button @click="adjustStat('left','结构',1)">+</button></div></div>
             <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('left','机动',-1)">-</button><input type="number" v-model.number="form.left_机动" min="0" max="15"><button @click="adjustStat('left','机动',1)">+</button></div></div>
           </div>
+          <div v-if="form.left_type !== 'none'" class="dkm-section">
+            <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
+            <div class="dkm-grid">
+              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.left_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.left_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.left_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.left_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.left_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+            </div>
+          </div>
           <SkillsEditor v-if="form.left_type !== 'none'" title="左手技能" v-model="form.left_skills" :max-slots="getSkillSlots(form.left_type)" />
         </section>
 
@@ -140,6 +150,16 @@
             <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('right','结构',-1)">-</button><input type="number" v-model.number="form.right_结构" min="0" max="15"><button @click="adjustStat('right','结构',1)">+</button></div></div>
             <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('right','机动',-1)">-</button><input type="number" v-model.number="form.right_机动" min="0" max="15"><button @click="adjustStat('right','机动',1)">+</button></div></div>
           </div>
+          <div v-if="form.right_type !== 'none'" class="dkm-section">
+            <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
+            <div class="dkm-grid">
+              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.right_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.right_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.right_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.right_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.right_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+            </div>
+          </div>
           <SkillsEditor v-if="form.right_type !== 'none'" title="右手技能" v-model="form.right_skills" :max-slots="getSkillSlots(form.right_type)" />
         </section>
 
@@ -154,6 +174,16 @@
             <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('extra','射击',-1)">-</button><input type="number" v-model.number="form.extra_射击" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','射击',1)">+</button></div></div>
             <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('extra','结构',-1)">-</button><input type="number" v-model.number="form.extra_结构" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','结构',1)">+</button></div></div>
             <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('extra','机动',-1)">-</button><input type="number" v-model.number="form.extra_机动" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','机动',1)">+</button></div></div>
+          </div>
+          <div v-if="form.extra_type !== 'none'" class="dkm-section">
+            <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
+            <div class="dkm-grid">
+              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.extra_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.extra_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.extra_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.extra_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.extra_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+            </div>
           </div>
           <SkillsEditor v-if="form.extra_type !== 'none'" title="其它技能" v-model="form.extra_skills" :max-slots="getSkillSlots(form.extra_type)" />
           <p v-if="form.extra_type === '载具' && form.extra_机动 < 10" class="hint warning">⚠ 载具机动&lt;10，效果不生效</p>
@@ -473,4 +503,13 @@ onMounted(()=>{ loadUnits() })
 .footer-right { display:flex; gap:28px; letter-spacing:2px; text-transform:uppercase; }
 .footer-right .good { color:rgba(122,236,255,0.8); }
 .footer-right .muted { color:rgba(193,232,255,0.3); }
+
+/* Phase 11: damage_kind_modifiers */
+.dkm-section { margin-top: 6px; padding: 6px 8px; background: rgba(0,0,0,0.15); border: 1px solid rgba(159,142,120,0.1); }
+.dkm-title { font-size: 8px; color: rgba(255,176,0,0.45); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 3px; display: block; }
+.dkm-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.dkm-cell { display: flex; flex-direction: column; align-items: center; }
+.dkm-cell label { font-size: 7px; color: rgba(193,232,255,0.35); }
+.dkm-cell input { width: 44px; padding: 2px 3px; background: rgba(0,0,0,0.3); border: 1px solid rgba(159,142,120,0.12); color: #c1e8ff; font-family: inherit; font-size: 9px; text-align: center; }
+.dkm-cell input:focus { border-color: rgba(255,176,0,0.25); outline: none; }
 </style>

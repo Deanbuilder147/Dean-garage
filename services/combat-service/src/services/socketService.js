@@ -147,6 +147,30 @@ class CombatSocketService {
         });
         break;
         
+      case 'manual_roll_request':
+        // Phase 11: 手动摇骰请求 -> 广播给房间其他玩家
+        console.log(`客户端 ${clientId} 请求手动摇骰:`, data);
+        this.broadcastToBattle(battleId, {
+          type: 'manual_roll_broadcast',
+          clientId,
+          ...data,
+          timestamp: new Date().toISOString()
+        });
+        break;
+
+      case 'manual_roll_response':
+        // Phase 11: 摇骰结果回传 -> 发给请求方
+        console.log(`客户端 ${clientId} 摇骰结果:`, data);
+        if (data.requestClientId) {
+          this.sendToClient(data.requestClientId, {
+            type: 'manual_roll_result',
+            clientId,
+            ...data,
+            timestamp: new Date().toISOString()
+          });
+        }
+        break;
+
       case 'ping':
         this.sendToClient(clientId, {
           type: 'pong',

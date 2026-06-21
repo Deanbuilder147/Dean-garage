@@ -79,19 +79,7 @@
       <span class="dim">战区: 7-B Alpha</span>
     </div>
 
-  </main>
-
-  <footer class="footer">
-    <div class="footer-left">
-      <span>[ 系统稳定 // 12:04:99 ]</span>
-    </div>
-    <div class="footer-right">
-      <span class="good">同步率: 98.4%</span>
-      <span class="muted">坐标: 35.6895 N</span>
-      <span class="muted">状态: 最佳</span>
-    </div>
-  </footer>
-</template>
+  </main></template>
 
 <script setup>
 import { ref, computed } from 'vue'
