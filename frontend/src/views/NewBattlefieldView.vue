@@ -19,6 +19,15 @@
         <button class="btn-save" @click="saveMap" :disabled="saving">{{ saving ? '保存中...' : '保存地图' }}</button>
         <button class="btn-export" @click="exportJSON">📤 导出 JSON</button>
         <button class="btn-export" @click="showTerrainMgr=true;loadTerrainDefinitions()">[ 地形管理 ]</button>
+        <div class="map-load-group">
+          <select v-model="selectedMapFile" @change="onSelectMapFile" class="map-load-select">
+            <option value="">🗺️ 加载旧地图...</option>
+            <option v-for="m in mapFileList" :key="m.filename" :value="m.filename">
+              {{ m.name }} ({{ m.width }}×{{ m.height }})
+            </option>
+          </select>
+          <span v-if="mapLoadStatus" class="map-load-status">{{ mapLoadStatus }}</span>
+        </div>
       </div>
 
       <!-- HexGridCanvas 组件 (mode="edit") -->
@@ -197,6 +206,11 @@ const batchResult = ref('')
 const saving = ref(false)
 const saveStatus = ref('就绪')
 
+// Phase 13: 地图文件列表 & 选中状态
+const mapFileList = ref([])
+const selectedMapFile = ref('')
+const mapLoadStatus = ref('')
+
 // ---- HexGridCanvas 组件引用 ----
 const hexGrid = ref(null)
 
@@ -214,7 +228,7 @@ const gridW = computed(() => battlefield.value?.width || 15)
 const gridH = computed(() => battlefield.value?.height || 10)
 const totalCellCount = computed(() => gridW.value * gridH.value)
 const nonEmptyCellCount = computed(() =>
-  Object.values(terrainMap).filter(v => v && v !== 'moon').length
+  Object.values(terrainMap).filter(v => v && extractTerrainId(v) !== 'moon').length
 )
 
 // ---- 地形调色板 (从全项目唯一真理 UNIVERSAL_TERRAIN_MAP 派生) ----
@@ -305,6 +319,24 @@ const currentTerrainColor = computed(() => {
   return t ? t.color : '#888888'
 })
 
+
+// Phase 13: 地形ID提取 — 兼容旧版字符串和新版结构化对象
+function extractTerrainId(cellValue) {
+  if (!cellValue) return 'moon'
+  if (typeof cellValue === 'string') return cellValue
+  if (typeof cellValue === 'object' && cellValue.terrain_id) return cellValue.terrain_id
+  if (typeof cellValue === 'object' && cellValue.terrain) return cellValue.terrain
+  if (typeof cellValue === 'object' && cellValue.type) return cellValue.type
+  return 'moon'
+}
+
+// Phase 13: 地形名称提取 — 兼容新版结构化对象
+function extractTerrainName(cellValue, terrainTypes) {
+  const tid = extractTerrainId(cellValue)
+  const def = terrainTypes.find(t => t.id === tid)
+  return def ? def.name : tid
+}
+
 function getTerrainColor(id) {
   const def = UNIVERSAL_TERRAIN_MAP[id]
   return def ? def.color : '#888888'
@@ -332,8 +364,9 @@ function editorDrawFn(ctx, { hlQ, hlR }) {
     for (let q = 0; q < gridW.value; q++) {
       const { flatX: cx, flatY: cy } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
 
-      // 地形填充
-      const tid = terrainMap[`${q},${r}`] || 'moon'
+      // 地形填充 (Phase 13: 兼容旧版字符串和新版结构化对象)
+      const rawCell = terrainMap[`${q},${r}`]
+      const tid = extractTerrainId(rawCell)
       const terrainDef = terrainTypes.find(t => t.id === tid) || terrainTypes[0]
       ctx.fillStyle = hexToRGBA(terrainDef.color, 0.35)
       drawHexPath(ctx, cx, cy)
@@ -450,6 +483,79 @@ function navigateTo(path) { router.push(path) }
 //  数据加载 / 保存 / 导出
 // ================================================================
 
+// Phase 13: 从后端拉取地图文件列表
+async function fetchMapFileList() {
+  try {
+    const res = await fetch('/api/map/list')
+    const data = await res.json()
+    mapFileList.value = data.maps || []
+    if (mapFileList.value.length > 0) {
+      addLog('info', `发现 ${mapFileList.value.length} 个已保存的地图文件`)
+    }
+  } catch (e) {
+    console.warn('[MapList] 拉取地图列表失败:', e.message)
+  }
+}
+
+// Phase 13: 选中地图后加载
+async function onSelectMapFile() {
+  const filename = selectedMapFile.value
+  if (!filename) return
+  mapLoadStatus.value = '加载中...'
+  try {
+    const res = await fetch(`/api/map/list?file=${encodeURIComponent(filename)}`)
+    if (!res.ok && res.status === 404) {
+      // 回退: 使用原有 getBattlefields 加载
+      const { data } = await mapAPI.getBattlefields()
+      const maps = data?.battlefields || data?.maps || []
+      const found = maps.find(m => m.filename === filename || m.name === filename.replace('.json', ''))
+      if (found) {
+        await loadMapData(found)
+        mapLoadStatus.value = `✓ 已加载: ${found.name || filename}`
+        setTimeout(() => { mapLoadStatus.value = '' }, 3000)
+        return
+      }
+      mapLoadStatus.value = '✗ 地图未找到'
+      setTimeout(() => { mapLoadStatus.value = '' }, 3000)
+      return
+    }
+    const data = await res.json()
+    if (data.battlefield || data.map) {
+      await loadMapData(data.battlefield || data.map)
+      mapLoadStatus.value = `✓ 已加载: ${(data.battlefield || data.map).name || filename}`
+      setTimeout(() => { mapLoadStatus.value = '' }, 3000)
+    }
+  } catch (e) {
+    mapLoadStatus.value = '✗ 加载失败'
+    console.error('[MapList] 加载地图失败:', e)
+    setTimeout(() => { mapLoadStatus.value = '' }, 3000)
+  }
+}
+
+// Phase 13: 加载地图数据到编辑器
+async function loadMapData(mapData) {
+  battlefield.value = mapData
+  // 清空现有地形
+  Object.keys(terrainMap).forEach(k => delete terrainMap[k])
+  // 加载地形数据
+  const rawTerrain = mapData.terrain || mapData.terrainData
+  if (rawTerrain) {
+    const t = typeof rawTerrain === 'string' ? JSON.parse(rawTerrain) : rawTerrain
+    if (t && typeof t === 'object') {
+      Object.entries(t).forEach(([key, val]) => { terrainMap[key] = val })
+    }
+  }
+  // 恢复 hex 配置
+  if (mapData.hexConfig || mapData.hex_config) {
+    const hc = mapData.hexConfig || mapData.hex_config
+    if (hc.spacingH !== undefined) spacingH.value = hc.spacingH
+    if (hc.spacingV !== undefined) spacingV.value = hc.spacingV
+    if (hc.offsetFactor !== undefined) offsetFactor.value = hc.offsetFactor
+  }
+  hexGrid.value?.redraw()
+  addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && terrainMap[k] !== 'moon').length} 个地形格子)`)
+}
+
 onMounted(async () => {
   const mapId = route.query.id || route.params.id
   let mapData = null
@@ -485,6 +591,8 @@ onMounted(async () => {
     addLog('error', `加载地图失败: ${e.message || e}`)
   }
   await nextTick()
+  // Phase 13: 异步拉取地图文件列表
+  fetchMapFileList().catch(() => {})
   // HexGridCanvas 在 onMounted 中自行初始化 Canvas + 事件绑定
 })
 
@@ -530,7 +638,7 @@ async function saveMap() {
   try {
     const terrainData = {}
     Object.entries(terrainMap).forEach(([key, val]) => {
-      if (val && val !== 'moon') terrainData[key] = val
+      if (val && extractTerrainId(val) !== 'moon') terrainData[key] = val
     })
     await mapAPI.updateBattlefield(battlefield.value.id, {
       terrain: terrainData,
@@ -663,6 +771,37 @@ function exportJSON() {
   font-family: monospace;
 }
 .btn-export:hover { background: rgba(255,176,0,0.3); }
+
+/* Phase 13: 地图加载下拉框 */
+.map-load-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.map-load-select {
+  padding: 5px 10px;
+  background: rgba(0,0,0,0.4);
+  color: #c1e8ff;
+  border: 1px solid rgba(255,176,0,0.3);
+  font-size: 11px;
+  font-family: 'Fira Code', monospace;
+  cursor: pointer;
+  min-width: 200px;
+}
+.map-load-select:hover {
+  border-color: #ffb000;
+}
+.map-load-select option {
+  background: #001620;
+  color: #c1e8ff;
+}
+.map-load-status {
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  color: #ffb000;
+  white-space: nowrap;
+}
 
 .terrain-palette {
   display: flex;

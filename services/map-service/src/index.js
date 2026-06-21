@@ -9,9 +9,67 @@ import rateLimit from 'express-rate-limit';
 
 import { initDatabase } from './database/db.js';
 import config from './config/index.js';
-import battlefieldRoutes from './routes/battlefields.js';
 
 const app = express();
+// Phase 13: 地图列表接口 — 扫描 data 目录返回所有 .json 地图文件
+import fs from 'fs';
+import path from 'path';
+
+app.get('/api/map/list', (req, res) => {
+  try {
+    // Phase 13: 支持 ?file=filename.json 加载具体地图文件
+    const requestedFile = req.query.file;
+    if (requestedFile) {
+      const safeName = path.basename(requestedFile); // 防止路径遍历
+      const filePath = path.join(dataDir, safeName);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: '地图文件不存在', filename: safeName });
+      }
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const data = JSON.parse(raw);
+      return res.json({
+        filename: safeName,
+        battlefield: data.battlefield || data,
+        map: data.battlefield || data,
+        name: data.battlefield?.name || data.name || safeName.replace('.json', ''),
+      });
+    }
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      return res.json({ maps: [] });
+    }
+    const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.json'));
+    const maps = files.map(f => {
+      const filePath = path.join(dataDir, f);
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const data = JSON.parse(raw);
+        return {
+          filename: f,
+          name: data.battlefield?.name || data.name || f.replace('.json', ''),
+          width: data.battlefield?.width || data.width || 15,
+          height: data.battlefield?.height || data.height || 10,
+          terrainCount: data.battlefield?.terrainCount ||
+            (data.battlefield?.terrainData ? Object.keys(data.battlefield.terrainData).length : 0),
+          exportDate: data.exportDate || null,
+        };
+      } catch (parseErr) {
+        return { filename: f, name: f.replace('.json', ''), error: 'parse_failed' };
+      }
+    });
+    maps.sort((a, b) => {
+      if (a.exportDate && b.exportDate) return b.exportDate.localeCompare(a.exportDate);
+      return a.name.localeCompare(b.name);
+    });
+    res.json({ maps });
+  } catch (error) {
+    console.error('[Map List] Error:', error);
+    res.status(500).json({ error: '获取地图列表失败' });
+  }
+});
+
+import battlefieldRoutes from './routes/battlefields.js';
+
 
 // 速率限制配置
 const limiter = rateLimit({

@@ -548,7 +548,6 @@
           <div>原则: {{ editableConfig._meta.principle }}</div>
         </div>
       </section>
-    </div>
   </main>
 
     <!-- Phase 12: AI 技能导入弹窗 -->

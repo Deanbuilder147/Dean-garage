@@ -89,6 +89,20 @@
       </div>
 
 
+      <!-- ===== Phase 13: Faction Panel (Floating Draggable Collapsible) ===== -->
+      <div
+        class="floating-card floating-faction-panel"
+        :class="{ collapsed: factionPanelCollapsed }"
+        :style="{ left: factionPanelPos.left + 'px', top: factionPanelPos.top + 'px' }"
+        ref="factionPanelRef"
+      >
+        <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'factionPanel')">
+          <span class="floating-card-title">🗂️ 阵营单位</span>
+          <button class="floating-card-collapse-btn" @click.stop="toggleFactionPanel" :title="factionPanelCollapsed ? '展开' : '折叠'">
+            {{ factionPanelCollapsed ? '▶' : '◀' }}
+          </button>
+        </div>
+        <div class="floating-card-body" v-show="!factionPanelCollapsed">
       <!-- Faction Boxes (bottom) -->
       <div class="faction-boxes">
         <div v-for="faction in factionGroups" :key="faction.key" class="faction-box" :class="'faction-' + faction.key">
@@ -144,10 +158,26 @@
           </div>
         </div>
       </div>
+        </div><!-- end floating-card-body -->
+      </div><!-- end floating-card -->
     </main>
 
-    <!-- ===== RIGHT: Action Panel ===== -->
-    <aside class="dm-action-panel">
+    <!-- ===== RIGHT: Action Panel (Floating Draggable Collapsible) ===== -->
+    <div
+      class="floating-card floating-action-panel"
+      :class="{ collapsed: actionPanelCollapsed }"
+      :style="{ left: actionPanelPos.left + 'px', top: actionPanelPos.top + 'px' }"
+      ref="actionPanelRef"
+    >
+      <!-- Phase 13: 抓取条 (Drag Bar) -->
+      <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'actionPanel')">
+        <span class="floating-card-title">⚔ 行动面板</span>
+        <button class="floating-card-collapse-btn" @click.stop="toggleActionPanel" :title="actionPanelCollapsed ? '展开' : '折叠'">
+          {{ actionPanelCollapsed ? '▶' : '◀' }}
+        </button>
+      </div>
+      <!-- Phase 13: 卡片内容 (折叠时隐藏) -->
+      <div class="floating-card-body" v-show="!actionPanelCollapsed">
       <!-- Deploy Phase Panel -->
       <template v-if="isDeployPhase">
         <div class="ap-header">
@@ -361,7 +391,8 @@
         <div class="ap-empty-icon">◈</div>
         <div class="ap-empty-text">点击战场上的棋子<br/>查看可用行动</div>
       </div>
-    </aside>
+      </div><!-- end floating-card-body -->
+    </div><!-- end floating-card -->
   </div>
 </template>
 
@@ -373,6 +404,119 @@ import { unitSpriteResolver } from '../resolvers/unitSpriteResolver.js'
 import { useUserStore } from '../stores/user'
 import { useRoute, useRouter } from 'vue-router'
 import { combatAPI, hangarAPI, glossaryAPI } from '@/api/client'
+
+// ================================================================
+//  Phase 13: 地形数据向后兼容转换层 (Sanitizer)
+//  自动将旧版纯文本字符串包装为 Phase 9.5 标准结构化对象
+// ================================================================
+
+/**
+ * 旧版地形到 Phase 9.5 标准的结构化映射表
+ * 格式: terrain_id → { terrain_hp, is_destructible, max_hp, destroyed_transform_to }
+ * 数据源: UNIVERSAL_TERRAIN_MAP + Phase 9.5 战场地形设计文档
+ */
+const TERRAIN_SANITIZER_MAP = {
+  forest:          { terrain_hp: 3, is_destructible: true,  max_hp: 3, destroyed_transform_to: 'plain' },
+  mountain:        { terrain_hp: 5, is_destructible: true,  max_hp: 5, destroyed_transform_to: 'plain' },
+  water:           { terrain_hp: 0, is_destructible: false, max_hp: 0, destroyed_transform_to: 'water' },
+  fortress:        { terrain_hp: 10, is_destructible: true, max_hp: 10, destroyed_transform_to: 'plain' },
+  wall:            { terrain_hp: 20, is_destructible: true, max_hp: 20, destroyed_transform_to: 'plain' },
+  base:            { terrain_hp: 5,  is_destructible: true, max_hp: 5,  destroyed_transform_to: 'plain' },
+  mothership:      { terrain_hp: 15, is_destructible: true, max_hp: 15, destroyed_transform_to: 'plain' },
+  desert:          { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'desert' },
+  lunar:           { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'lunar' },
+  plain:           { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'plain' },
+  moon:            { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'moon' },
+  empty:           { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'empty' },
+  space:           { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'space' },
+  repair_station:  { terrain_hp: 3,  is_destructible: true, max_hp: 3,  destroyed_transform_to: 'plain' },
+  spawn_earth:     { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn_earth' },
+  spawn_maxion:    { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn_maxion' },
+  spawn:           { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn' },
+  lava:            { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'lava' },
+  ruin:            { terrain_hp: 2,  is_destructible: true, max_hp: 2,  destroyed_transform_to: 'plain' },
+  crater:          { terrain_hp: 0,  is_destructible: false, max_hp: 0, destroyed_transform_to: 'crater' },
+}
+
+/**
+ * 地形数据兼容转换: 将旧版纯文本字符串 → Phase 9.5 结构化对象
+ * 
+ * 输入: 可能是 'forest' 字符串, 或已经是 { terrain_id: 'forest', ... } 对象
+ * 输出: 标准化对象 { terrain_id: '...', terrain_hp: N, is_destructible: bool, max_hp: N, destroyed_transform_to: '...' }
+ * 
+ * @param {string|object} cellValue - 单个格子的地形数据
+ * @returns {object} 标准化的地形对象
+ */
+function sanitizeTerrainCell(cellValue) {
+  // 已经是完整的结构化对象 (含 terrain_id 或 terrain_hp 字段)
+  if (cellValue && typeof cellValue === 'object' && !Array.isArray(cellValue)) {
+    if (cellValue.terrain_id || cellValue.terrain_hp !== undefined || cellValue.is_destructible !== undefined) {
+      const tid = cellValue.terrain_id || cellValue.type || cellValue.terrain || 'moon'
+      const mapping = TERRAIN_SANITIZER_MAP[tid] || {}
+      return {
+        terrain_id: tid,
+        terrain_hp: cellValue.terrain_hp ?? mapping.terrain_hp ?? 0,
+        is_destructible: cellValue.is_destructible ?? mapping.is_destructible ?? false,
+        max_hp: cellValue.max_hp ?? cellValue.terrain_hp ?? mapping.max_hp ?? 0,
+        destroyed_transform_to: cellValue.destroyed_transform_to ?? mapping.destroyed_transform_to ?? 'plain',
+      }
+    }
+  }
+
+  // 旧版纯文本字符串格式 (如 "forest", "mountain")
+  if (typeof cellValue === 'string') {
+    const tid = cellValue
+    const mapping = TERRAIN_SANITIZER_MAP[tid]
+    if (mapping) {
+      return {
+        terrain_id: tid,
+        terrain_hp: mapping.terrain_hp,
+        is_destructible: mapping.is_destructible,
+        max_hp: mapping.max_hp,
+        destroyed_transform_to: mapping.destroyed_transform_to,
+      }
+    }
+    // 未知地形类型, 返回默认值
+    return {
+      terrain_id: tid,
+      terrain_hp: 0,
+      is_destructible: false,
+      max_hp: 0,
+      destroyed_transform_to: 'plain',
+    }
+  }
+
+  // 无效或 null/undefined, 返回默认 moon
+  return {
+    terrain_id: 'moon',
+    terrain_hp: 0,
+    is_destructible: false,
+    max_hp: 0,
+    destroyed_transform_to: 'moon',
+  }
+}
+
+/**
+ * 批量清洗 terrainMap: 遍历所有格子，逐个转换
+ * 
+ * @param {object} terrainMap - { "q,r": terrainIdString 或 terrainObject }
+ * @returns {object} 清洗后的 terrainMap
+ */
+function sanitizeTerrainMap(terrainMap) {
+  if (!terrainMap || typeof terrainMap !== 'object') return {}
+  const sanitized = {}
+  let convertedCount = 0
+  Object.entries(terrainMap).forEach(([key, val]) => {
+    const originalType = typeof val
+    sanitized[key] = sanitizeTerrainCell(val)
+    if (originalType === 'string' && val) convertedCount++
+  })
+  if (convertedCount > 0) {
+    console.log(`[TerrainSanitizer] 已转换 ${convertedCount} 个旧版地形字符串 → Phase 9.5 结构化对象`)
+  }
+  return sanitized
+}
+
 
 const route = useRoute()
 const router = useRouter()
@@ -2107,6 +2251,64 @@ async function finishDeployment() {
 }
 
 // ===== Init =====
+
+// Phase 13: 清洗战场端加载的地形数据
+function sanitizeBattlefieldTerrain() {
+  const state = battleState.value
+  if (!state) return
+
+  // 1. 清洗 cells 数组（如果存在）
+  if (state.cells && Array.isArray(state.cells)) {
+    let converted = 0
+    state.cells = state.cells.map(cell => {
+      if (!cell) return cell
+      const origTerrain = cell.terrain
+      if (typeof origTerrain === 'string') {
+        const sanitized = sanitizeTerrainCell(origTerrain)
+        converted++
+        return { ...cell, terrain: sanitized }
+      }
+      // 如果已经是对象但没有 terrain_id, 补充
+      if (typeof origTerrain === 'object' && origTerrain && !origTerrain.terrain_id && origTerrain.terrain_hp === undefined) {
+        // 可能是其他结构, 不做修改
+      }
+      return cell
+    })
+    if (converted > 0) {
+      addLog('system', `[兼容] 已清洗 ${converted} 个旧版地形格子数据`)
+      console.log(`[TerrainSanitizer] 已清洗 battlefield cells: ${converted} 个`)
+    }
+  }
+
+  // 2. 清洗 terrain 对象（如果存在）
+  if (state.terrain && typeof state.terrain === 'object') {
+    let rawTerrain = typeof state.terrain === 'string' ? JSON.parse(state.terrain) : state.terrain
+    // 检查是否有旧版字符串值
+    const hasOldFormat = Object.values(rawTerrain).some(v => typeof v === 'string')
+    if (hasOldFormat) {
+      let converted = 0
+      Object.entries(rawTerrain).forEach(([key, val]) => {
+        if (typeof val === 'string') {
+          rawTerrain[key] = sanitizeTerrainCell(val)
+          converted++
+        }
+      })
+      state.terrain = rawTerrain
+      addLog('system', `[兼容] 已清洗地形 map: ${converted} 个`)
+      console.log(`[TerrainSanitizer] 已清洗 battlefield terrain: ${converted} 个`)
+    }
+  }
+
+  // 3. 同步清洗后的数据到本地 terrainMap (供 drawBattleScene 使用)
+  if (state.terrain && typeof state.terrain === 'object') {
+    const t = typeof state.terrain === 'string' ? JSON.parse(state.terrain) : state.terrain
+    Object.keys(terrainMap).forEach(k => delete terrainMap[k])
+    Object.entries(t).forEach(([key, val]) => {
+      terrainMap[key] = val
+    })
+  }
+}
+
 onMounted(async () => {
     document.addEventListener('keydown', onDiceKeyDown)
     // 加载 3D 视角配置 (静默拉取，战场端不提供 UI 调节)
@@ -2167,6 +2369,11 @@ onMounted(async () => {
     addLog('system', battleState.value ? ('进入战场: ' + (battleState.value.map_name || '已创建')) : '进入离线部署模式')
   }
 
+    // Phase 13: 旧地图地形向后兼容清洗
+  sanitizeBattlefieldTerrain()
+  initFloatingCardPositions()
+  window.addEventListener('resize', initFloatingCardPositions)
+
   // Canvas 初始化已迁移至 HexGridCanvas 组件内部
   // initCanvas()
   // 事件处理已迁移至 HexGridCanvas 组件 (hex-click/hex-hover emit)
@@ -2179,6 +2386,9 @@ watch(() => battleState.value?.faction_turn, (val) => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onDiceKeyDown)
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  window.removeEventListener('resize', initFloatingCardPositions)
 })
 
 // Phase8: 空格掷骰 / ESC取消
@@ -2400,12 +2610,10 @@ function onDiceKeyDown(e) {
 .faction-boxes {
   display: flex;
   gap: 12px;
-  padding: 10px 0 12px;
+  padding: 6px 0;
   flex-shrink: 0;
   overflow-x: auto;
-  min-height: 140px;
-  border-top: 1px solid rgba(255,176,0,0.12);
-  margin-top: 6px;
+  min-height: 100px;
 }
 
 .faction-boxes::-webkit-scrollbar {
@@ -2587,25 +2795,110 @@ function onDiceKeyDown(e) {
   width: 100%;
 }
 
-/* ===== RIGHT ACTION PANEL ===== */
+/* ===== Phase 13: FLOATING CARD OVERRIDE (replaces old dm-action-panel) ===== */
+/* 老版 dm-action-panel 被悬浮卡片替代，保留样式仅作回退引用 */
 .dm-action-panel {
-  flex-shrink: 0;
-  width: 200px;
-  min-width: 200px;
-  background: rgba(8,51,68,0.95);
-  border-left: 1px solid rgba(255,176,0,0.1);
-  display: flex;
-  flex-direction: column;
-  padding: 16px 10px;
-  gap: 12px;
-  overflow-y: auto;
-  min-height: 0;
-  max-height: 100vh;
-  transition: all 0.3s;
+  display: none !important; /* 已被 floating-card 替代 */
 }
 
-.dm-action-panel.hidden {
-  opacity: 0.4;
+/* ===== Phase 13: Floating Card System ===== */
+.floating-card {
+  position: fixed;
+  z-index: 100;
+  background: rgba(8,51,68,0.96);
+  border: 1px solid rgba(255,176,0,0.25);
+  border-radius: 6px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 60px rgba(255,176,0,0.05);
+  transition: height 0.3s ease, border-color 0.2s;
+  min-width: 200px;
+  max-width: 420px;
+  user-select: none;
+  overflow: hidden;
+}
+
+.floating-card:hover {
+  border-color: rgba(255,176,0,0.4);
+}
+
+.floating-card.collapsed {
+  min-width: auto;
+  width: auto !important;
+}
+
+.floating-card-dragbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.3);
+  border-bottom: 1px solid rgba(255,176,0,0.12);
+  cursor: grab;
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  letter-spacing: 1px;
+}
+
+.floating-card-dragbar:active {
+  cursor: grabbing;
+}
+
+.floating-card-title {
+  color: #ffb000;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.floating-card-collapse-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #9f8e78;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.floating-card-collapse-btn:hover {
+  background: rgba(255,176,0,0.15);
+  color: #ffb000;
+  border-color: rgba(255,176,0,0.3);
+}
+
+.floating-card-body {
+  overflow-y: auto;
+  max-height: 70vh;
+  transition: max-height 0.3s ease, opacity 0.2s;
+  padding: 0;
+}
+
+/* 行动面板特定样式 */
+.floating-action-panel {
+  width: 220px;
+}
+
+.floating-action-panel .floating-card-body {
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 阵营面板特定样式 */
+.floating-faction-panel {
+  width: auto;
+  max-width: 95vw;
+}
+
+.floating-faction-panel .floating-card-body {
+  padding: 8px;
+  max-height: 50vh;
 }
 
 .ap-empty {

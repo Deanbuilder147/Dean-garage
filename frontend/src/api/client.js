@@ -59,7 +59,10 @@ export const mapAPI = {
   getBattlefield: (id) => apiClient.get(`/map/battlefields/${id}`),
   createBattlefield: (data) => apiClient.post('/map/battlefields', data),
   updateBattlefield: (id, data) => apiClient.put(`/map/battlefields/${id}`, data),
-  deleteBattlefield: (id) => apiClient.delete(`/map/battlefields/${id}`)
+  deleteBattlefield: (id) => apiClient.delete(`/map/battlefields/${id}`),
+  // Phase 13: 地图文件列表
+  getMapList: () => apiClient.get('/map/list'),
+  getMapFile: (filename) => apiClient.get(`/map/list?file=${encodeURIComponent(filename)}`)
 };
 
 export const combatAPI = {
