@@ -9,6 +9,7 @@
         <p>[ {{ user?.username || '指挥官' }} ]</p>
         <p>军衔: {{ userRank }}</p>
       </div>
+      <button class="logout-btn" @click="handleLogout" title="退出登录">↩ 退出</button>
     </div>
 
     <nav class="nav">
@@ -61,12 +62,14 @@
 <script setup>
 import { ref, computed, inject, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
 import AppSidebar from './AppSidebar.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
+const router = useRouter()
 const sidebarCollapsed = ref(false)
 const logContainer = ref(null)
 
@@ -85,6 +88,14 @@ watch(sidebarActionLog, () => {
     if (logContainer.value) logContainer.value.scrollTop = 0
   })
 }, { deep: true })
+
+function handleLogout() {
+  // 清除所有本地鉴权数据
+  localStorage.clear()
+  userStore.clearUser()
+  // 重定向回登录页
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -252,5 +263,25 @@ watch(sidebarActionLog, () => {
   font-size: 10px;
   text-align: center;
   padding: 20px 0;
+}
+
+.logout-btn {
+  margin-top: 6px;
+  padding: 4px 10px;
+  background: rgba(255,77,77,0.08);
+  border: 1px solid rgba(255,77,77,0.2);
+  color: rgba(255,77,77,0.7);
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  font-family: inherit;
+  letter-spacing: 1px;
+}
+
+.logout-btn:hover {
+  background: rgba(255,77,77,0.2);
+  color: #ff6b6b;
+  border-color: rgba(255,77,77,0.4);
 }
 </style>

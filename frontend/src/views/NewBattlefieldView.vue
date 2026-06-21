@@ -19,6 +19,7 @@
         <button class="btn-save" @click="saveMap" :disabled="saving">{{ saving ? '保存中...' : '保存地图' }}</button>
         <button class="btn-export" @click="exportJSON">📤 导出 JSON</button>
         <button class="btn-export" @click="showTerrainMgr=true;loadTerrainDefinitions()">[ 地形管理 ]</button>
+        <button class="btn-export" @click="showNewMapModal = true">[ 新建地图 ]</button>
         <div class="map-load-group">
           <select v-model="selectedMapFile" @change="onSelectMapFile" class="map-load-select">
             <option value="">🗺️ 加载旧地图...</option>
@@ -129,6 +130,38 @@
       </div>
     </main></div>
 
+
+    <!-- Phase 13.5: 新建地图弹窗 -->
+    <div v-if="showNewMapModal" class="terrain-mgr-overlay" @click.self="showNewMapModal=false">
+      <div class="terrain-mgr-panel" style="max-width: 420px;">
+        <div class="terrain-mgr-header">
+          <span>[ 新建地图 ]</span>
+          <button class="tm-close" @click="showNewMapModal=false">✕</button>
+        </div>
+        <div class="terrain-mgr-body" style="display:flex;flex-direction:column;gap:16px;padding:20px;">
+          <div style="display:flex;gap:20px;align-items:center;">
+            <div style="flex:1;">
+              <label style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">宽度 (列) · 10–200</label>
+              <input v-model.number="newMapWidth" type="number" min="10" max="200"
+                style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
+            </div>
+            <span style="color:rgba(255,176,0,0.4);font-size:18px;margin-top:20px;">×</span>
+            <div style="flex:1;">
+              <label style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">高度 (行) · 10–200</label>
+              <input v-model.number="newMapHeight" type="number" min="10" max="200"
+                style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
+            </div>
+          </div>
+          <div style="color:rgba(241,243,252,0.4);font-size:10px;text-align:center;">
+            总计 {{ newMapWidth * newMapHeight }} 格 · 最小 100 格 · 最大 40,000 格
+          </div>
+          <div v-if="newMapError" style="color:#ff4d4d;font-size:11px;text-align:center;">{{ newMapError }}</div>
+        </div>
+        <div class="terrain-mgr-footer">
+          <button class="btn-save" @click="createNewMap" style="width:100%;">确认创建</button>
+        </div>
+      </div>
+    </div>
     <!-- Phase9: 自定义地形管理弹窗 -->
     <div v-if="showTerrainMgr" class="terrain-mgr-overlay" @click.self="showTerrainMgr=false">
       <div class="terrain-mgr-panel">
@@ -210,6 +243,11 @@ const saveStatus = ref('就绪')
 const mapFileList = ref([])
 const selectedMapFile = ref('')
 const mapLoadStatus = ref('')
+// Phase 13.5: 新建地图弹窗状态
+const showNewMapModal = ref(false)
+const newMapWidth = ref(15)
+const newMapHeight = ref(10)
+const newMapError = ref('')
 
 // ---- HexGridCanvas 组件引用 ----
 const hexGrid = ref(null)
@@ -631,6 +669,45 @@ async function saveViewConfig() {
   }
 }
 
+
+// Phase 13.5: 根据输入的 width/height 创建新地图
+function createNewMap() {
+  newMapError.value = ''
+  const w = newMapWidth.value
+  const h = newMapHeight.value
+
+  // 刚性约束
+  if (w < 10 || w > 200 || h < 10 || h > 200) {
+    newMapError.value = '尺寸必须在 10–200 范围内'
+    return
+  }
+  if (!Number.isInteger(w) || !Number.isInteger(h)) {
+    newMapError.value = '尺寸必须为整数'
+    return
+  }
+
+  // 清空旧地形
+  Object.keys(terrainMap).forEach(k => delete terrainMap[k])
+
+  // 动态设置 battlefield 的 width/height
+  battlefield.value = {
+    id: null,
+    name: `新战场 ${w}x${h}`,
+    width: w,
+    height: h,
+    terrainData: {},
+  }
+
+  showNewMapModal.value = false
+  saveStatus.value = `已创建 ${w}×${h} 地图`
+
+  // 触发 HexGridCanvas 重绘 + 滑槽边界重算
+  nextTick(() => {
+    hexGrid.value?.redraw()
+  })
+
+  addLog('system', `新建地图: ${w}×${h} (${w * h} 格)`)
+}
 async function saveMap() {
   if (!battlefield.value) return
   saving.value = true

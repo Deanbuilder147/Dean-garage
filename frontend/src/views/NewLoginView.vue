@@ -92,8 +92,10 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { authAPI } from '@/api/client'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const mode = ref('login')
 const loading = ref(false)
 const error = ref('')
@@ -114,6 +116,10 @@ async function handleLogin() {
       password: loginForm.value.password
     })
     localStorage.setItem('token', data.token)
+    if (data.user) {
+      localStorage.setItem('user', JSON.stringify(data.user))
+      userStore.setUser(data.user)
+    }
     router.push('/home')
   } catch (e) {
     error.value = e.response?.data?.message || '凭据验证失败，请重试'
