@@ -3,12 +3,6 @@
     <div class="canvas-container" ref="canvasContainer">
       <canvas ref="mapCanvas"></canvas>
     </div>
-    <!-- Phase13: 双轴平移滑槽 (防飞图) -->
-    <div class="slider-panel" @mousedown.stop @click.stop>
-      <input type="range" class="slider-track slider-h" min="0" max="100" :value="hSlider" @input="onHSlider" title="水平平移 X">
-      <span class="slider-divider">|</span>
-      <input type="range" class="slider-track slider-v" min="0" max="100" :value="vSlider" @input="onVSlider" title="垂直平移 Y">
-    </div>
     <div class="cursor-hint" v-if="hoverCoord">{{ hoverCoord }}</div>
     <slot name="overlay" />
   </div>
@@ -69,10 +63,6 @@ const mapCanvas = ref(null)
 const scale = ref(1)
 const offsetX = ref(60)
 const offsetY = ref(60)
-const hSlider = ref(50)       // 水平滑槽 0-100
-const vSlider = ref(50)       // 垂直滑槽 0-100
-let _sliderSyncing = false    // 防止滑槽→offset→滑槽 死循环
-
 const hoverCoord = ref('')
 // ISO 矩阵参数 — 使用 reactive 以支持父层通过 props 动态调节 3D 视角
 const ISO = reactive({ ...ISO_DEFAULTS })
@@ -254,66 +244,6 @@ function centerGrid() {
 //  Canvas 初始化
 // ================================================================
 
-// ================================================================
-//  Phase13: 滑槽边界算力对账 & 双向同步
-// ================================================================
-
-/** 计算等距变换后的棋盘世界尺寸 */
-function getGridDims() {
-  const lastCol = hexToPixel(props.gridWidth - 1, 0)
-  const lastRow = hexToPixel(0, props.gridHeight - 1)
-  const worldW = lastCol.x + HEX_RADIUS * 2
-  const worldH = lastRow.y + HEX_RADIUS * 2
-  const gridW = worldW * ISO.scaleX + worldH * Math.abs(ISO.shearX)
-  const gridH = worldH * ISO.scaleY
-  return { gridW, gridH }
-}
-
-/** 计算滑槽动态 min/max 范围 */
-function getSliderRange() {
-  const canvas = mapCanvas.value
-  if (!canvas) return { minX: -500, maxX: 500, minY: -500, maxY: 500 }
-  const { gridW, gridH } = getGridDims()
-  const scaledW = gridW * scale.value
-  const scaledH = gridH * scale.value
-  const cw = canvas.width
-  const ch = canvas.height
-  return {
-    minX: -scaledW + cw * 0.2,
-    maxX: cw * 0.8,
-    minY: -scaledH + ch * 0.2,
-    maxY: ch * 0.8,
-  }
-}
-
-/** offset → 滑槽 % 逆向同步 (鼠标拖拽/缩放/重置后调用) */
-function syncSlidersFromOffset() {
-  if (_sliderSyncing) return
-  const { minX, maxX, minY, maxY } = getSliderRange()
-  if (maxX > minX) hSlider.value = Math.round(((offsetX.value - minX) / (maxX - minX)) * 100)
-  if (maxY > minY) vSlider.value = Math.round(((offsetY.value - minY) / (maxY - minY)) * 100)
-}
-
-/** 水平滑槽 → offsetX */
-function onHSlider(e) {
-  const val = parseFloat(e.target.value)
-  const { minX, maxX } = getSliderRange()
-  _sliderSyncing = true
-  offsetX.value = minX + (maxX - minX) * (val / 100)
-  draw()
-  _sliderSyncing = false
-}
-
-/** 垂直滑槽 → offsetY */
-function onVSlider(e) {
-  const val = parseFloat(e.target.value)
-  const { minY, maxY } = getSliderRange()
-  _sliderSyncing = true
-  offsetY.value = minY + (maxY - minY) * (val / 100)
-  draw()
-  _sliderSyncing = false
-}
-
 function initCanvas() {
   const canvas = mapCanvas.value
   const container = canvasContainer.value
@@ -379,7 +309,6 @@ function draw() {
   }
 
   ctx.restore()
-  syncSlidersFromOffset()   // Phase13: 同步滑槽游标
 }
 
 // ================================================================
@@ -688,79 +617,5 @@ defineExpose({
   pointer-events: none;
   user-select: none;
   z-index: 10;
-}
-
-/* ===== Phase13: 双轴平移滑槽 ===== */
-.slider-panel {
-  position: absolute;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  background: rgba(6, 18, 24, 0.82);
-  border: 1px solid rgba(255, 176, 0, 0.18);
-  border-radius: 6px;
-  padding: 3px 10px;
-  backdrop-filter: blur(4px);
-}
-
-.slider-panel:hover {
-  border-color: rgba(255, 176, 0, 0.35);
-}
-
-.slider-track {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 3px;
-  background: rgba(255, 176, 0, 0.12);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.slider-h { width: 140px; }
-.slider-v { width: 100px; }
-
-.slider-track:hover {
-  background: rgba(255, 176, 0, 0.22);
-}
-
-.slider-track::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: #ffb000;
-  border: 1.5px solid #0d1f2d;
-  cursor: grab;
-  box-shadow: 0 0 5px rgba(255, 176, 0, 0.35);
-  transition: box-shadow 0.15s;
-}
-
-.slider-track::-moz-range-thumb {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: #ffb000;
-  border: 1.5px solid #0d1f2d;
-  cursor: grab;
-  box-shadow: 0 0 5px rgba(255, 176, 0, 0.35);
-}
-
-.slider-track::-webkit-slider-thumb:active {
-  cursor: grabbing;
-  box-shadow: 0 0 10px rgba(255, 176, 0, 0.65);
-}
-
-.slider-divider {
-  color: rgba(255, 176, 0, 0.25);
-  font-size: 10px;
-  margin: 0 4px;
-  user-select: none;
 }
 </style>
