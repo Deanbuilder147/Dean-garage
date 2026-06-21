@@ -12,6 +12,9 @@ import { getGlossaryConfig, saveGlossaryConfig, deleteSkills } from '../services
 
 const router = express.Router();
 
+// Phase 12: 手动摇骰挂起的回合数据
+const pendingManualTurns = new Map();
+
 // JWT 配置（与 auth-service 保持一致）
 // 环境变量必须设置，无 fallback（安全要求）
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -441,6 +444,44 @@ router.post('/:id/attack', authenticate, async (req, res) => {
     
     // 注入防御方地形
     injectTerrain(state, target);
+
+    // Phase 12: 检测手动摇骰技能
+    let pendingRoll = false;
+    let pendingDiceType = '1d6';
+    let pendingSuccessLine = 4;
+    if (skill_id) {
+        const glossary = getGlossaryConfig();
+        const skillDef = glossary?.skills?.[skill_id];
+        if (skillDef && skillDef.is_manual_roll) {
+            pendingRoll = true;
+            pendingDiceType = skillDef.dice_type || '1d6';
+            pendingSuccessLine = skillDef.success_line ?? 4;
+        }
+    }
+
+    // Phase 12: 手动摇骰 → 挂起并等待客户端结果
+    if (pendingRoll) {
+        const turnId = `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        pendingManualTurns.set(turnId, {
+            battleId: req.params.id,
+            attacker,
+            target,
+            attack_type,
+            skill_id,
+            state,
+            createdAt: Date.now()
+        });
+        // 60 秒超时自动清理
+        setTimeout(() => { pendingManualTurns.delete(turnId); }, 60000);
+
+        return res.json({
+            status: 'pending_roll',
+            turnId,
+            dice_type: pendingDiceType,
+            success_line: pendingSuccessLine,
+            message: '该技能需要手动摇骰，请通过 POST /:id/manual-roll-result 提交结果'
+        });
+    }
 
     // 战斗结算
     const combatResult = CombatResolver.resolveAttack(attacker, target, attack_type, skill_id);
@@ -1666,4 +1707,107 @@ router.post('/:id/conceal', authenticate, async (req, res) => {
 });
 
 // ============================================================
+// Phase 12: 手动摇骰结果提交
+router.post('/:id/manual-roll-result', authenticate, async (req, res) => {
+  try {
+    const { turnId, roll } = req.body;
+    if (!turnId || roll === undefined) {
+      return res.status(400).json({ error: '缺少 turnId 或 roll' });
+    }
+
+    const pending = pendingManualTurns.get(turnId);
+    if (!pending) {
+      return res.status(404).json({ error: '未找到挂起的摇骰回合（可能已超时）' });
+    }
+    pendingManualTurns.delete(turnId);
+
+    const { attacker, target, attack_type, skill_id, state, createdAt } = pending;
+    console.log(`[Phase12] 手动摇骰完成 turnId=${turnId} roll=${roll} 等待=${Date.now() - createdAt}ms`);
+
+    // 构建 external_roll_result
+    const glossary = getGlossaryConfig();
+    const skillDef = glossary?.skills?.[skill_id] || {};
+    const external_roll_result = {
+      roll,
+      dice_type: skillDef.dice_type || '1d6',
+      success_line: skillDef.success_line ?? 4,
+      bonus_damage: skillDef.success_bonus_damage ?? 0,
+      isSuccess: roll >= (skillDef.success_line ?? 4)
+    };
+
+    // 重新执行完整攻击（带掷骰结果）
+    const combatResult = CombatResolver.resolveAttack(attacker, target, attack_type, skill_id, external_roll_result);
+
+    // 更新状态
+    attacker.dealtDamageThisTurn = true;
+    attacker.has_acted = true;
+
+    state.battle_log = state.battle_log || [];
+    state.battle_log.push({
+      type: 'attack',
+      attacker: attacker.name,
+      target: target.name,
+      attack_type,
+      skill_id,
+      damage: combatResult.final_damage,
+      manual_roll: roll,
+      target_hp: target.hp,
+      timestamp: new Date().toISOString()
+    });
+
+    if (target.hp <= 0) {
+      state.units = state.units.filter(u => String(u.id) !== String(target.id));
+      state.battle_log.push({
+        type: 'destroyed',
+        unit: target.name,
+        destroyed_by: attacker.name
+      });
+    }
+
+    // 检查回合推进
+    const autoTurnResult = autoTurnCheck(state);
+
+    await db.execute(
+      'UPDATE battle_sessions SET units_state = $1, phase = $2, current_faction = $3, current_turn = $4 WHERE id = $5',
+      [JSON.stringify(state), state.phase, state.current_faction, state.turn_number, req.params.id]
+    );
+
+    res.json({
+      message: '手动摇骰攻击完成',
+      status: 'roll_resolved',
+      turnId,
+      manual_roll: { roll, dice_type: external_roll_result.dice_type, success_line: external_roll_result.success_line, isSuccess: external_roll_result.isSuccess },
+      combat_result: combatResult,
+      state
+    });
+  } catch (error) {
+    console.error('[Phase12] manual-roll-result error:', error);
+    res.status(500).json({ error: '手动摇骰结算失败' });
+  }
+});
+
+// Phase 12: 查询挂起的摇骰（客户端重连恢复）
+router.get('/:id/pending-roll', authenticate, async (req, res) => {
+  try {
+    const pendingList = [];
+    for (const [turnId, data] of pendingManualTurns.entries()) {
+      if (data.battleId === req.params.id) {
+        const glossary = getGlossaryConfig();
+        const skillDef = glossary?.skills?.[data.skill_id] || {};
+        pendingList.push({
+          turnId,
+          attacker_id: data.attacker.id,
+          target_id: data.target.id,
+          dice_type: skillDef.dice_type || '1d6',
+          success_line: skillDef.success_line ?? 4,
+          createdAt: data.createdAt
+        });
+      }
+    }
+    res.json({ status: 'ok', pending: pendingList });
+  } catch (error) {
+    res.status(500).json({ error: '查询失败' });
+  }
+});
+
 export default router;

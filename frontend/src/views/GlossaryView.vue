@@ -71,6 +71,7 @@
           <h2>🧙 万能槽位创建向导</h2>
           <span class="wizard-step-indicator">Step {{ wizardStep }}/6 — {{ wizardStepLabel }}</span>
           <button class="btn" @click="toggleWizard">✕ 关闭</button>
+        <button class="btn btn-ai-import" @click="toggleAiImport">🤖 导入AI技能</button>
         </div>
 
         <!-- Step 1: 主语 -->
@@ -549,6 +550,31 @@
       </section>
     </div>
   </main>
+
+    <!-- Phase 12: AI 技能导入弹窗 -->
+    <div v-if="showAiImport" class="wizard-overlay" @click.self="showAiImport=false">
+      <div class="wizard-panel ai-import-panel">
+        <div class="wizard-header">
+          <h2>🤖 导入AI生成技能</h2>
+          <button class="btn" @click="showAiImport=false">✕ 关闭</button>
+        </div>
+        <div class="wizard-body">
+          <p class="wizard-desc">粘贴 AI 生成器输出的技能 JSON（支持单个对象或数组）</p>
+          <textarea
+            v-model="aiImportJson"
+            class="ai-import-textarea"
+            placeholder='粘贴技能 JSON，例如：[{"id":"plasma_storm","name":"等离子风暴","action_type":"attack","damage_kind":"thermal","base_damage":18,...}]'
+            rows="12"
+          ></textarea>
+          <div class="ai-import-actions">
+            <button class="btn" @click="showAiImport=false">取消</button>
+            <button class="btn btn-primary" @click="importAiSkills">导入技能</button>
+          </div>
+          <p v-if="aiImportResult" :class="aiImportSuccess ? 'import-success' : 'import-error'">{{ aiImportResult }}</p>
+        </div>
+      </div>
+    </div>
+
 </template>
 
 <script setup>
@@ -724,6 +750,12 @@ async function saveConfig() {
 
 // ===== Phase 11: 万能槽位分步创建向导 =====
 const showWizard = ref(false)
+
+// Phase 12: AI 技能导入
+const showAiImport = ref(false)
+const aiImportJson = ref('')
+const aiImportResult = ref('')
+const aiImportSuccess = ref(false)
 const wizardStep = ref(1)
 const wizardForm = reactive({
   _key: '',
@@ -820,6 +852,88 @@ function commitWizardSkill() {
   skillKeyEdits[key] = key
   showWizard.value = false
   alert(`词条「${editableConfig.skills[key].label}」已创建！请保存以同步规则。`)
+}
+
+function toggleAiImport() {
+  showAiImport.value = !showAiImport.value
+  aiImportResult.value = ''
+  aiImportJson.value = ''
+}
+
+async function importAiSkills() {
+  aiImportResult.value = ''
+  if (!aiImportJson.value.trim()) {
+    aiImportResult.value = '请粘贴技能 JSON'
+    aiImportSuccess.value = false
+    return
+  }
+  try {
+    let skills = JSON.parse(aiImportJson.value)
+    if (!Array.isArray(skills)) skills = [skills]
+
+    const config = JSON.parse(JSON.stringify(skillsData.value))
+    let imported = 0
+    let skipped = 0
+
+    for (const skill of skills) {
+      if (!skill.id || !skill.name) {
+        skipped++
+        continue
+      }
+      // 标准化万能语法字段
+      const normalized = {
+        id: skill.id,
+        name: skill.name,
+        label: skill.label || skill.name,
+        description: skill.description || '',
+        category: skill.category || skill.action_type || 'attack',
+        base_damage: skill.base_damage ?? 0,
+        cast_range: skill.cast_range ?? 1,
+        min_cast_range: skill.min_cast_range ?? 0,
+        aoe_radius: skill.aoe_radius ?? 0,
+        target_filter: skill.target_filter || 'enemy',
+        action_type: skill.action_type || 'attack',
+        attack_stat: skill.attack_stat || 'melee',
+        damage_kind: skill.damage_kind || 'kinetic',
+        dice_type: skill.dice_type || '1d6',
+        success_line: skill.success_line ?? 4,
+        success_bonus_damage: skill.success_bonus_damage ?? 0,
+        is_manual_roll: skill.is_manual_roll ?? false,
+        height_bonus_per_diff: skill.height_bonus_per_diff ?? 0,
+        accuracy_mod: skill.accuracy_mod ?? 0,
+        evasion_mod: skill.evasion_mod ?? 0,
+        requires_unmoved: skill.requires_unmoved ?? false,
+        requires_stealth: skill.requires_stealth ?? false,
+        status_effects: skill.status_effects || [],
+        bonuses: skill.bonuses || [],
+        damage_kind_modifiers: skill.damage_kind_modifiers || {}
+      }
+
+      if (config.skills[skill.id]) {
+        if (!confirm(`技能 "${skill.name}" (${skill.id}) 已存在，是否覆盖？`)) {
+          skipped++
+          continue
+        }
+      }
+      config.skills[skill.id] = normalized
+      imported++
+    }
+
+    if (imported > 0) {
+      await saveConfig(config)
+      skillsData.value = config
+      aiImportResult.value = `成功导入 ${imported} 个技能${skipped > 0 ? '，跳过 ' + skipped + ' 个' : ''}`
+      aiImportSuccess.value = true
+      aiImportJson.value = ''
+      setTimeout(() => { aiImportResult.value = ''; showAiImport.value = false }, 2000)
+    } else {
+      aiImportResult.value = '没有可导入的技能（' + skipped + ' 个被跳过）'
+      aiImportSuccess.value = false
+    }
+  } catch (e) {
+    aiImportResult.value = 'JSON 解析失败: ' + e.message
+    aiImportSuccess.value = false
+  }
 }
 
 onMounted(() => {
@@ -975,4 +1089,41 @@ onMounted(() => {
   display: flex; gap: 6px; padding: 10px 18px;
   border-top: 1px solid rgba(159,142,120,0.1); justify-content: space-between;
 }
+
+/* Phase 12: AI 导入样式 */
+.btn-ai-import {
+  background: rgba(147, 112, 219, 0.15);
+  border: 1px solid rgba(147, 112, 219, 0.25);
+  color: #d4b8ff;
+}
+.btn-ai-import:hover {
+  background: rgba(147, 112, 219, 0.25);
+  border-color: rgba(147, 112, 219, 0.4);
+}
+.ai-import-panel { max-width: 540px; }
+.ai-import-textarea {
+  width: 100%;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(159, 142, 120, 0.15);
+  color: #c1e8ff;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  resize: vertical;
+  margin-bottom: 12px;
+  border-radius: 4px;
+}
+.ai-import-textarea:focus {
+  border-color: rgba(147, 112, 219, 0.4);
+  outline: none;
+}
+.ai-import-textarea::placeholder { color: rgba(193, 232, 255, 0.25); }
+.ai-import-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.import-success { color: #4caf50; font-size: 12px; margin-top: 8px; }
+.import-error { color: #f44336; font-size: 12px; margin-top: 8px; }
 </style>

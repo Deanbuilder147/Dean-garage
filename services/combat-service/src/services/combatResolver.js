@@ -241,6 +241,10 @@ class CombatResolver {
             }
         }
 
+        // Phase 12: dkm 平坦字段 → 装备对象映射
+        const attackerEquipment = this._mapDkmToEquipment(attacker);
+        const defenderEquipment = this._mapDkmToEquipment(defender);
+
         // Phase 10: 提取激活的技能效果 (含泛化 bonus_value)
         const activeSkillBonuses = this._extractSkillBonuses(attacker, resolvedSkill) || {};
 
@@ -264,7 +268,7 @@ class CombatResolver {
                 extraBonuses: activeSkillBonuses,
                 z: attacker.z ?? attacker.height ?? 0,
                 height: attacker.height ?? attacker.z ?? 0,
-                equipment: attacker.equipment || {}
+                equipment: attackerEquipment
             },
             defender: {
                 defense: defender.defense || 5,
@@ -272,7 +276,7 @@ class CombatResolver {
                 shield: defender.shield || 0,
                 resistance: defender.resistance || null,
                 buffs: defender.buffs || [],
-                equipment: defender.equipment || {},
+                equipment: defenderEquipment,
                 skills: defender.skills || [],
                 mobility: defender.mobility || 0,
                 terrain: defender.terrain || 'moon',
@@ -393,13 +397,13 @@ class CombatResolver {
      * @param {Object} rollResult
      */
     processManualRollResult(turnId, rollResult) {
-        const pending = this.manualRollPending.get(turnId);
+        const pending = CombatResolver._manualRollPending.get(turnId);
         if (!pending) {
-            console.warn(`[Phase11] 未找到挂起的手动摇骰 turnId=${turnId}`);
+            console.warn(`[Phase12] 未找到挂起的手动摇骰 turnId=${turnId}`);
             return false;
         }
         clearTimeout(pending.timeout);
-        this.manualRollPending.delete(turnId);
+        CombatResolver._manualRollPending.delete(turnId);
         const isSuccess = rollResult.roll >= (rollResult.successLine ?? 4);
         const bonus = isSuccess ? (rollResult.bonus_damage ?? rollResult.bonus ?? 0) : 0;
         pending.resolve({
@@ -418,9 +422,9 @@ class CombatResolver {
 // 静态包装方法
 // ============================================================
 
-CombatResolver.resolveAttack = function(attacker, target, attack_type, skill_id) {
+CombatResolver.resolveAttack = function(attacker, target, attack_type, skill_id, external_roll_result) {
     const res = new CombatResolver();
-    return res.executeTurn(attacker, target, { attack_type, skill_id });
+    return res.executeTurn(attacker, target, { attack_type, skill_id, external_roll_result: external_roll_result || null });
 };
 
 CombatResolver.resolveSurpriseAttack = function(surpriseUnit, target, attack_type) {

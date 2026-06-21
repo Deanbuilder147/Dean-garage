@@ -319,7 +319,8 @@ class DamagePipe {
         const eq = defender.equipment || {};
 
         // 遍历所有装备槽位
-        for (const slot of ['full_armor', 'coating', 'shield_gen', 'reactive_armor']) {
+        // Phase 12: 扩展槽位支持手部/其它装备 dkm
+        for (const slot of ['full_armor', 'coating', 'shield_gen', 'reactive_armor', 'left_hand', 'right_hand', 'other']) {
             if (eq[slot]) {
                 const slotMods = eq[slot].damage_kind_modifiers || {};
                 reduction += slotMods[weaponType] || 0;

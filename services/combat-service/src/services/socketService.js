@@ -159,13 +159,28 @@ class CombatSocketService {
         break;
 
       case 'manual_roll_response':
-        // Phase 11: 摇骰结果回传 -> 发给请求方
-        console.log(`客户端 ${clientId} 摇骰结果:`, data);
+        // Phase 12: 摇骰结果回传 -> 发给请求方 + 广播房间
+        console.log(`[Phase12] 客户端 ${clientId} 摇骰结果: turnId=${data.turnId} roll=${data.roll}`);
         if (data.requestClientId) {
           this.sendToClient(data.requestClientId, {
             type: 'manual_roll_result',
             clientId,
-            ...data,
+            turnId: data.turnId,
+            roll: data.roll,
+            diceType: data.dice_type || '1d6',
+            successLine: data.success_line || 4,
+            isSuccess: data.roll >= (data.success_line || 4),
+            timestamp: new Date().toISOString()
+          });
+        }
+        // 广播给房间所有客户端
+        if (data.turnId) {
+          this.broadcastToBattle(battleId, {
+            type: 'manual_roll_broadcast',
+            clientId,
+            turnId: data.turnId,
+            roll: data.roll,
+            diceType: data.dice_type || '1d6',
             timestamp: new Date().toISOString()
           });
         }
