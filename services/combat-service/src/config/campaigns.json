@@ -1,0 +1,213 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "机甲战棋 剧情战役配置表 — Phase 15 单机沙盒教学关卡",
+    "date": "2026-06-21 18:00:00",
+    "principle": "固定关卡通过配置定义沙盒初始化状态，含地图、敌方AI机甲、装备DKM、阶段剧本"
+  },
+  "campaigns": {
+    "tutorial_01": {
+      "id": "tutorial_01",
+      "name": "第一课：全要素语法拆除",
+      "chapter": 1,
+      "chapter_name": "第一章：初阵",
+      "description": "教学关卡 — 学习使用爆炸属性技能拆除城市建筑、登上废墟高地利用地形优势、配合手动摇骰对水域目标造成致命打击。",
+      "difficulty": "tutorial",
+      "map": {
+        "width": 10,
+        "height": 8,
+        "terrain": {
+          "2,1": "city_building",
+          "5,2": "water",
+          "6,2": "water"
+        }
+      },
+      "player_spawn_zones": [
+        { "q": 0, "r": 4 },
+        { "q": 1, "r": 4 },
+        { "q": 0, "r": 5 }
+      ],
+      "player_units": [
+        {
+          "id": "tutorial_player_alpha",
+          "name": "试作型·破城锤",
+          "faction": "earth",
+          "hp": 120,
+          "max_hp": 120,
+          "attack": 14,
+          "melee": 14,
+          "ranged": 8,
+          "defense": 10,
+          "mobility": 6,
+          "weaponType": "kinetic",
+          "armorType": "normal",
+          "shield": 0,
+          "level": 5,
+          "equipment": {
+            "right_hand": {
+              "name": "爆裂战锤",
+              "weaponType": "kinetic",
+              "damage_kind": "explosive",
+              "attack_bonus": 3,
+              "durability": 8
+            },
+            "left_hand": {
+              "name": "战术盾牌",
+              "armorType": "normal",
+              "defense_bonus": 3,
+              "durability": 6
+            }
+          },
+          "skills": [
+            {
+              "id": "skill_focused_fire",
+              "type": "focused_fire",
+              "active": true,
+              "name": "专注射击"
+            },
+            {
+              "id": "skill_block",
+              "type": "block",
+              "active": true,
+              "name": "格挡"
+            }
+          ]
+        }
+      ],
+      "enemy_units": [
+        {
+          "id": "tutorial_enemy_sentinel",
+          "name": "哨兵·光束防线型",
+          "faction": "maxion",
+          "q": 5,
+          "r": 3,
+          "hp": 90,
+          "max_hp": 90,
+          "attack": 10,
+          "melee": 10,
+          "ranged": 6,
+          "defense": 12,
+          "mobility": 4,
+          "weaponType": "beam",
+          "armorType": "beam_resist",
+          "shield": 2,
+          "level": 4,
+          "equipment": {
+            "full_armor": {
+              "name": "光束抗性全覆装甲",
+              "armorType": "beam_resist",
+              "damage_kind_modifiers": {
+                "beam": 0.4,
+                "kinetic": 0.85,
+                "explosive": 1.0,
+                "corrosive": 0.9,
+                "thermal": 0.8
+              },
+              "defense_bonus": 5,
+              "durability": 6
+            },
+            "right_hand": {
+              "name": "脉冲步枪",
+              "weaponType": "beam",
+              "damage_kind": "beam",
+              "attack_bonus": 2,
+              "durability": 5
+            }
+          },
+          "skills": [
+            {
+              "id": "skill_sweep",
+              "type": "sweep",
+              "active": true,
+              "name": "扫射"
+            },
+            {
+              "id": "skill_guard",
+              "type": "guard",
+              "active": true,
+              "name": "守护"
+            }
+          ]
+        },
+        {
+          "id": "tutorial_enemy_scout",
+          "name": "侦察兵·水域突袭型",
+          "faction": "maxion",
+          "q": 6,
+          "r": 2,
+          "hp": 70,
+          "max_hp": 70,
+          "attack": 8,
+          "melee": 6,
+          "ranged": 9,
+          "defense": 6,
+          "mobility": 5,
+          "weaponType": "kinetic",
+          "armorType": "normal",
+          "shield": 0,
+          "level": 3,
+          "equipment": {
+            "right_hand": {
+              "name": "轻型冲锋枪",
+              "weaponType": "kinetic",
+              "damage_kind": "kinetic",
+              "attack_bonus": 1,
+              "durability": 4
+            }
+          },
+          "skills": [
+            {
+              "id": "skill_counter",
+              "type": "counter",
+              "active": true,
+              "name": "反击"
+            }
+          ]
+        }
+      ],
+      "stages": [
+        {
+          "id": "stage_1",
+          "order": 1,
+          "name": "第一阶段：拆除障碍",
+          "narrative": "【作战简报】前方城市建筑（坐标 2,1）封锁了通往敌阵的道路。你的机甲装备了【爆裂战锤】，其伤害类型为【爆炸】。请移动至建筑旁，使用爆炸属性攻击将其拆除为废墟！",
+          "hint": "提示：爆炸(explosive)伤害类型对城市建筑有特殊的破坏力。选中你的机甲，点击城市建筑所在格子，使用爆裂战锤发动攻击即可拆除。",
+          "trigger_conditions": [
+            {
+              "type": "terrain_transformed",
+              "cell_q": 2,
+              "cell_r": 1,
+              "from_terrain": "city_building",
+              "to_terrain": "rubble"
+            }
+          ],
+          "on_complete": "城市建筑已被拆除！废墟地形提供了防御加成，现在你可以继续前进了。"
+        },
+        {
+          "id": "stage_2",
+          "order": 2,
+          "name": "第二阶段：高地轰炸",
+          "narrative": "【作战简报】敌方【侦察兵·水域突袭型】正躲在前方低洼水域中！水域地形会削弱大部分伤害类型，但你的废墟高地提供了地形防御优势。请登上废墟高地，对水域中的敌人发起攻击！",
+          "hint": "提示：站在废墟上可获得 +10 防御加成。敌方在水域中有 -10 防御惩罚。利用专注射击(focused_fire)技能能在不移动的情况下获得 +4 伤害加成。",
+          "trigger_conditions": [
+            {
+              "type": "all_enemies_defeated"
+            }
+          ],
+          "on_complete": "所有敌方单位已被歼灭！第一阶段教学完成。你已掌握：地形破坏、高地利用、伤害类型克制三项核心战术。"
+        }
+      ],
+      "victory_condition": {
+        "type": "all_enemies_defeated"
+      },
+      "defeat_condition": {
+        "type": "all_player_units_defeated"
+      },
+      "rewards": {
+        "credits": 500,
+        "xp": 100,
+        "unlock_chapter": 2
+      }
+    }
+  }
+}

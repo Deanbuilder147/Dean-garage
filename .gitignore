@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.cache/
+*.log
+.DS_Store
+.codebuddy/teams/
+.codebuddy/plans/
+.codebuddy/integration/
+.playwright-cli/
+__pycache__/
+*.pyc
+*.pkl
+.env
