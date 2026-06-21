@@ -950,6 +950,96 @@ const spacingH = DEFAULT_SPACING_H
 const spacingV = DEFAULT_SPACING_V
 // ISO 等距参数 — 从后端视角配置动态加载，fallback 到 ISO_DEFAULTS
 const ISO = reactive({ ...ISO_DEFAULTS })
+// ================================================================
+//  Phase 13: 地形数据容器 (Phase 16 补全声明)
+//  存储 "q,r" → { terrain_id, terrain_hp, is_destructible, max_hp, destroyed_transform_to }
+// ================================================================
+const terrainMap = reactive({})
+
+// ================================================================
+//  Phase 13: 悬浮可拖拽折叠卡片状态管理 (Phase 16 补全声明)
+// ================================================================
+
+// 行动面板状态
+const actionPanelRef = ref(null)
+const actionPanelCollapsed = ref(false)
+const actionPanelPos = reactive({ left: 0, top: 60 })
+
+// 阵营面板状态
+const factionPanelRef = ref(null)
+const factionPanelCollapsed = ref(false)
+const factionPanelPos = reactive({ left: 0, top: 0 })
+
+// 拖拽状态 (共享)
+const dragState = reactive({
+  active: false,
+  target: '',       // 'actionPanel' | 'factionPanel'
+  startMouseX: 0,
+  startMouseY: 0,
+  startLeft: 0,
+  startTop: 0,
+})
+
+// 拖拽初始化函数
+function initFloatingCardPositions() {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  
+  // 行动面板: 右上区域
+  actionPanelPos.left = vw - 250
+  actionPanelPos.top = 60
+  
+  // 阵营面板: 底部区域
+  factionPanelPos.left = Math.max(0, (vw - 600) / 2)
+  factionPanelPos.top = vh - 240
+}
+
+// 开始拖拽
+function startDrag(event, panelId) {
+  dragState.active = true
+  dragState.target = panelId
+  dragState.startMouseX = event.clientX
+  dragState.startMouseY = event.clientY
+  
+  const pos = panelId === 'actionPanel' ? actionPanelPos : factionPanelPos
+  dragState.startLeft = pos.left
+  dragState.startTop = pos.top
+  
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', onDragEnd)
+  event.preventDefault()
+}
+
+// 拖拽移动
+function onDragMove(event) {
+  if (!dragState.active) return
+  const dx = event.clientX - dragState.startMouseX
+  const dy = event.clientY - dragState.startMouseY
+  
+  const pos = dragState.target === 'actionPanel' ? actionPanelPos : factionPanelPos
+  pos.left = Math.max(0, Math.min(window.innerWidth - 220, dragState.startLeft + dx))
+  pos.top = Math.max(0, Math.min(window.innerHeight - 40, dragState.startTop + dy))
+}
+
+// 拖拽结束
+function onDragEnd() {
+  dragState.active = false
+  dragState.target = ''
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+}
+
+// 切换行动面板折叠状态
+function toggleActionPanel() {
+  actionPanelCollapsed.value = !actionPanelCollapsed.value
+}
+
+// 切换阵营面板折叠状态
+function toggleFactionPanel() {
+  factionPanelCollapsed.value = !factionPanelCollapsed.value
+}
+
+
 
 async function loadViewConfig() {
   try {
@@ -1329,6 +1419,9 @@ function drawBattleScene(ctx, { hlQ = -1, hlR = -1 }) {
   }
 
   // Skill/Tactical range preview
+
+  // Attack range highlight preview (Phase 16 fix)
+  const attackRangeHexes = new Set()
   const skillRangeHexes = new Set()
   if (actionMode.value === 'tactical' && selectedUnit.value && !royroyDeployMode.value) {
     const su = selectedUnit.value
@@ -1409,6 +1502,28 @@ function drawBattleScene(ctx, { hlQ = -1, hlR = -1 }) {
         drawHexPath(ctx, cx, cy)
         ctx.fill()
         ctx.strokeStyle = 'rgba(0,180,220,0.4)'
+        ctx.lineWidth = 2
+        drawHexPath(ctx, cx, cy)
+        ctx.stroke()
+      }
+
+      // Attack range highlight
+      if (attackRangeHexes.has(`${q},${r}`)) {
+        ctx.fillStyle = 'rgba(255,77,77,0.1)'
+        drawHexPath(ctx, cx, cy)
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,77,77,0.3)'
+        ctx.lineWidth = 2
+        drawHexPath(ctx, cx, cy)
+        ctx.stroke()
+      }
+
+      // Skill range highlight
+      if (skillRangeHexes.has(`${q},${r}`)) {
+        ctx.fillStyle = 'rgba(255,176,0,0.12)'
+        drawHexPath(ctx, cx, cy)
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(255,176,0,0.35)'
         ctx.lineWidth = 2
         drawHexPath(ctx, cx, cy)
         ctx.stroke()
