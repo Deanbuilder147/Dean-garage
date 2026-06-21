@@ -43,7 +43,7 @@
         mode="battle"
         :grid-width="gridWidth"
         :grid-height="gridHeight"
-        :draw-fn="drawBattleScene"
+        :draw-fn="safeDrawBattleScene"
         :show-coords="showCoords"
         @hex-click="onHexClick"
         @hex-hover="onHexHover"
@@ -518,6 +518,104 @@ function sanitizeTerrainMap(terrainMap) {
 }
 
 
+
+// ================================================================
+//  Phase 14: 装备 DKM 防爆器 — 出击数据双重防护
+//  确保所有 unit 拥有完整的 equipment 三槽位 + damage_kind_modifiers
+// ================================================================
+
+/**
+ * 防御性清洗单个单位的装备对象
+ * 确保 left_hand / right_hand / other 三槽位俱全，
+ * 每个槽位包含标准 damage_kind_modifiers 节点
+ */
+function sanitizeUnitEquipment(unit) {
+  if (!unit || typeof unit !== 'object') return unit
+  unit.equipment = unit.equipment || {}
+  const slots = ['left_hand', 'right_hand', 'other']
+  let fixed = 0
+  slots.forEach(slot => {
+    if (!unit.equipment[slot] || typeof unit.equipment[slot] !== 'object') {
+      unit.equipment[slot] = {
+        damage_kind_modifiers: { kinetic: 0, beam: 0, explosive: 0, corrosive: 0 }
+      }
+      fixed++
+    } else {
+      const dkm = unit.equipment[slot].damage_kind_modifiers
+      if (!dkm || typeof dkm !== 'object') {
+        unit.equipment[slot].damage_kind_modifiers = { kinetic: 0, beam: 0, explosive: 0, corrosive: 0 }
+        fixed++
+      } else {
+        // 补全缺失的伤害类型键
+        const kinds = ['kinetic', 'beam', 'explosive', 'corrosive']
+        let patched = false
+        kinds.forEach(k => {
+          if (!(k in dkm)) { dkm[k] = 0; patched = true }
+        })
+        if (patched) fixed++
+      }
+    }
+  })
+  if (fixed > 0) {
+    console.log(`[EquipmentSanitizer] 单位 "${unit.name || unit.id}": 修复 ${fixed} 个装备槽位`)
+  }
+  return unit
+}
+
+/**
+ * 批量清洗战场中所有单位的装备
+ * 覆盖 battleState.units + deployPool
+ */
+function sanitizeAllUnitsEquipment() {
+  const state = battleState.value
+  let count = 0
+
+  // 清洗 battlefieldState 中的 units
+  if (state && state.units && Array.isArray(state.units)) {
+    state.units.forEach(u => {
+      const before = JSON.stringify(u.equipment || {})
+      sanitizeUnitEquipment(u)
+      if (JSON.stringify(u.equipment || {}) !== before) count++
+    })
+  }
+
+  // 清洗 deployPool 中的单位
+  if (deployPool.value && Array.isArray(deployPool.value)) {
+    deployPool.value.forEach(u => sanitizeUnitEquipment(u))
+  }
+
+  if (count > 0) {
+    console.log(`[EquipmentSanitizer] 已清洗 ${count} 个单位的装备 DKM 槽位 (总计 ${state?.units?.length || 0} 个战场单位)`)
+    try { addLog('system', `[防爆] 已自动修复 ${count} 个单位的装备数据`) } catch(_) {}
+  }
+  return count
+}
+
+/**
+ * 全局错误边界 — Canvas 渲染异常捕获
+ * 防止 drawBattleScene 静默黑屏
+ */
+function safeDrawBattleScene(ctx, opts) {
+  try {
+    drawBattleScene(ctx, opts)
+  } catch (e) {
+    console.error('[CanvasCRASH] drawBattleScene 运行时报错:', e.message || e)
+    console.error('[CanvasCRASH] 错误堆栈:', e.stack || '(无堆栈)')
+    // 尝试在 Canvas 上绘制错误信息
+    try {
+      ctx.save()
+      ctx.fillStyle = '#ff4444'
+      ctx.font = 'bold 20px monospace'
+      ctx.textAlign = 'center'
+      ctx.fillText('⚠ 渲染异常，请刷新页面', ctx.canvas.width / 2, 40)
+      ctx.font = '14px monospace'
+      ctx.fillStyle = '#ff8888'
+      ctx.fillText(e.message || 'Unknown Error', ctx.canvas.width / 2, 65)
+      ctx.restore()
+    } catch(_) {}
+    throw e  // 重新抛出以保持错误传播
+  }
+}
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
@@ -2225,6 +2323,8 @@ async function deployToHex(q, r) {
   deploying.value = true
   const unit = selectedDeployUnit.value
   try {
+    // Phase 14: 部署前清洗装备数据
+    sanitizeUnitEquipment(unit)
     await combatAPI.deployUnit(route.params.id, { unit_id: String(unit.id), q, r, unit_data: unit })
     addLog('deploy', `${unit.name} 部署到 ${formatCoord(q, r)}`)
     selectedDeployUnit.value = null
@@ -2310,6 +2410,21 @@ function sanitizeBattlefieldTerrain() {
 }
 
 onMounted(async () => {
+  // Phase 14: 全局 Canvas 渲染错误边界 - 防止静默黑屏
+  window.addEventListener('error', (event) => {
+    if (event.filename && (event.filename.includes('NewBattleView') || event.filename.includes('HexGridCanvas'))) {
+      console.error('[BattlefieldCRASH] 未捕获错误:', event.message)
+      console.error('[BattlefieldCRASH] 文件:', event.filename, '行:', event.lineno, '列:', event.colno)
+      console.error('[BattlefieldCRASH] 错误对象:', event.error)
+      event.preventDefault()
+    }
+  })
+  // 捕获 Promise rejection
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('[BattlefieldCRASH] 未处理的 Promise 拒绝:', event.reason)
+    event.preventDefault()
+  })
+
     document.addEventListener('keydown', onDiceKeyDown)
     // 加载 3D 视角配置 (静默拉取，战场端不提供 UI 调节)
     loadViewConfig().catch(() => {})
@@ -2317,6 +2432,8 @@ onMounted(async () => {
   try {
     const { data } = await combatAPI.getBattleState(route.params.id)
     battleState.value = data.battle || data
+        // Phase 14: 出击装备 DKM 防爆清洗
+        sanitizeAllUnitsEquipment()
 
     const phase = battleState.value?.phase || '准备中'
     if (phase === 'deployment') {
@@ -2340,6 +2457,11 @@ onMounted(async () => {
     // ===== Shared: Load deployPool whenever entering deploy phase =====
     if (isDeployPhase.value) {
       await loadDeployPool()
+      // Phase 14: 清洗部署池装备
+      if (deployPool.value && deployPool.value.length > 0) {
+        deployPool.value.forEach(u => sanitizeUnitEquipment(u))
+        console.log('[EquipmentSanitizer] 部署池已清洗 ' + deployPool.value.length + ' 个单位')
+      }
     }
 
     addLog('system', `进入战场: ${battleState.value?.map_name || '未知'} | ${battlefieldSize.value}`)
@@ -2370,7 +2492,23 @@ onMounted(async () => {
   }
 
     // Phase 13: 旧地图地形向后兼容清洗
-  sanitizeBattlefieldTerrain()
+    // Phase 14: 地形双重清洗强化 - 确保 Canvas 渲染前 terrainMap 已标准化
+    sanitizeBattlefieldTerrain()
+    // 强制对 terrainMap 进行二次清洗（覆盖 battleState.terrain 未覆盖的局部变更）
+    if (terrainMap && typeof terrainMap === "object") {
+      let cleaned = 0
+      Object.entries(terrainMap).forEach(function(kv) {
+        const key = kv[0], val = kv[1]
+        if (typeof val === "string") {
+          terrainMap[key] = sanitizeTerrainCell(val)
+          cleaned++
+        } else if (val && typeof val === "object" && !val.terrain_id) {
+          terrainMap[key] = sanitizeTerrainCell(val)
+          cleaned++
+        }
+      })
+      if (cleaned > 0) console.log("[TerrainSanitizer] terrainMap 二次清洗: " + cleaned + " 个")
+    }
   initFloatingCardPositions()
   window.addEventListener('resize', initFloatingCardPositions)
 

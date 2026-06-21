@@ -315,15 +315,22 @@ class DamagePipe {
      */
     static _calcArmorReduction(attacker, defender) {
         let reduction = 0;
-        const weaponType = attacker.weaponType || 'kinetic';
-        const eq = defender.equipment || {};
+        const weaponType = (attacker && attacker.weaponType) || 'kinetic';
+        const eq = (defender && defender.equipment) || {};
 
         // 遍历所有装备槽位
-        // Phase 12: 扩展槽位支持手部/其它装备 dkm
+        // Phase 14: 加固防御 - 确保空值不引发崩溃
         for (const slot of ['full_armor', 'coating', 'shield_gen', 'reactive_armor', 'left_hand', 'right_hand', 'other']) {
-            if (eq[slot]) {
-                const slotMods = eq[slot].damage_kind_modifiers || {};
-                reduction += slotMods[weaponType] || 0;
+            try {
+                const slotData = eq[slot];
+                if (slotData && typeof slotData === 'object') {
+                    const slotMods = slotData.damage_kind_modifiers || {};
+                    if (slotMods && typeof slotMods === 'object') {
+                        reduction += Number(slotMods[weaponType]) || 0;
+                    }
+                }
+            } catch(e) {
+                console.warn(`[_calcArmorReduction] 槽位 ${slot} 处理异常:`, e.message);
             }
         }
 
