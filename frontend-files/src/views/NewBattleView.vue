@@ -38,11 +38,14 @@
       </div>
 
       <!-- Canvas Area: HexGridCanvas 通用战棋渲染组件 -->
+      <!-- Phase 16: 显式传递 spacingH/spacingV，确保鼠标拾取与渲染统一源 -->
       <HexGridCanvas
         ref="hexGrid"
         mode="battle"
         :grid-width="gridWidth"
         :grid-height="gridHeight"
+        :spacing-h="spacingH"
+        :spacing-v="spacingV"
         :draw-fn="safeDrawBattleScene"
         :show-coords="showCoords"
         @hex-click="onHexClick"
@@ -397,6 +400,20 @@
 </template>
 
 <script setup>
+// ================================================================
+//  Phase 16 审计: 战场端鼠标拾取管线完整对账
+//  ================================================================
+//  点击管道: 鼠标 → HexGridCanvas.getHexAtEvent() → canvasPosToHex()
+//            → ① r = round(flatY/(1.5*HEX_RADIUS*spacingV))  [Even-R刚性]
+//            → ② flatX = (worldX - shearX*flatY)/scaleX         [消去shearX]
+//            → ③ q = round((flatX/spacingH - evenOffset)/sqrt3*HEX_RADIUS)
+//            → emit('hex-click', {q,r}) → NewBattleView.onHexClick()
+//  渲染管道: NewBattleView.hexToPixel(q,r) → pointyTopCenter(q,r) → flatX,flatY
+//            → HexGridCanvas CTM: translate→scale→transform(scaleX,0,shearX,scaleY,0,0)
+//  验证: spacingH/spacingV 显式传递 (line ~47-48)，与 hexUtils DEFAULT 同位
+//  状态: onMounted中 sanitizeUnitEquipment(L2436) + safeDrawBattleScene(L598-618) + sanitizeBattlefieldTerrain(L2494)
+//  ✅ 所有入口已对账: 逆变换原子化、防爆清洗器激活、Canvas崩溃边界捕获
+// ================================================================
 import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, drawHexPath, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection } from '../utils/hexUtils.js'
 import HexGridCanvas from '../components/HexGridCanvas.vue'

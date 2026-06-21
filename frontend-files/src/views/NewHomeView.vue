@@ -64,6 +64,43 @@
         <div class="scanline"></div>
       </div>
 
+      <!-- Phase 16: 词条造词工厂 (Phase 10 青色主题) -->
+      <div class="card card-glossary" @click="router.push('/glossary')">
+        <div class="card-text">
+          <div class="card-icon" style="color:#00e5ff">
+            <svg class="icon icon-xl" viewBox="0 0 24 24">
+              <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M9 10h6M9 13h4M9 16h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="card-title-group">
+            <h3>📖 词条造词工厂</h3>
+            <p>基于主谓宾定状补六维语式，自由组装与修改完全体机甲技能词条库。</p>
+          </div>
+        </div>
+        <button class="card-btn card-btn-cyan">编撰</button>
+        <div class="scanline"></div>
+      </div>
+
+      <!-- Phase 16: 剧情模式战役 (Phase 11 金橙色主题) -->
+      <div class="card card-campaign" @click="router.push('/campaign')">
+        <div class="card-text">
+          <div class="card-icon" style="color:#ff9d00">
+            <svg class="icon icon-xl" viewBox="0 0 24 24">
+              <path d="M12 2L2 22h20L12 2z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M12 8v10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="12" cy="8" r="2" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="card-title-group">
+            <h3>🌋 剧情模式战役</h3>
+            <p>第一课：全要素语法拆除。进入单机剧情沙盒，体验破城锤的属性克制教学。</p>
+          </div>
+        </div>
+        <button class="card-btn card-btn-orange">出征</button>
+        <div class="scanline"></div>
+      </div>
+
     </div>
 
     <div class="status-bar">
@@ -325,6 +362,20 @@ function handleLogout() {
 }
 .card-btn:hover { background: #ffc840; }
 .card-btn:active { transform: scale(0.96); }
+
+/* Phase 16: 词条造词工厂 — Phase 10 青色主题 */
+.card-glossary { border-color: rgba(0, 229, 255, 0.3); }
+.card-glossary::before { background: #00e5ff; }
+.card-glossary:hover { background: #001a29; border-color: rgba(0, 229, 255, 0.5); }
+.card-btn-cyan { background: #00e5ff; color: #001a2e; }
+.card-btn-cyan:hover { background: #33ebff; }
+
+/* Phase 16: 剧情模式战役 — Phase 11 金橙色主题 */
+.card-campaign { border-color: rgba(255, 157, 0, 0.3); }
+.card-campaign::before { background: #ff9d00; }
+.card-campaign:hover { background: #1a0e00; border-color: rgba(255, 157, 0, 0.5); }
+.card-btn-orange { background: #ff9d00; color: #1a0e00; }
+.card-btn-orange:hover { background: #ffb840; }
 
 .status-bar {
   background: #001620;

@@ -639,6 +639,7 @@ defineExpose({
   ISO,
   hexToPixel,
   pixelToHex,
+  getHexAtEvent,       // Phase 16: 暴露原子化逆变换供父层审计/调试
   getWorldPos,
   canvasPosToWorld,
   zoomIn,

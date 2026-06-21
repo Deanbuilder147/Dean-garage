@@ -16,6 +16,7 @@ import NewBattlefieldSelector from './views/NewBattlefieldSelector.vue';
 import NewBattleView from './views/NewBattleView.vue';
 import NewBattlefieldView from './views/NewBattlefieldView.vue';
 import NewPreparationRoom from './views/NewPreparationRoom.vue';
+import CampaignView from './views/CampaignView.vue';
 import TerminalView from './views/TerminalView.vue';
 
 // Phase 13-A: 设备分流
@@ -35,6 +36,7 @@ const routes = [
   { path: '/battlefields', component: NewBattlefieldSelector, meta: { requiresAuth: true } },
   { path: '/battlefield-edit/:id?', component: NewBattlefieldView, meta: { requiresAuth: true } },
   { path: '/glossary', component: GlossaryView, meta: { requiresAuth: true } },
+  { path: '/campaign', component: CampaignView, meta: { requiresAuth: true } },  // Phase 16: 剧情模式战役
   { path: '/preparation/:roomId', component: NewPreparationRoom, meta: { requiresAuth: true } },
 
   // Phase 13-A: 设备专属分流路由
