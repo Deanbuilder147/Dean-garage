@@ -1,7 +1,7 @@
 <template>
   <main class="main-content">
     <header class="page-header">
-      <h1>[ 词条库中枢 · 结构化 CRUD ]</h1>
+      <h1>[ 词条库中枢 · 万能语法战斗中枢 v5.0 ]</h1>
       <div class="header-meta">
         <span class="meta-item"><span class="dot-live"></span> {{ syncStatus }}</span>
         <span class="sep">::</span>
@@ -213,34 +213,159 @@
               </div>
             </div>
 
-            <!-- 高级参数 (可折叠) -->
-            <div class="advanced-section">
-              <button
-                class="btn btn-toggle-advanced"
-                @click="toggleAdvanced(key)"
-              >
-                {{ advancedOpen[key] ? '▼' : '▶' }} 高级参数 (类型专属)
-              </button>
-              <div v-if="advancedOpen[key]" class="advanced-body">
-                <div class="advanced-params">
-                  <div v-for="(val, pkey) in getAdvancedParams(skill)" :key="pkey" class="param-row">
-                    <span class="param-key">{{ pkey }}</span>
-                    <input
-                      v-if="editMode && typeof val !== 'boolean'"
-                      v-model="skill[pkey]"
-                      :type="typeof val === 'number' ? 'number' : 'text'"
-                      class="param-input"
-                      :class="{ 'param-text': typeof val === 'string' }"
-                    />
-                    <span v-else-if="editMode && typeof val === 'boolean'" class="param-value">
-                      <input type="checkbox" v-model="skill[pkey]" /> {{ skill[pkey] ? '是' : '否' }}
-                    </span>
-                    <span v-else class="param-value">{{ val }}</span>
-                  </div>
-                  <div v-if="Object.keys(getAdvancedParams(skill)).length === 0" class="advanced-empty">
-                    无类型专属参数
-                  </div>
-                </div>
+            <!-- 动作掷骰属性 (平铺) -->
+            <div class="dice-fields">
+              <div class="dice-section-label">[ 动作掷骰属性 ]</div>
+              <div class="uf-row">
+                <!-- dice_type -->
+                <label class="param-row">
+                  <span class="param-key">骰子类型</span>
+                  <input
+                    v-if="editMode"
+                    v-model="skill.dice_type"
+                    type="text"
+                    class="param-input param-text"
+                    placeholder="1d6"
+                  />
+                  <span v-else class="param-value">{{ skill.dice_type || '1d6' }}</span>
+                </label>
+
+                <!-- success_line -->
+                <label class="param-row">
+                  <span class="param-key">成功线</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.success_line"
+                    type="number" min="1" max="20" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">{{ skill.success_line ?? 4 }}+</span>
+                </label>
+
+                <!-- success_bonus_damage -->
+                <label class="param-row">
+                  <span class="param-key">成功追加</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.success_bonus_damage"
+                    type="number" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">+{{ skill.success_bonus_damage ?? 0 }}</span>
+                </label>
+
+                <!-- is_manual_roll -->
+                <label class="param-row">
+                  <span class="param-key">手动摇骰</span>
+                  <template v-if="editMode">
+                    <input type="checkbox" v-model="skill.is_manual_roll" />
+                    <span class="param-value">{{ skill.is_manual_roll ? 'ON' : 'OFF' }}</span>
+                  </template>
+                  <span v-else class="param-value">{{ skill.is_manual_roll ? '⚡ 手动' : '自动' }}</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Phase 10: 属性分流与干预插槽 -->
+            <div class="phase10-fields">
+              <div class="dice-section-label phase10-label">[ Phase 10 · 属性分流与干预插槽 ]</div>
+              <div class="uf-row">
+                <!-- damage_kind -->
+                <label class="param-row">
+                  <span class="param-key">伤害类型</span>
+                  <select v-if="editMode" v-model="skill.damage_kind" class="param-select">
+                    <option value="kinetic">动能 kinetic</option>
+                    <option value="beam">光束 beam</option>
+                    <option value="explosive">爆炸 explosive</option>
+                    <option value="corrosive">腐蚀 corrosive</option>
+                    <option value="thermal">热熔 thermal</option>
+                  </select>
+                  <span v-else class="param-value">{{ skill.damage_kind || 'kinetic' }}</span>
+                </label>
+
+                <!-- min_cast_range -->
+                <label class="param-row">
+                  <span class="param-key">最小距离</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.min_cast_range"
+                    type="number" min="0" max="20" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">{{ skill.min_cast_range ?? 0 }} 格</span>
+                </label>
+
+                <!-- accuracy_mod -->
+                <label class="param-row">
+                  <span class="param-key">命中修正</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.accuracy_mod"
+                    type="number" min="-10" max="10" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">{{ (skill.accuracy_mod ?? 0) > 0 ? '+' : '' }}{{ skill.accuracy_mod ?? 0 }}</span>
+                </label>
+
+                <!-- evasion_mod -->
+                <label class="param-row">
+                  <span class="param-key">闪避修正</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.evasion_mod"
+                    type="number" min="-10" max="10" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">{{ (skill.evasion_mod ?? 0) > 0 ? '+' : '' }}{{ skill.evasion_mod ?? 0 }}</span>
+                </label>
+              </div>
+
+              <div class="uf-row">
+                <!-- height_bonus_per_diff -->
+                <label class="param-row">
+                  <span class="param-key">高地格加成</span>
+                  <input
+                    v-if="editMode"
+                    v-model.number="skill.height_bonus_per_diff"
+                    type="number" min="0" max="10" step="1"
+                    class="param-input"
+                  />
+                  <span v-else class="param-value">+{{ skill.height_bonus_per_diff ?? 0 }}/格</span>
+                </label>
+
+                <!-- action_type -->
+                <label class="param-row">
+                  <span class="param-key">动作类型</span>
+                  <select v-if="editMode" v-model="skill.action_type" class="param-select">
+                    <option value="attack">攻击 attack</option>
+                    <option value="heal">治疗 heal</option>
+                    <option value="buff">增益 buff</option>
+                    <option value="debuff">减益 debuff</option>
+                    <option value="passive">被动 passive</option>
+                  </select>
+                  <span v-else class="param-value">{{ skill.action_type || 'attack' }}</span>
+                </label>
+
+                <!-- attack_stat -->
+                <label class="param-row">
+                  <span class="param-key">攻击属性</span>
+                  <select v-if="editMode" v-model="skill.attack_stat" class="param-select">
+                    <option value="melee">格斗 melee</option>
+                    <option value="ranged">射击 ranged</option>
+                    <option value="max">取最高 max</option>
+                  </select>
+                  <span v-else class="param-value">{{ skill.attack_stat || 'melee' }}</span>
+                </label>
+
+                <!-- requires_unmoved -->
+                <label class="param-row">
+                  <span class="param-key">要求$不动</span>
+                  <template v-if="editMode">
+                    <input type="checkbox" v-model="skill.requires_unmoved" />
+                    <span class="param-value">{{ skill.requires_unmoved ? '需要' : '不需要' }}</span>
+                  </template>
+                  <span v-else class="param-value">{{ skill.requires_unmoved ? '⚓ 需不动' : '-' }}</span>
+                </label>
               </div>
             </div>
           </div>
@@ -303,7 +428,6 @@ const saveMsg = ref('')
 const saveMsgTimeout = ref(null)
 const editMode = ref(false)
 const pendingDeletes = ref([])
-const advancedOpen = reactive({})
 const skillKeyEdits = reactive({})
 
 const editableConfig = reactive({
@@ -312,42 +436,6 @@ const editableConfig = reactive({
   systems: {}
 })
 
-// 可用状态效果列表
-const availableEffects = [
-  { value: 'burn', label: '灼烧 burn' },
-  { value: 'stun', label: '眩晕 stun' },
-  { value: 'disable', label: '断腿 disable' },
-  { value: 'slow', label: '减速 slow' },
-  { value: 'poison', label: '中毒 poison' },
-  { value: 'freeze', label: '冰冻 freeze' },
-]
-
-// 5 个通用字段名 (用于过滤高级参数)
-const UNIVERSAL_FIELDS = new Set([
-  'type', 'label', 'category', 'description',
-  'target_filter', 'cast_range', 'aoe_radius', 'base_damage', 'status_effects',
-  'deterministic', 'trigger'
-])
-
-const syncStatus = computed(() => {
-  if (loading.value) return '加载中...'
-  if (loadError.value) return '离线'
-  return '在线'
-})
-
-const configVersion = computed(() => editableConfig._meta?.version || '?')
-const skillCount = computed(() => Object.keys(editableConfig.skills || {}).length)
-
-// 获取高级参数 (过滤掉通用字段)
-function getAdvancedParams(skill) {
-  const params = {}
-  for (const [key, val] of Object.entries(skill)) {
-    if (!UNIVERSAL_FIELDS.has(key)) {
-      params[key] = val
-    }
-  }
-  return params
-}
 
 // 获取系统参数 (过滤 label/description/deterministic)
 function getSystemParams(sys) {
@@ -378,10 +466,6 @@ function toggleEffect(skill, effectValue) {
   }
 }
 
-// 折叠/展开高级参数
-function toggleAdvanced(key) {
-  advancedOpen[key] = !advancedOpen[key]
-}
 
 // 技能 KEY 编辑失焦时同步
 function onSkillKeyBlur(oldKey) {
@@ -413,10 +497,23 @@ function addNewSkill() {
     aoe_radius: 0,
     base_damage: 0,
     status_effects: [],
-    deterministic: true
+    dice_type: '1d6',
+    success_line: 4,
+    success_bonus_damage: 0,
+    is_manual_roll: false,
+    deterministic: true,
+    // Phase 10: 万能语法字段
+    damage_kind: 'kinetic',
+    min_cast_range: 0,
+    accuracy_mod: 0,
+    evasion_mod: 0,
+    height_bonus_per_diff: 0,
+    action_type: 'attack',
+    attack_stat: 'melee',
+    requires_unmoved: false,
+    requires_stealth: false
   }
   skillKeyEdits[newKey] = newKey
-  advancedOpen[newKey] = false
 }
 
 // 删除词条
@@ -425,7 +522,6 @@ function deleteSkill(key) {
   pendingDeletes.value.push(key)
   delete editableConfig.skills[key]
   delete skillKeyEdits[key]
-  delete advancedOpen[key]
 }
 
 // 加载配置
@@ -527,13 +623,6 @@ onMounted(() => {
 .btn-delete { border-color: rgba(255,82,82,0.3); color: #ff5252; padding: 4px 12px; font-size: 11px; }
 .btn-delete:hover { border-color: #ff5252; background: rgba(255,82,82,0.15); }
 .btn-reload { border-color: rgba(0,180,220,0.25); }
-.btn-toggle-advanced {
-  padding: 4px 12px; font-size: 10px; background: transparent;
-  border: 1px solid rgba(159,142,120,0.15); color: rgba(193,232,255,0.5);
-  cursor: pointer; font-family: inherit; letter-spacing: 1px;
-  transition: all 0.15s;
-}
-.btn-toggle-advanced:hover { border-color: rgba(255,176,0,0.3); color: #ffd597; }
 .save-msg { font-size: 11px; color: #13ff43; letter-spacing: 1px; }
 .delete-hint { font-size: 10px; color: #ff5252; letter-spacing: 1px; }
 
@@ -596,11 +685,16 @@ onMounted(() => {
 .status-tag.active { border-color: #ffb000; background: rgba(255,176,0,0.1); color: #ffb000; }
 .status-checkbox { display: none; }
 
-/* 高级参数 */
-.advanced-section { margin-top: 8px; }
-.advanced-body { margin-top: 6px; padding: 8px 12px; border: 1px dashed rgba(159,142,120,0.1); background: rgba(0,0,0,0.1); }
-.advanced-params { display: flex; flex-wrap: wrap; gap: 8px; }
-.advanced-empty { font-size: 10px; color: rgba(193,232,255,0.2); padding: 8px; }
+/* 骰子属性区域 */
+.dice-fields { margin-top: 8px; padding-top: 10px; border-top: 1px solid rgba(255,176,0,0.1); }
+.dice-section-label {
+  font-size: 9px; color: rgba(255,176,0,0.4); letter-spacing: 2px;
+  margin-bottom: 6px; text-transform: uppercase;
+}
+
+/* Phase 10 属性分流插槽 */
+.phase10-fields { margin-top: 8px; padding-top: 10px; border-top: 1px solid rgba(0,180,220,0.15); }
+.phase10-label { color: rgba(0,180,220,0.5) !important; }
 
 /* 系统参数 */
 .system-card { border: 1px solid rgba(159,142,120,0.08); margin-bottom: 10px; padding: 12px; background: rgba(0,0,0,0.1); }

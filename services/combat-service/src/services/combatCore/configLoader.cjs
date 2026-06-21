@@ -1,5 +1,5 @@
 /**
- * configLoader.cjs — 词条库配置热加载器
+ * configLoader.cjs — 词条库配置热加载器 (Phase 10)
  *
  * 提供运行时重新加载词条库中枢配置的能力。
  * 调用 getGlossaryConfig() 总是返回最新的 JSON 数据。

@@ -1,30 +1,22 @@
 /**
- * combatResolver.js v2.0 — 机甲战棋战斗解析器（去骰化）
+ * combatResolver.js v3.0 — 机甲战棋战斗解析器 (Phase 10 万能语法中枢)
  *
  * 处理战斗系统：奇袭、火力覆盖、迷雾系统、主攻击、耐久度结算。
- * 所有随机骰子判定已移除，改为词条库确定性公式。
+ * Phase 10: 移除硬编码技能数组，改为万能语法字段驱动。
  */
 
 import DamagePipe from './combatCore/damagePipe.cjs';
 import EquipmentDurability from './combatCore/equipmentDurability.cjs';
 import SkillExecutor from './combatCore/skillExecutor.cjs';
+import { getGlossaryConfig } from './combatCore/configLoader.cjs';
 
-
-
-// 词条库参数已内置于方法默认值中
 
 class CombatResolver {
     constructor() {
         this.battlefield = null;
         this.fogActive = false;
-
-        // 火力覆盖状态（整场战斗）
         this.fireCoverageUsed = false;
-
-        // 耐久度管理
         this.durability = new EquipmentDurability();
-
-        // 技能执行器（不再需要 DiceEngine）
         this.skillExecutor = new SkillExecutor();
     }
 
@@ -60,7 +52,6 @@ class CombatResolver {
             const dist = Math.max(dq, dr, ds);
 
             if (dist <= 2) {
-                // 检查是否有守护/装甲
                 const blocked = this._checkFireCoverageBlock(unit);
                 let actualDamage = 5;
 
@@ -107,14 +98,15 @@ class CombatResolver {
                 return true;
             }
         }
+        // Phase 10: 泛化装备检查
         if (unit.equipment) {
-            if (unit.equipment.full_armor) {
-                this.durability.consumeDurability(unit, 'special_full_armor', 999);
-                return true;
-            }
-            if (unit.equipment.coating) {
-                this.durability.consumeDurability(unit, 'special_coating', 999);
-                return true;
+            const eq = unit.equipment;
+            // 检查所有装备槽位的 damage_kind_modifiers
+            for (const slot of ['full_armor', 'coating', 'shield_gen', 'reactive_armor']) {
+                if (eq[slot]) {
+                    this.durability.consumeDurability(unit, 'special_' + slot, 999);
+                    return true;
+                }
             }
         }
         return false;
@@ -122,11 +114,10 @@ class CombatResolver {
 
     _disableBlockingAbility(unit) {
         const eq = unit.equipment || {};
-        if (eq.full_armor) {
-            this.durability.consumeDurability(unit, 'special_full_armor', 999);
-        }
-        if (eq.coating) {
-            this.durability.consumeDurability(unit, 'special_coating', 999);
+        for (const slot of ['full_armor', 'coating', 'shield_gen', 'reactive_armor']) {
+            if (eq[slot]) {
+                this.durability.consumeDurability(unit, 'special_' + slot, 999);
+            }
         }
     }
 
@@ -135,6 +126,8 @@ class CombatResolver {
             if (!unit || !unit.skills) continue;
             for (const skill of unit.skills) {
                 if (!skill || !skill.active) continue;
+                // Phase 10: 使用万能字段判断
+                const uf = this.skillExecutor._getUniversalFields(skill.type);
                 switch (skill.type) {
                     case 'assist':
                         this.skillExecutor.initAssistCounter(unit);
@@ -158,7 +151,8 @@ class CombatResolver {
         const cfg = getSystemConfig('ambush');
         const damagePercent = cfg?.damage_percent ?? 0.7;
         const ambushDamage = Math.floor((attacker.attack || 10) * damagePercent);
-        const defenseReduction = DamagePipe._calcDefense(defender);
+        const terrainDefs = getGlossaryConfig()?.terrains || {};
+        const defenseReduction = DamagePipe._calcDefense(defender, attacker, terrainDefs);
 
         return {
             type: 'ambush',
@@ -189,7 +183,7 @@ class CombatResolver {
     }
 
     // ============================================================
-    // 战斗主循环
+    // 战斗主循环 (Phase 10: 万能语法驱动)
     // ============================================================
 
     executeTurn(attacker, defender, options = {}) {
@@ -220,17 +214,18 @@ class CombatResolver {
         let attMelee = attacker.melee || attacker.attack || 10;
         let attRanged = attacker.ranged || attacker.attack || 10;
 
-        // 技能处理
+        // Phase 10: 万能语法技能路由 (移除硬编码 MELEE_SKILLS/RANGED_SKILLS)
         const resolvedSkill = this._resolveSkill(attacker, options.skill_id);
 
-        const MELEE_SKILLS = ['counter', 'block', 'polearm', 'long_handle', 'supply'];
-        const RANGED_SKILLS = ['sweep', 'throw', 'stable', 'sniper', 'sweep_precise', 'focused_fire'];
-
         if (resolvedSkill) {
-            if (MELEE_SKILLS.includes(resolvedSkill.type)) {
-                attackType = 'melee';
-            } else if (RANGED_SKILLS.includes(resolvedSkill.type)) {
+            const uf = this.skillExecutor._getUniversalFields(resolvedSkill.type);
+            // 根据 attack_stat 或 action_type 判定攻击类型
+            if (uf.attack_stat === 'ranged') {
                 attackType = 'ranged';
+            } else if (uf.attack_stat === 'melee') {
+                attackType = 'melee';
+            } else if (uf.action_type === 'attack') {
+                attackType = uf.attack_stat || 'melee';
             }
         }
 
@@ -246,10 +241,17 @@ class CombatResolver {
             }
         }
 
-        // 提取激活的技能效果
+        // Phase 10: 提取激活的技能效果 (含泛化 bonus_value)
         const activeSkillBonuses = this._extractSkillBonuses(attacker, resolvedSkill) || {};
 
-        // 伤害计算
+        // Phase 10: 获取地形定义和万能技能字段
+        const config = getGlossaryConfig();
+        const terrainDefs = config?.terrains || {};
+        const skillUf = resolvedSkill
+            ? this.skillExecutor._getUniversalFields(resolvedSkill.type)
+            : {};
+
+        // 伤害计算 (Phase 10: 传入 terrainDefs 和新字段)
         const damageResult = DamagePipe.calculate({
             attacker: {
                 melee: attMelee,
@@ -259,7 +261,10 @@ class CombatResolver {
                 weaponType: attacker.weaponType || 'kinetic',
                 buffs: attacker.buffs || [],
                 skills: attacker.skills || [],
-                extraBonuses: activeSkillBonuses
+                extraBonuses: activeSkillBonuses,
+                z: attacker.z ?? attacker.height ?? 0,
+                height: attacker.height ?? attacker.z ?? 0,
+                equipment: attacker.equipment || {}
             },
             defender: {
                 defense: defender.defense || 5,
@@ -270,10 +275,19 @@ class CombatResolver {
                 equipment: defender.equipment || {},
                 skills: defender.skills || [],
                 mobility: defender.mobility || 0,
-                terrain: defender.terrain || null
+                terrain: defender.terrain || 'moon',
+                z: defender.z ?? defender.height ?? 0,
+                height: defender.height ?? defender.z ?? 0
             },
             attack_type: attackType,
-            sniper_mobility_reduction: sniperMobilityReduction
+            sniper_mobility_reduction: sniperMobilityReduction,
+            terrainDefs,
+            // Phase 10: 万能语法字段注入管道
+            is_manual_roll: skillUf.is_manual_roll || false,
+            dice_type: skillUf.dice_type || '1d6',
+            success_line: skillUf.success_line ?? 4,
+            success_bonus_damage: skillUf.success_bonus_damage ?? 0,
+            height_bonus_per_diff: skillUf.height_bonus_per_diff ?? 0
         });
 
         result.totalDamage += damageResult.final_damage;
@@ -293,6 +307,10 @@ class CombatResolver {
         return attacker.skills.find(s => s && (s.id === skillId || s.type === skillId));
     }
 
+    /**
+     * Phase 10: 泛化技能加成提取
+     * 不再按技能名硬编码分支，而是从 skillExecutor 获取 bonus_value
+     */
     _extractSkillBonuses(attacker, resolvedSkill) {
         if (!attacker || !attacker.skills) return null;
 
@@ -300,24 +318,52 @@ class CombatResolver {
         for (const skill of attacker.skills) {
             if (!skill || !skill.active) continue;
 
+            const uf = this.skillExecutor._getUniversalFields(skill.type);
+
             if (skill.type === 'assist') {
                 const assistResult = this.skillExecutor.executeAssist(attacker, false);
                 if (assistResult.triggered) {
-                    bonuses.push({ type: 'assist', value: assistResult.bonus });
+                    bonuses.push({
+                        type: 'assist',
+                        value: assistResult.bonus,
+                        bonus_value: assistResult.bonus
+                    });
                 }
             }
             if (skill.type === 'blockade') {
                 const blockadeResult = this.skillExecutor.executeBlockade(attacker, undefined, false);
                 if (blockadeResult.triggered) {
-                    bonuses.push({ type: 'blockade', value: blockadeResult.mobility_reduction });
+                    bonuses.push({
+                        type: 'blockade',
+                        value: blockadeResult.mobility_reduction,
+                        bonus_value: blockadeResult.mobility_reduction
+                    });
                 }
             }
             if (skill.type === 'counter') {
-                bonuses.push({ type: 'counter', value: 2 });
+                bonuses.push({
+                    type: 'counter',
+                    value: 2,
+                    bonus_value: 2
+                });
             }
             if (skill.type === 'focused_fire' && resolvedSkill && resolvedSkill.type === 'focused_fire') {
                 const ff = this.skillExecutor.executeFocusedFire();
-                bonuses.push({ type: 'focused_fire', value: ff.bonus });
+                bonuses.push({
+                    type: 'focused_fire',
+                    value: ff.bonus,
+                    bonus_value: ff.bonus
+                });
+            }
+            if (skill.type === 'guard') {
+                const guardResult = this.skillExecutor.executeGuard(attacker, false);
+                if (guardResult.triggered) {
+                    bonuses.push({
+                        type: 'guard',
+                        value: guardResult.reduction,
+                        bonus_value: guardResult.reduction
+                    });
+                }
             }
         }
 
