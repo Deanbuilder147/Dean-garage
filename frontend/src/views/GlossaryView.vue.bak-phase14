@@ -93,24 +93,6 @@
             </select></div>
           <div class="wiz-check"><input type="checkbox" v-model="wizardForm.requires_unmoved" /> 需要本回合未移动</div>
           <div class="wiz-check"><input type="checkbox" v-model="wizardForm.requires_stealth" /> 需要潜行状态</div>
-          <div class="wiz-field"><label>HP 低于值 (requires_hp_below)</label>
-            <input type="number" v-model.number="wizardForm.requires_hp_below" min="0" max="100" class="wiz-input" />
-            <small class="wiz-hint">0=无限制，单位当前HP低于此值才可触发</small></div>
-          <div class="wiz-field"><label>目标地形条件 (target_on_terrain)</label>
-            <select v-model="wizardForm.target_on_terrain" class="param-select">
-              <option value="">无限制</option>
-              <option value="plain">平原</option>
-              <option value="mountain">山地</option>
-              <option value="forest">森林</option>
-              <option value="water">水域</option>
-              <option value="moon">月面</option>
-              <option value="fortress">堡垒</option>
-              <option value="ruins">废墟</option>
-              <option value="crystal">晶矿</option>
-              <option value="rubble">残骸</option>
-              <option value="city_building">城市建筑</option>
-            </select>
-            <small class="wiz-hint">限定目标必须站在特定地形上</small></div>
         </div>
 
         <!-- Step 2: 谓语 -->
@@ -796,8 +778,6 @@ const wizardForm = reactive({
   status_effects_str: '',
   requires_unmoved: false,
   requires_stealth: false,
-  requires_hp_below: 0,
-  target_on_terrain: '',
   description: '',
   deterministic: true,
 })
@@ -833,8 +813,6 @@ function toggleWizard() {
     status_effects_str: '',
     requires_unmoved: false,
     requires_stealth: false,
-    requires_hp_below: 0,
-    target_on_terrain: '',
     description: '',
     deterministic: true,
   })
@@ -865,8 +843,6 @@ function commitWizardSkill() {
     attack_stat: wizardForm.attack_stat,
     requires_unmoved: wizardForm.requires_unmoved,
     requires_stealth: wizardForm.requires_stealth,
-    requires_hp_below: wizardForm.requires_hp_below || 0,
-    target_on_terrain: wizardForm.target_on_terrain || '',
     dice_type: wizardForm.dice_type,
     success_line: wizardForm.success_line,
     success_bonus_damage: wizardForm.success_bonus_damage,

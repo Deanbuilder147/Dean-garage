@@ -18,7 +18,6 @@
  */
 
 const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./configLoader.cjs');
-const ConditionEvaluator = require('./conditionEvaluator.cjs');
 
 
 class SkillExecutor {
@@ -142,18 +141,12 @@ class SkillExecutor {
             return { triggered: false, message: `技能 ${skillType} 未在词条库中定义` };
         }
 
-        // === Phase 14: 复合条件链 (Subject Checks) ===
-        const condContext = {
-            unit: unit,
-            target: target,
-            targetTerrain: target?.terrain || context?.terrain,
-            battleState: context?.battleState,
-        };
-        if (!ConditionEvaluator.evaluate(cfg, condContext)) {
-            return {
-                triggered: false,
-                message: `${uf.label} 不满足触发条件（${JSON.stringify(cfg.requires_unmoved ? '需要未移动' : '')}${cfg.requires_hp_below ? ' HP<' + cfg.requires_hp_below : ''}${cfg.target_on_terrain ? ' 目标地形:' + cfg.target_on_terrain : ''}${cfg.requires_stealth ? ' 需要潜行' : ''}）`
-            };
+        // === 主语检查 (Subject Checks) ===
+        if (uf.requires_unmoved && unit.has_moved) {
+            return { triggered: false, message: `${uf.label} 需要本回合未移动` };
+        }
+        if (uf.requires_stealth && !unit.stealth) {
+            return { triggered: false, message: `${uf.label} 需要隐身状态` };
         }
 
         // === 宾语距离检查 (Object Range Check) ===

@@ -1,10 +1,10 @@
 /**
- * ConditionEvaluator - 条件评估器 (Phase 14 复合条件链激活)
+ * ConditionEvaluator - 条件评估器
  * 
  * 职责:
- * 1. 评估词条触发条件（支持 structured {required/any/not} 与 flat 平铺两种格式）
+ * 1. 评估词条触发条件
  * 2. 支持复杂条件组合 (AND/OR/NOT)
- * 3. 提供预置条件检查器（含 requires_hp_below / requires_unmoved / target_on_terrain）
+ * 3. 提供预置条件检查器
  */
 
 class ConditionEvaluator {
@@ -64,53 +64,6 @@ class ConditionEvaluator {
         const percentage = (ctx.unit?.hp / maxHp) * 100;
         return this.compare(percentage, value, op);
       },
-      
-      // ========== Phase 14: 新增复合条件检查器 ==========
-
-      /**
-       * requires_hp_below: 单位 HP 低于指定值
-       * 用途: 残血技能触发条件
-       * 示例: { requires_hp_below: 50 } → unit.hp < 50 才触发
-       */
-      requires_hp_below: (ctx, value) => {
-        if (!value || value <= 0) return true; // 0/负数/未设置 → 不限
-        const hp = ctx.unit?.hp ?? ctx.unit?.current_hp;
-        if (hp === undefined || hp === null) return false;
-        return hp < value;
-      },
-
-      /**
-       * requires_unmoved: 单位本回合未移动
-       * 用途: 需要停驻蓄力的技能
-       * 示例: { requires_unmoved: true } → unit.has_moved !== true
-       */
-      requires_unmoved: (ctx, value) => {
-        if (!value) return true; // false → 不要求，自动通过
-        return ctx.unit?.has_moved !== true;
-      },
-
-      /**
-       * target_on_terrain: 目标格子地形校验
-       * 用途: 地形限定技能（如水战专属）
-       * 示例: { target_on_terrain: "water" } → 目标必须在水中
-       */
-      target_on_terrain: (ctx, value) => {
-        if (!value) return true; // 空值 → 不限
-        const terrain = ctx.target?.terrain || ctx.targetTerrain;
-        return terrain === value;
-      },
-
-      /**
-       * requires_stealth: 单位处于隐身/潜行状态
-       * 用途: 潜行专属技能
-       * 示例: { requires_stealth: true } → unit.stealth === true
-       */
-      requires_stealth: (ctx, value) => {
-        if (!value) return true;
-        return ctx.unit?.stealth === true;
-      },
-
-      // ========== 原有隐身系列 checkers (保持向后兼容) ==========
       
       // 姿态相关
       defense_stance: (ctx, value) => ctx.defender?.stance === 'defense',
@@ -172,35 +125,16 @@ class ConditionEvaluator {
         return unit?.faction === value;
       }
     };
-
-    // Phase 14: 可识别的 flat 条件键白名单
-    // 只有在此列表中的 key 才会被作为条件评估
-    this.flatConditionKeys = new Set([
-      'requires_hp_below',
-      'requires_unmoved',
-      'requires_stealth',
-      'target_on_terrain',
-    ]);
   }
 
   /**
    * 评估条件组
-   * Phase 14: 支持两种格式 —
-   *   A) 词条结构化: { required: [...], any: [...], not: {...} }
-   *   B) 技能平铺式: { requires_unmoved: true, requires_hp_below: 50 }
-   * 
    * @param {object} conditions - 条件定义
    * @param {object} context - 执行上下文
    * @returns {boolean}
    */
   evaluate(conditions, context) {
     if (!conditions) return true;
-    
-    // Phase 14: 检测是否为平铺 (flat) 格式
-    // 平铺格式: 没有 required/any/not/check 字段，直接是键值对
-    if (!conditions.required && !conditions.any && !conditions.not && !conditions.check) {
-      return this.evaluateFlat(conditions, context);
-    }
     
     // 处理 required (AND)
     if (conditions.required) {
@@ -222,36 +156,6 @@ class ConditionEvaluator {
       return this.evaluateSingle(conditions, context);
     }
     
-    return true;
-  }
-
-  /**
-   * Phase 14: 平铺条件格式评估
-   * 将技能配置中的扁平字段自动转换为 AND 条件链
-   * 
-   * @param {object} conditions - 平铺条件 { requires_unmoved: true, requires_hp_below: 50 }
-   * @param {object} context - 执行上下文
-   * @returns {boolean}
-   */
-  evaluateFlat(conditions, context) {
-    // 遍历所有条件键
-    for (const [key, value] of Object.entries(conditions)) {
-      // 只处理已知的条件键
-      if (!this.flatConditionKeys.has(key)) continue;
-      
-      // 跳过未设置的值 (0, false, null, undefined, '')
-      if (!value && value !== true) continue;
-      
-      const checker = this.checkers[key];
-      if (!checker) {
-        console.warn(`[ConditionEvaluator] 平铺条件缺少检查器: ${key}`);
-        continue;
-      }
-      
-      if (!checker(context, value)) {
-        return false;
-      }
-    }
     return true;
   }
 
@@ -289,6 +193,9 @@ class ConditionEvaluator {
     const checker = this.checkers[check];
     
     if (ref) {
+      // 有 ref 时，比较 check 的值和 ref 的值
+      // 如: armor_resistance_type == attack_damage_type
+      // 直接从上下文获取字段值，不调用检查器
       const checkValue = this.getValueFromContext(context, check);
       const refValue = this.getValueFromContext(context, ref);
       return this.compare(checkValue, refValue, operator);
@@ -296,10 +203,12 @@ class ConditionEvaluator {
     
     if (!checker) {
       console.warn(`[ConditionEvaluator] 未知检查项: ${check}`);
+      // 尝试从上下文直接比较
       const actualValue = this.getValueFromContext(context, check);
       return this.compare(actualValue, value, operator);
     }
     
+    // 使用检查器
     return checker(context, value, operator);
   }
 
@@ -307,6 +216,7 @@ class ConditionEvaluator {
    * 数值比较
    */
   compare(a, b, operator) {
+    // 处理 undefined
     if (a === undefined || b === undefined) {
       return operator === '!=' ? a !== b : false;
     }
@@ -328,6 +238,7 @@ class ConditionEvaluator {
   getValueFromContext(context, path) {
     if (!path) return undefined;
     
+    // 字段名映射 (ref 引用可能使用不同的字段名)
     const fieldMapping = {
       'attack_damage_type': 'damageType',
       'target_hp': 'target.hp',
@@ -353,7 +264,6 @@ class ConditionEvaluator {
    */
   registerChecker(name, fn) {
     this.checkers[name] = fn;
-    this.flatConditionKeys.add(name);
   }
 
   /**
