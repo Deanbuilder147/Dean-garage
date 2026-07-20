@@ -1,7 +1,6 @@
 // ============= 六角格公共工具模块 =============
-// Phase 29-X 最高图腾令 — 大一统规则母体引擎
-// Even-R Offset 尖顶六角格数学唯一真理
-// 供 HexGridCanvasEngine 与外层视图共同使用
+// 供 BattlefieldView（地图编辑器）和 NewBattleView（战场指挥）共同使用
+// 修改此文件即可同步影响所有使用六角格的页面
 
 // ---- 六角格尺寸 ----
 export const HEX_WIDTH = 64
@@ -306,11 +305,18 @@ export const TERRAIN_COLORS = {
   repair_station: { name: '维修站', color: '#ff9800' },
   spawn_earth:  { name: '出生(地)', color: '#13ff43' },
   spawn_maxion: { name: '出生(马)', color: '#ff4d4d' },
-  spawn:        { name: '出生点',   color: '#ffb000' }
+  spawn:        { name: '出生点',   color: '#ffb000' },
+  // Phase 29-GlossaryMerge: 词条库复活地形（与 glossary-skill-config.json terrains 对齐）
+  plain:        { name: '平原',     color: '#7a9b4f' },
+  ruins:        { name: '废墟',     color: '#696969' },
+  crystal:      { name: '晶矿',     color: '#7b68ee' },
+  rubble:       { name: '残骸',     color: '#8b7d6b' },
+  city_building:{ name: '城市建筑', color: '#b8860b' }
 }
 
 // ================================================================
-//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（16 种）
+//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（21 种）
+//  Phase 29-GlossaryMerge: +5 词条库复活地形 (plain/ruins/crystal/rubble/city_building)
 //  规则：TERRAIN_COLORS 提供颜色/名称，此处统一追加 cost
 //  新增或修改地形时，只需改此处与 TERRAIN_COLORS 即可。
 // ================================================================
@@ -330,7 +336,13 @@ export const UNIVERSAL_TERRAIN_MAP = {
   repair_station: { ...TERRAIN_COLORS.repair_station, cost: 1 },
   spawn_earth:  { ...TERRAIN_COLORS.spawn_earth, cost: 0 },
   spawn_maxion: { ...TERRAIN_COLORS.spawn_maxion, cost: 0 },
-  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0 }
+  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0 },
+  // Phase 29-GlossaryMerge: 词条库复活地形 — 与 glossary-skill-config.json terrains 100% 对齐
+  plain:        { ...TERRAIN_COLORS.plain, cost: 1 },
+  ruins:        { ...TERRAIN_COLORS.ruins, cost: 2 },
+  crystal:      { ...TERRAIN_COLORS.crystal, cost: 2 },
+  rubble:       { ...TERRAIN_COLORS.rubble, cost: 2 },
+  city_building:{ ...TERRAIN_COLORS.city_building, cost: 1 }
 }
 
 /**
@@ -404,6 +416,97 @@ export function drawHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFl
 }
 
 // ---- 等距视角坐标转换 ----
+
+/**
+ * ISO 等距正向变换：2D 平面坐标 → ISO 屏幕坐标
+ * CTM 等价: x' = x*scaleX + y*shearX,  y' = x*shearY + y*scaleY
+ * @param {number} px 2D X
+ * @param {number} py 2D Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ * @returns {{ x: number, y: number }}
+ */
+export function isoTransformPoint(px, py, iso) {
+  return {
+    x: px * iso.scaleX + py * iso.shearX,
+    y: px * iso.shearY + py * iso.scaleY
+  }
+}
+
+/**
+ * ISO 等距逆向变换：ISO 屏幕坐标 → 2D 平面坐标
+ * 2×2 仿射逆矩阵: det = scaleX*scaleY - shearX*shearY
+ * @param {number} px ISO 屏幕 X
+ * @param {number} py ISO 屏幕 Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ * @returns {{ x: number, y: number }}
+ */
+export function isoInverseTransformPoint(px, py, iso) {
+  const det = iso.scaleX * iso.scaleY - iso.shearX * iso.shearY
+  return {
+    x: (px * iso.scaleY - iso.shearX * py) / det,
+    y: (iso.scaleX * py - iso.shearY * px) / det
+  }
+}
+
+/**
+ * 绘制等距六边形路径（对 6 个顶点逐点施加 ISO 变换）
+ * 在纯净 2D Canvas 上直接 lineTo，无需 ctx.transform
+ * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
+ * @param {number} cx 2D 中心 X
+ * @param {number} cy 2D 中心 Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ */
+export function drawIsoHexPath(ctx, cx, cy, iso) {
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2
+    const hx = cx + HEX_RADIUS * Math.cos(angle)
+    const hy = cy + HEX_RADIUS * Math.sin(angle)
+    const pt = isoTransformPoint(hx, hy, iso)
+    if (i === 0) ctx.moveTo(pt.x, pt.y)
+    else ctx.lineTo(pt.x, pt.y)
+  }
+  ctx.closePath()
+}
+
+/**
+ * 绘制等距扁六边形路径（顶角/底角扁平化 + ISO 逐顶点变换）
+ * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
+ * @param {number} cx 2D 中心 X
+ * @param {number} cy 2D 中心 Y
+ * @param {number} cellW 单元格宽度
+ * @param {number} cellH 单元格高度
+ * @param {number} topFlat 顶角扁平度 (0=尖顶, 0.5=全平)
+ * @param {number} bottomFlat 底角扁平度 (0=尖底, 0.5=全平)
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ */
+export function drawIsoHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFlat, iso) {
+  const hw = cellW / 2
+  const hh = cellH / 2
+  const sideTopY = cy - hh + topFlat * cellH
+  const sideBotY = cy + hh - bottomFlat * cellH
+
+  const vertices = [
+    { x: cx, y: cy - hh },              // 顶点
+    { x: cx + hw, y: sideTopY },        // 右上
+    { x: cx + hw, y: sideBotY },        // 右下
+    { x: cx, y: cy + hh },              // 底点
+    { x: cx - hw, y: sideBotY },        // 左下
+    { x: cx - hw, y: sideTopY }         // 左上
+  ]
+
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const pt = isoTransformPoint(vertices[i].x, vertices[i].y, iso)
+    if (i === 0) ctx.moveTo(pt.x, pt.y)
+    else ctx.lineTo(pt.x, pt.y)
+  }
+  ctx.closePath()
+}
+
+// ================================================================
+//  旧版坐标变换（向后兼容，已在 Phase 30 中弃用）
+// ================================================================
 
 /**
  * 将六角格中心坐标映射到屏幕像素（支持等距变换）

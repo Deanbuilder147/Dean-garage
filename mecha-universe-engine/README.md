@@ -1,5 +1,9 @@
 # 机甲战棋 (Mecha Battle)
 
+> **单体架构入口（Monorepo Root）**：本目录是项目的唯一构建与部署入口。
+> 运行时 `docker compose up -d` 与 host 运行脚本 `./run-services.sh`、`./stop-services.sh` 均以此目录为根。
+> 顶层 `../` 仅保留独立工具/补丁目录（apps、scripts、fix_scripts、combat-patches、dicescript），不再包含可部署代码副本。
+
 基于微服务架构的机甲战棋游戏，采用 Node.js + Vue3 技术栈。
 
 ## 架构概览

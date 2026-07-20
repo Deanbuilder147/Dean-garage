@@ -1,23 +1,10 @@
-# Phase 29-X — 前端构建与部署
-FROM node:20-alpine AS builder
+# 机甲战棋游戏 - Frontend Dockerfile (Phase 29-TrueFinal: Nginx 内部监听 80)
+FROM nginx:alpine
 
-WORKDIR /build
-
-COPY package.json package-lock.json* ./
-RUN npm install --legacy-peer-deps
-
-COPY . .
-RUN npm run build
-
-# ========================================
-
-FROM nginx:1.27-alpine
-
-RUN rm -rf /usr/share/nginx/html/*
-
-COPY --from=builder /build/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY dist /usr/share/nginx/html
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost/ || exit 1
