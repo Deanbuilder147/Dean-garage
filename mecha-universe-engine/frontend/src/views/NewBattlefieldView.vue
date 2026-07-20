@@ -18,6 +18,7 @@
         <button class="btn-save" @click="saveMap" :disabled="saving">{{ saving ? '保存中...' : '保存地图' }}</button>
         <button class="btn-export" @click="exportJSON">📤 导出 JSON</button>
         <button class="btn-export" @click="showNewMapModal = true">[ 新建地图 ]</button>
+        <button class="btn-export btn-danger" @click="deleteCurrentMap" :disabled="!battlefield || !battlefield.id" title="删除当前已加载（已保存）的地图">[ 删除地图 ]</button>
         <div class="map-load-group">
           <select v-model="selectedMapFile" @change="onSelectMapFile" class="map-load-select">
             <option value="">🗺️ 加载旧地图...</option>
@@ -728,6 +729,35 @@ async function saveMap() {
   }
 }
 
+// 删除当前已加载的地图（需已保存、拥有后端 id）
+async function deleteCurrentMap() {
+  if (!battlefield.value || !battlefield.value.id) {
+    alert('当前地图尚未保存，无后端记录可删除。请先点击「保存地图」。')
+    return
+  }
+  const name = battlefield.value.name || '未命名地图'
+  if (!confirm(`确定删除地图「${name}」吗？此操作不可恢复，且会从服务器永久移除。`)) return
+  try {
+    await mapAPI.deleteBattlefield(battlefield.value.id)
+    addLog('system', `已删除地图: ${name}`)
+    // 重置编辑器为新地图状态，保持可用
+    Object.keys(terrainMap).forEach(k => delete terrainMap[k])
+    battlefield.value = {
+      id: null,
+      name: `新战场 ${gridW.value}x${gridH.value}`,
+      width: gridW.value,
+      height: gridH.value,
+      terrainData: {}
+    }
+    selectedMapFile.value = ''
+    await fetchMapFileList()
+    saveStatus.value = `已删除地图「${name}」`
+  } catch (e) {
+    addLog('error', `删除地图失败: ${e.message || e}`)
+    alert('删除地图失败: ' + (e.message || e))
+  }
+}
+
 function exportJSON() {
   const name = battlefield.value?.name || '未命名'
   const exportData = {
@@ -838,6 +868,17 @@ function exportJSON() {
   font-family: monospace;
 }
 .btn-export:hover { background: rgba(255,176,0,0.3); }
+.btn-danger {
+  padding: 6px 16px;
+  background: rgba(255,64,64,0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(255,64,64,0.35);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: monospace;
+}
+.btn-danger:hover { background: rgba(255,64,64,0.35); }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Phase 13: 地图加载下拉框 */
 .map-load-group {

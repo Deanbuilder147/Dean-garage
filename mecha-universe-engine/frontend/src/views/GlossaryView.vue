@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container w-full h-full flex flex-col min-h-0">
+  <div class="page-container w-full h-full flex flex-col min-h-0 overflow-y-auto">
     <header class="page-header">
       <h1>[ 词条库中枢 · 万能语法战斗中枢 v5.0 ]</h1>
       <div class="header-meta">
@@ -45,6 +45,14 @@
         @click="loadConfig"
       >
         [ 重新加载 ]
+      </button>
+      <button
+        v-if="editMode"
+        class="btn btn-upload"
+        :disabled="excelLoading"
+        @click="triggerExcelUpload"
+      >
+        📥 {{ excelLoading ? '解析中...' : '上传Excel' }}
       </button>
       <span v-if="pendingDeletes.length > 0" class="delete-hint">
         ⚠ {{ pendingDeletes.length }} 个待删除
@@ -185,6 +193,29 @@
             <input id="wiz-accuracy-mod" name="accuracy_mod" type="number" v-model.number="wizardForm.accuracy_mod" min="-10" max="10" class="wiz-input" /></div>
           <div class="wiz-field"><label for="wiz-evasion-mod">回避修正 (evasion_mod)</label>
             <input id="wiz-evasion-mod" name="evasion_mod" type="number" v-model.number="wizardForm.evasion_mod" min="-10" max="10" class="wiz-input" /></div>
+          <hr class="wiz-sep" />
+          <div class="wiz-check"><input id="wiz-has-dice" type="checkbox" v-model="wizardForm.has_dice" /> <label for="wiz-has-dice">启用多分支投骰 (has_dice) — 掷骰后按点数命中不同分支</label></div>
+          <div v-if="wizardForm.has_dice" class="wiz-branches">
+            <div class="wiz-branch" v-for="(br, bi) in wizardForm.dice_branches" :key="bi">
+              <div class="wiz-branch-head">
+                <span>分支 #{{ bi + 1 }}</span>
+                <button type="button" class="wiz-x" @click="wizardForm.dice_branches.splice(bi,1)">删除分支</button>
+              </div>
+              <div class="wiz-field"><label>生效点数 points（逗号分隔如 1,2,3；区间用 - 如 4-6）</label>
+                <input v-model="br.pointsStr" placeholder="1,2,3 或 4-6" class="wiz-input" />
+              </div>
+              <div class="wiz-effects" v-for="(ef, ei) in br.effects" :key="ei">
+                <select v-model="ef.action" class="param-select">
+                  <option v-for="a in BRANCH_ACTIONS" :key="a" :value="a">{{ a }}</option>
+                </select>
+                <input type="number" v-model.number="ef.value" placeholder="数值" class="wiz-input" />
+                <input v-if="ef.action === 'apply_status'" v-model="ef.status" placeholder="状态 key，如 stun" class="wiz-input" />
+                <button type="button" class="wiz-x" @click="br.effects.splice(ei,1)">删效果</button>
+              </div>
+              <button type="button" class="wiz-add" @click="br.effects.push({ action: 'damage', value: 0, status: '' })">+ 添加效果</button>
+            </div>
+            <button type="button" class="wiz-add" @click="addWizardBranch">+ 添加判定分支</button>
+          </div>
         </div>
 
         <!-- Step 5: 补语 -->
@@ -221,6 +252,32 @@
       </div>
     </div>
 
+    <!-- 词条中枢首页 · 全部词条列表（总览） -->
+    <section class="panel overview-panel">
+      <div class="panel-header">
+        <h2>[ 词条中枢首页 · 全部词条 ({{ skillCount }}）]</h2>
+        <span class="panel-badge">INDEX</span>
+      </div>
+      <div class="panel-body">
+        <div v-if="skillCount === 0" class="empty-state">
+          <p>暂无词条，点击「添加新词条」或「分步向导」创建</p>
+        </div>
+        <div v-else class="overview-list">
+          <button
+            v-for="(skill, key) in editableConfig.skills"
+            :key="'ov-' + key"
+            class="overview-item"
+            @click="scrollToSkill(key)"
+          >
+            <span class="ov-key">{{ key }}</span>
+            <span class="ov-name">{{ skill.name || key }}</span>
+            <span class="ov-cat" :class="'cat-' + (skill.category || 'melee')">{{ CATEGORY_LABELS[skill.category] || skill.category }}</span>
+            <span v-if="skill.has_dice" class="ov-dice">🎲 d{{ skill.dice_type }}</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- 词条编辑面板 -->
       <!-- 技能参数面板 -->
       <section class="panel">
@@ -234,52 +291,18 @@
             <p>暂无词条，点击「添加新词条」创建</p>
           </div>
 
-          <!-- 词条卡片 -->
+          <!-- 词条卡片（结构化三区块 + 投骰多分支） -->
           <div
             v-for="(skill, key) in editableConfig.skills"
             :key="key"
+            :id="'skill-card-' + key"
             class="skill-card"
             :class="{ 'deleted-card': pendingDeletes.includes(key) }"
           >
-            <!-- 卡片头部 -->
+            <!-- 卡片头：KEY + 名称 + 删除 -->
             <div class="skill-card-header">
-              <div class="skill-id-group">
-                <label class="skill-id-label" :for="`skill-${key}-key`">KEY</label>
-                <input
-                  v-if="editMode"
-                  :id="`skill-${key}-key`"
-                  :name="`skill_${key}_key`"
-                  v-model="skillKeyEdits[key]"
-                  type="text"
-                  class="skill-id-input"
-                  placeholder="skill_key"
-                  @blur="onSkillKeyBlur(key)"
-                />
-                <span v-else class="skill-id-value">{{ key }}</span>
-              </div>
-              <div class="skill-label-group">
-                <label class="skill-id-label" :for="`skill-${key}-label`">名称</label>
-                <input
-                  v-if="editMode"
-                  :id="`skill-${key}-label`"
-                  :name="`skill_${key}_label`"
-                  v-model="skill.label"
-                  type="text"
-                  class="skill-label-input"
-                  placeholder="技能名称"
-                />
-                <span v-else class="skill-label-value">{{ skill.label || key }}</span>
-              </div>
-              <div class="skill-category-group">
-                <label class="skill-id-label" :for="`skill-${key}-category`">分类</label>
-                <select v-if="editMode" :id="`skill-${key}-category`" :name="`skill_${key}_category`" v-model="skill.category" class="param-select">
-                  <option value="melee">近战</option>
-                  <option value="ranged">远程</option>
-                  <option value="special">特殊</option>
-                  <option value="passive">被动</option>
-                </select>
-                <span v-else class="skill-label-value">{{ skill.category || '-' }}</span>
-              </div>
+              <span class="skill-key-badge">{{ key }}</span>
+              <span class="skill-name-badge">{{ skill.name || key }}</span>
               <button
                 v-if="editMode"
                 class="btn btn-delete"
@@ -289,295 +312,292 @@
               </button>
             </div>
 
-            <!-- 描述 -->
-            <div class="skill-desc-row">
-              <label class="skill-id-label" :for="`skill-${key}-description`">描述</label>
-              <textarea
-                v-if="editMode"
-                :id="`skill-${key}-description`"
-                :name="`skill_${key}_description`"
-                v-model="skill.description"
-                class="skill-desc-input"
-                rows="2"
-                placeholder="技能描述..."
-              ></textarea>
-              <span v-else class="skill-desc-text">{{ skill.description || '-' }}</span>
-            </div>
+            <!-- 区块一 · 名称分类面板 -->
+            <section class="edit-block">
+              <div class="block-title">▸ 区块一 · 名称分类</div>
+              <div class="block-body">
+                <div class="block-row">
+                  <label class="param-row" :for="`skill-${key}-key`">
+                    <span class="param-key">KEY（检索代号）</span>
+                    <input
+                      v-if="editMode"
+                      :id="`skill-${key}-key`"
+                      v-model="skillKeyEdits[key]"
+                      type="text"
+                      class="param-input param-text"
+                      placeholder="skill_key"
+                      @blur="onSkillKeyBlur(key)"
+                    />
+                    <span v-else class="param-value">{{ key }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-name`">
+                    <span class="param-key">名称（中文名）</span>
+                    <input v-if="editMode" :id="`skill-${key}-name`" v-model="skill.name" type="text" class="param-input param-text" placeholder="技能名称" />
+                    <span v-else class="param-value">{{ skill.name || key }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-category`">
+                    <span class="param-key">分类 category</span>
+                    <select v-if="editMode" :id="`skill-${key}-category`" v-model="skill.category" class="param-select">
+                      <option v-for="c in SKILL_CATEGORIES" :key="c" :value="c">{{ CATEGORY_LABELS[c] }} {{ c }}</option>
+                    </select>
+                    <span v-else class="param-value">{{ CATEGORY_LABELS[skill.category] || skill.category }}</span>
+                  </label>
+                </div>
+                <label class="param-row param-row-wide" :for="`skill-${key}-description`">
+                  <span class="param-key">描述</span>
+                  <input v-if="editMode" :id="`skill-${key}-description`" v-model="skill.description" type="text" class="param-input param-text" placeholder="技能描述..." />
+                  <span v-else class="param-value">{{ skill.description || '-' }}</span>
+                </label>
+              </div>
+            </section>
 
-            <!-- 5 个通用结构字段 -->
-            <div class="universal-fields">
-              <div class="uf-row">
-                <!-- target_filter -->
-                <label class="param-row" :for="`skill-${key}-target-filter`">
-                  <span class="param-key">施放对象</span>
-                  <select v-if="editMode" :id="`skill-${key}-target-filter`" :name="`skill_${key}_target_filter`" v-model="skill.target_filter" class="param-select">
-                    <option value="enemy">敌方 enemy</option>
-                    <option value="ally">友方 ally</option>
-                    <option value="self">自身 self</option>
-                    <option value="all">全员 all</option>
+            <!-- 区块二 · 基础属性与伤害分流面板 -->
+            <section class="edit-block">
+              <div class="block-title">▸ 区块二 · 基础属性与伤害分流</div>
+              <div class="block-body">
+                <label class="param-row" :for="`skill-${key}-target-scope`">
+                  <span class="param-key">施放对象 target_scope</span>
+                  <select v-if="editMode" :id="`skill-${key}-target-scope`" v-model="skill.target_scope" class="param-select">
+                    <option v-for="s in TARGET_SCOPES" :key="s" :value="s">{{ TARGET_SCOPE_LABELS[s] }}</option>
                   </select>
-                  <span v-else class="param-value">{{ skill.target_filter || 'enemy' }}</span>
+                  <span v-else class="param-value">{{ TARGET_SCOPE_LABELS[skill.target_scope] || skill.target_scope }}</span>
                 </label>
 
-                <!-- cast_range -->
                 <label class="param-row" :for="`skill-${key}-cast-range`">
-                  <span class="param-key">施放距离</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-cast-range`"
-                    :name="`skill_${key}_cast_range`"
-                    v-model.number="skill.cast_range"
-                    type="number" min="0" max="20" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ skill.cast_range ?? 0 }} 格</span>
-                </label>
-
-                <!-- aoe_radius -->
-                <label class="param-row" :for="`skill-${key}-aoe-radius`">
-                  <span class="param-key">AOE 半径</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-aoe-radius`"
-                    :name="`skill_${key}_aoe_radius`"
-                    v-model.number="skill.aoe_radius"
-                    type="number" min="0" max="10" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ skill.aoe_radius ?? 0 }} {{ (skill.aoe_radius ?? 0) === 0 ? '(单体)' : '格' }}</span>
-                </label>
-
-                <!-- Phase 30: range_type (radial / directional_beam / cone) -->
-                <label class="param-row" :for="`skill-${key}-range-type`">
-                  <span class="param-key">范围类型</span>
-                  <select v-if="editMode" :id="`skill-${key}-range-type`" :name="`skill_${key}_range_type`" v-model="skill.range_type" class="param-select">
-                    <option value="radial">同心圆 radial</option>
-                    <option value="directional_beam">地图炮 directional_beam</option>
-                    <option value="cone">扇形 cone</option>
-                  </select>
-                  <span v-else class="param-value">{{ skill.range_type === 'directional_beam' ? '地图炮' : skill.range_type === 'cone' ? '扇形' : '同心圆' }}</span>
-                </label>
-
-                <!-- beam_width (仅 directional_beam 时显示) -->
-                <label v-if="skill.range_type === 'directional_beam'" class="param-row" :for="`skill-${key}-beam-width`">
-                  <span class="param-key">炮宽(格)</span>
-                  <input v-if="editMode" :id="`skill-${key}-beam-width`" :name="`skill_${key}_beam_width`" v-model.number="skill.beam_width" type="number" min="1" max="10" step="1" class="param-input" />
-                  <span v-else class="param-value">{{ skill.beam_width || 1 }} 格</span>
-                </label>
-              </div>
-
-              <div class="uf-row">
-                <!-- base_damage -->
-                <label class="param-row" :for="`skill-${key}-base-damage`">
-                  <span class="param-key">基础伤害</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-base-damage`"
-                    :name="`skill_${key}_base_damage`"
-                    v-model.number="skill.base_damage"
-                    type="number" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ skill.base_damage ?? 0 }}</span>
-                </label>
-
-                <!-- status_effects -->
-                <label class="param-row param-row-wide">
-                  <span class="param-key">附加效果</span>
-                  <span v-if="!editMode" class="param-value">
-                    {{ (skill.status_effects || []).join(', ') || '无' }}
+                  <span class="param-key">施放距离 cast_range</span>
+                  <span v-if="editMode" class="range-inputs">
+                    <input v-model.number="skill.cast_range.min" type="number" min="0" max="20" class="param-input param-num" /> ~
+                    <input v-model.number="skill.cast_range.max" type="number" min="0" max="20" class="param-input param-num" /> 格
                   </span>
-                  <div v-else class="status-effects-tags">
-                    <label
-                      v-for="eff in availableEffects"
-                      :key="eff.value"
-                      class="status-tag"
-                      :class="{ active: (skill.status_effects || []).includes(eff.value) }"
-                    >
-                      <input
-                        type="checkbox"
-                        :id="`skill-${key}-eff-${eff.value}`"
-                        :name="`skill_${key}_eff_${eff.value}`"
-                        :checked="(skill.status_effects || []).includes(eff.value)"
-                        @change="toggleEffect(skill, eff.value)"
-                        class="status-checkbox"
-                      />
-                      {{ eff.label }}
-                    </label>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            <!-- 动作掷骰属性 (平铺) -->
-            <div class="dice-fields">
-              <div class="dice-section-label">[ 动作掷骰属性 ]</div>
-              <div class="uf-row">
-                <!-- dice_type -->
-                <label class="param-row" :for="`skill-${key}-dice-type`">
-                  <span class="param-key">骰子类型</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-dice-type`"
-                    :name="`skill_${key}_dice_type`"
-                    v-model="skill.dice_type"
-                    type="text"
-                    class="param-input param-text"
-                    placeholder="1d6"
-                  />
-                  <span v-else class="param-value">{{ skill.dice_type || '1d6' }}</span>
+                  <span v-else class="param-value">{{ skill.cast_range && skill.cast_range.min }}~{{ skill.cast_range && skill.cast_range.max }} 格</span>
                 </label>
 
-                <!-- success_line -->
-                <label class="param-row" :for="`skill-${key}-success-line`">
-                  <span class="param-key">成功线</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-success-line`"
-                    :name="`skill_${key}_success_line`"
-                    v-model.number="skill.success_line"
-                    type="number" min="1" max="20" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ skill.success_line ?? 4 }}+</span>
+                <label class="param-row" :for="`skill-${key}-skill-shape`">
+                  <span class="param-key">技能形态 skill_shape</span>
+                  <select v-if="editMode" :id="`skill-${key}-skill-shape`" v-model="skill.skill_shape" class="param-select">
+                    <option v-for="sh in SKILL_SHAPES" :key="sh" :value="sh">{{ SKILL_SHAPE_LABELS[sh] }}</option>
+                  </select>
+                  <span v-else class="param-value">{{ SKILL_SHAPE_LABELS[skill.skill_shape] || skill.skill_shape }}</span>
                 </label>
 
-                <!-- success_bonus_damage -->
-                <label class="param-row" :for="`skill-${key}-success-bonus`">
-                  <span class="param-key">成功追加</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-success-bonus`"
-                    :name="`skill_${key}_success_bonus_damage`"
-                    v-model.number="skill.success_bonus_damage"
-                    type="number" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">+{{ skill.success_bonus_damage ?? 0 }}</span>
-                </label>
-
-                <!-- is_manual_roll -->
-                <label class="param-row" :for="`skill-${key}-is-manual-roll`">
-                  <span class="param-key">手动摇骰</span>
-                  <template v-if="editMode">
-                    <input :id="`skill-${key}-is-manual-roll`" :name="`skill_${key}_is_manual_roll`" type="checkbox" v-model="skill.is_manual_roll" />
-                    <span class="param-value">{{ skill.is_manual_roll ? 'ON' : 'OFF' }}</span>
-                  </template>
-                  <span v-else class="param-value">{{ skill.is_manual_roll ? '⚡ 手动' : '自动' }}</span>
-                </label>
-              </div>
-            </div>
-
-            <!-- Phase 10: 属性分流与干预插槽 -->
-            <div class="phase10-fields">
-              <div class="dice-section-label phase10-label">[ Phase 10 · 属性分流与干预插槽 ]</div>
-              <div class="uf-row">
-                <!-- damage_kind -->
                 <label class="param-row" :for="`skill-${key}-damage-kind`">
-                  <span class="param-key">伤害类型</span>
-                  <select v-if="editMode" :id="`skill-${key}-damage-kind`" :name="`skill_${key}_damage_kind`" v-model="skill.damage_kind" class="param-select">
-                    <option value="kinetic">动能 kinetic</option>
-                    <option value="beam">光束 beam</option>
-                    <option value="explosive">爆炸 explosive</option>
-                    <option value="corrosive">腐蚀 corrosive</option>
-                    <option value="thermal">热熔 thermal</option>
+                  <span class="param-key">伤害种类 damage_kind</span>
+                  <select v-if="editMode" :id="`skill-${key}-damage-kind`" v-model="skill.damage_kind" class="param-select">
+                    <option v-for="dk in DAMAGE_KINDS" :key="dk" :value="dk">{{ DAMAGE_KIND_LABELS[dk] }}</option>
                   </select>
-                  <span v-else class="param-value">{{ skill.damage_kind || 'kinetic' }}</span>
+                  <span v-else class="param-value">{{ DAMAGE_KIND_LABELS[skill.damage_kind] || skill.damage_kind }}</span>
                 </label>
 
-                <!-- min_cast_range -->
-                <label class="param-row" :for="`skill-${key}-min-cast-range`">
-                  <span class="param-key">最小距离</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-min-cast-range`"
-                    :name="`skill_${key}_min_cast_range`"
-                    v-model.number="skill.min_cast_range"
-                    type="number" min="0" max="20" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ skill.min_cast_range ?? 0 }} 格</span>
-                </label>
-
-                <!-- accuracy_mod -->
-                <label class="param-row" :for="`skill-${key}-accuracy-mod`">
-                  <span class="param-key">命中修正</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-accuracy-mod`"
-                    :name="`skill_${key}_accuracy_mod`"
-                    v-model.number="skill.accuracy_mod"
-                    type="number" min="-10" max="10" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ (skill.accuracy_mod ?? 0) > 0 ? '+' : '' }}{{ skill.accuracy_mod ?? 0 }}</span>
-                </label>
-
-                <!-- evasion_mod -->
-                <label class="param-row" :for="`skill-${key}-evasion-mod`">
-                  <span class="param-key">闪避修正</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-evasion-mod`"
-                    :name="`skill_${key}_evasion_mod`"
-                    v-model.number="skill.evasion_mod"
-                    type="number" min="-10" max="10" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">{{ (skill.evasion_mod ?? 0) > 0 ? '+' : '' }}{{ skill.evasion_mod ?? 0 }}</span>
-                </label>
-              </div>
-
-              <div class="uf-row">
-                <!-- height_bonus_per_diff -->
-                <label class="param-row" :for="`skill-${key}-height-bonus`">
-                  <span class="param-key">高地格加成</span>
-                  <input
-                    v-if="editMode"
-                    :id="`skill-${key}-height-bonus`"
-                    :name="`skill_${key}_height_bonus_per_diff`"
-                    v-model.number="skill.height_bonus_per_diff"
-                    type="number" min="0" max="10" step="1"
-                    class="param-input"
-                  />
-                  <span v-else class="param-value">+{{ skill.height_bonus_per_diff ?? 0 }}/格</span>
-                </label>
-
-                <!-- action_type -->
                 <label class="param-row" :for="`skill-${key}-action-type`">
-                  <span class="param-key">动作类型</span>
-                  <select v-if="editMode" :id="`skill-${key}-action-type`" :name="`skill_${key}_action_type`" v-model="skill.action_type" class="param-select">
-                    <option value="attack">攻击 attack</option>
-                    <option value="heal">治疗 heal</option>
-                    <option value="buff">增益 buff</option>
-                    <option value="debuff">减益 debuff</option>
-                    <option value="passive">被动 passive</option>
+                  <span class="param-key">动作类型 action_type</span>
+                  <select v-if="editMode" :id="`skill-${key}-action-type`" v-model="skill.action_type" class="param-select">
+                    <option v-for="at in ACTION_TYPES" :key="at" :value="at">{{ ACTION_TYPE_LABELS[at] }}</option>
                   </select>
-                  <span v-else class="param-value">{{ skill.action_type || 'attack' }}</span>
-                </label>
-
-                <!-- attack_stat -->
-                <label class="param-row" :for="`skill-${key}-attack-stat`">
-                  <span class="param-key">攻击属性</span>
-                  <select v-if="editMode" :id="`skill-${key}-attack-stat`" :name="`skill_${key}_attack_stat`" v-model="skill.attack_stat" class="param-select">
-                    <option value="melee">格斗 melee</option>
-                    <option value="ranged">射击 ranged</option>
-                    <option value="max">取最高 max</option>
-                  </select>
-                  <span v-else class="param-value">{{ skill.attack_stat || 'melee' }}</span>
-                </label>
-
-                <!-- requires_unmoved -->
-                <label class="param-row" :for="`skill-${key}-requires-unmoved`">
-                  <span class="param-key">要求$不动</span>
-                  <template v-if="editMode">
-                    <input :id="`skill-${key}-requires-unmoved`" :name="`skill_${key}_requires_unmoved`" type="checkbox" v-model="skill.requires_unmoved" />
-                    <span class="param-value">{{ skill.requires_unmoved ? '需要' : '不需要' }}</span>
-                  </template>
-                  <span v-else class="param-value">{{ skill.requires_unmoved ? '⚓ 需不动' : '-' }}</span>
+                  <span v-else class="param-value">{{ ACTION_TYPE_LABELS[skill.action_type] || skill.action_type }}</span>
                 </label>
               </div>
-            </div>
+
+              <!-- 兼容插槽：旧专属字段折叠区，不影响主三区块 -->
+              <details class="compat-slot">
+                <summary>⚙ 兼容插槽（AOE / 修正 / 状态 / 旧距离）</summary>
+                <div class="block-body">
+                  <label class="param-row" :for="`skill-${key}-aoe-radius`">
+                    <span class="param-key">AOE 半径</span>
+                    <input v-if="editMode" :id="`skill-${key}-aoe-radius`" v-model.number="skill.aoe_radius" type="number" min="0" max="10" class="param-input" />
+                    <span v-else class="param-value">{{ skill.aoe_radius ?? 0 }} {{ (skill.aoe_radius ?? 0) === 0 ? '(单体)' : '格' }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-range-type`">
+                    <span class="param-key">范围类型 range_type</span>
+                    <select v-if="editMode" :id="`skill-${key}-range-type`" v-model="skill.range_type" class="param-select">
+                      <option value="radial">同心圆 radial</option>
+                      <option value="directional_beam">地图炮 directional_beam</option>
+                      <option value="cone">扇形 cone</option>
+                      <option value="single">单点 single</option>
+                    </select>
+                    <span v-else class="param-value">{{ skill.range_type || 'radial' }}</span>
+                  </label>
+                  <label v-if="skill.range_type === 'directional_beam'" class="param-row" :for="`skill-${key}-beam-width`">
+                    <span class="param-key">炮宽(格)</span>
+                    <input v-if="editMode" :id="`skill-${key}-beam-width`" v-model.number="skill.beam_width" type="number" min="1" max="10" class="param-input" />
+                    <span v-else class="param-value">{{ skill.beam_width || 1 }} 格</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-min-cast-range`">
+                    <span class="param-key">最小距离</span>
+                    <input v-if="editMode" :id="`skill-${key}-min-cast-range`" v-model.number="skill.min_cast_range" type="number" min="0" max="20" class="param-input" />
+                    <span v-else class="param-value">{{ skill.min_cast_range ?? 0 }} 格</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-accuracy-mod`">
+                    <span class="param-key">命中修正</span>
+                    <input v-if="editMode" :id="`skill-${key}-accuracy-mod`" v-model.number="skill.accuracy_mod" type="number" min="-10" max="10" class="param-input" />
+                    <span v-else class="param-value">{{ (skill.accuracy_mod ?? 0) > 0 ? '+' : '' }}{{ skill.accuracy_mod ?? 0 }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-evasion-mod`">
+                    <span class="param-key">闪避修正</span>
+                    <input v-if="editMode" :id="`skill-${key}-evasion-mod`" v-model.number="skill.evasion_mod" type="number" min="-10" max="10" class="param-input" />
+                    <span v-else class="param-value">{{ (skill.evasion_mod ?? 0) > 0 ? '+' : '' }}{{ skill.evasion_mod ?? 0 }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-height-bonus`">
+                    <span class="param-key">高地格加成</span>
+                    <input v-if="editMode" :id="`skill-${key}-height-bonus`" v-model.number="skill.height_bonus_per_diff" type="number" min="0" max="10" class="param-input" />
+                    <span v-else class="param-value">+{{ skill.height_bonus_per_diff ?? 0 }}/格</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-attack-stat`">
+                    <span class="param-key">攻击属性</span>
+                    <select v-if="editMode" :id="`skill-${key}-attack-stat`" v-model="skill.attack_stat" class="param-select">
+                      <option value="melee">格斗 melee</option>
+                      <option value="ranged">射击 ranged</option>
+                      <option value="max">取最高 max</option>
+                    </select>
+                    <span v-else class="param-value">{{ skill.attack_stat || 'melee' }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-base-damage`">
+                    <span class="param-key">基础伤害</span>
+                    <input v-if="editMode" :id="`skill-${key}-base-damage`" v-model.number="skill.base_damage" type="number" step="1" class="param-input" />
+                    <span v-else class="param-value">{{ skill.base_damage ?? 0 }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-requires-unmoved`">
+                    <span class="param-key">要求未移动</span>
+                    <template v-if="editMode">
+                      <input :id="`skill-${key}-requires-unmoved`" type="checkbox" v-model="skill.requires_unmoved" />
+                      <span class="param-value">{{ skill.requires_unmoved ? '需要' : '不需要' }}</span>
+                    </template>
+                    <span v-else class="param-value">{{ skill.requires_unmoved ? '⚓ 需不动' : '-' }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-requires-stealth`">
+                    <span class="param-key">要求隐身</span>
+                    <template v-if="editMode">
+                      <input :id="`skill-${key}-requires-stealth`" type="checkbox" v-model="skill.requires_stealth" />
+                      <span class="param-value">{{ skill.requires_stealth ? '需要' : '不需要' }}</span>
+                    </template>
+                    <span v-else class="param-value">{{ skill.requires_stealth ? '🥷 需隐身' : '-' }}</span>
+                  </label>
+                  <label class="param-row param-row-wide">
+                    <span class="param-key">附加效果 status_effects</span>
+                    <span v-if="!editMode" class="param-value">{{ (skill.status_effects || []).join(', ') || '无' }}</span>
+                    <div v-else class="status-effects-tags">
+                      <label
+                        v-for="eff in availableEffects"
+                        :key="eff.value"
+                        class="status-tag"
+                        :class="{ active: (skill.status_effects || []).includes(eff.value) }"
+                      >
+                        <input
+                          type="checkbox"
+                          :id="`skill-${key}-eff-${eff.value}`"
+                          :checked="(skill.status_effects || []).includes(eff.value)"
+                          @change="toggleEffect(skill, eff.value)"
+                          class="status-checkbox"
+                        />
+                        {{ eff.label }}
+                      </label>
+                    </div>
+                  </label>
+                </div>
+              </details>
+            </section>
+
+            <!-- 区块三 · 投骰属性与多重判定面板 -->
+            <section class="edit-block">
+              <div class="block-title">▸ 区块三 · 投骰属性与多重判定</div>
+              <div class="block-body">
+                <!-- 主开关 -->
+                <label class="param-row has-dice-row" :for="`skill-${key}-has-dice`">
+                  <span class="param-key">是否投骰 has_dice</span>
+                  <template v-if="editMode">
+                    <input :id="`skill-${key}-has-dice`" type="checkbox" v-model="skill.has_dice" />
+                    <span class="param-value">{{ skill.has_dice ? 'ON（启用多判定）' : 'OFF（传统掷骰）' }}</span>
+                  </template>
+                  <span v-else class="param-value">{{ skill.has_dice ? 'ON' : 'OFF' }}</span>
+                </label>
+
+                <!-- 新投骰多分支模型 -->
+                <div v-if="skill.has_dice" class="dice-branch-zone">
+                  <label class="param-row" :for="`skill-${key}-dice-type`">
+                    <span class="param-key">骰子面数 dice_type</span>
+                    <select v-if="editMode" :id="`skill-${key}-dice-type`" v-model.number="skill.dice_type" class="param-select">
+                      <option v-for="dt in DICE_TYPES" :key="dt" :value="dt">d{{ dt }}</option>
+                    </select>
+                    <span v-else class="param-value">d{{ skill.dice_type }}</span>
+                  </label>
+
+                  <div class="branches-list">
+                    <div
+                      v-for="(branch, bi) in skill.dice_branches"
+                      :key="branch.id"
+                      class="branch-card"
+                    >
+                      <div class="branch-head">
+                        <span class="branch-title">《判定{{ bi + 1 }}》</span>
+                        <button v-if="editMode" class="btn btn-mini btn-delete" @click="removeBranch(skill, bi)">− 删除判定</button>
+                      </div>
+
+                      <!-- 生效点数集合（离散 2,5 或区间 [1,4]） -->
+                      <div class="branch-sub">
+                        <span class="branch-sub-label">生效点数</span>
+                        <input
+                          v-if="editMode"
+                          class="param-input param-text point-text"
+                          :value="pointText(branch)"
+                          :placeholder="'离散 2,5 或区间 [1,4]'"
+                          @input="setPointText(branch, $event.target.value)"
+                        />
+                        <span v-else class="param-value">{{ pointText(branch) || '（无）' }}</span>
+                      </div>
+
+                      <!-- 判定效果列表 -->
+                      <div class="branch-sub">
+                        <span class="branch-sub-label">判定效果</span>
+                        <div
+                          v-for="(eff, ei) in branch.effects"
+                          :key="ei"
+                          class="effect-row"
+                        >
+                          <select v-if="editMode" v-model="eff.action" class="param-select effect-action">
+                            <option v-for="a in BRANCH_ACTIONS" :key="a" :value="a">{{ BRANCH_ACTION_LABELS[a] }}</option>
+                          </select>
+                          <span v-else class="param-value">{{ BRANCH_ACTION_LABELS[eff.action] || eff.action }}</span>
+                          <template v-if="eff.action === 'apply_status'">
+                            <input v-if="editMode" v-model="eff.status" class="param-input param-text" placeholder="状态标识 status" />
+                            <span v-else class="param-value">{{ eff.status || '-' }}</span>
+                          </template>
+                          <template v-else>
+                            <input v-if="editMode" v-model.number="eff.value" type="number" step="1" class="param-input param-num" placeholder="数值" />
+                            <span v-else class="param-value">{{ eff.value ?? 0 }}</span>
+                          </template>
+                          <button v-if="editMode" class="btn btn-mini btn-delete" @click="removeEffect(branch, ei)">✕</button>
+                        </div>
+                        <button v-if="editMode" class="btn btn-mini btn-add" @click="addEffect(branch)">+ 添加判定效果</button>
+                      </div>
+                    </div>
+
+                    <button v-if="editMode" class="btn btn-add" @click="addBranch(skill)">+ 添加判定分支</button>
+                    <span v-if="!editMode && (!skill.dice_branches || !skill.dice_branches.length)" class="param-value">（无判定分支）</span>
+                  </div>
+                </div>
+
+                <!-- 传统掷骰（has_dice = false 时显示） -->
+                <div v-else class="legacy-dice-zone">
+                  <label class="param-row" :for="`skill-${key}-success-line`">
+                    <span class="param-key">成功线</span>
+                    <input v-if="editMode" :id="`skill-${key}-success-line`" v-model.number="skill.success_line" type="number" min="1" max="20" class="param-input" />
+                    <span v-else class="param-value">{{ skill.success_line ?? 4 }}+</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-success-bonus`">
+                    <span class="param-key">成功追加</span>
+                    <input v-if="editMode" :id="`skill-${key}-success-bonus`" v-model.number="skill.success_bonus_damage" type="number" step="1" class="param-input" />
+                    <span v-else class="param-value">+{{ skill.success_bonus_damage ?? 0 }}</span>
+                  </label>
+                  <label class="param-row" :for="`skill-${key}-is-manual-roll`">
+                    <span class="param-key">手动摇骰</span>
+                    <template v-if="editMode">
+                      <input :id="`skill-${key}-is-manual-roll`" type="checkbox" v-model="skill.is_manual_roll" />
+                      <span class="param-value">{{ skill.is_manual_roll ? 'ON' : 'OFF' }}</span>
+                    </template>
+                    <span v-else class="param-value">{{ skill.is_manual_roll ? '⚡ 手动' : '自动' }}</span>
+                  </label>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </section>
@@ -651,11 +671,97 @@
       </div>
     </div>
 
+    <!-- Excel 导入预览模态框 -->
+    <div v-if="showExcelModal" class="excel-overlay" @click.self="showExcelModal = false">
+      <div class="excel-modal">
+        <div class="excel-modal-header">
+          <h3>📥 Excel 导入预览</h3>
+          <button class="excel-close" @click="showExcelModal = false">✕</button>
+        </div>
+
+        <div class="excel-counts">
+          <span class="count-badge badge-new">新增 {{ excelPreview.counts.new }} 条</span>
+          <span class="count-badge badge-update">修改 {{ excelPreview.counts.update }} 条</span>
+          <span class="count-badge badge-total">共 {{ excelPreview.counts.total }} 条</span>
+          <span v-if="excelPreview.errors.length" class="count-badge badge-error">
+            ❌ {{ excelPreview.errors.length }} 处错误 · 禁止确认
+          </span>
+        </div>
+
+        <div v-if="excelPreview.errors.length" class="excel-block excel-errors">
+          <div class="excel-block-title err-title">⛔ 错误（必须修正后才能导入）</div>
+          <div v-for="(err, i) in excelPreview.errors" :key="'err' + i" class="excel-line err-line">
+            行 {{ err.row || '-' }} · <b>{{ err.key || err.field }}</b> · {{ err.message }}
+          </div>
+        </div>
+
+        <div v-if="excelPreview.warnings.length" class="excel-block excel-warnings">
+          <div class="excel-block-title warn-title">⚠ 警告</div>
+          <div v-for="(w, i) in excelPreview.warnings" :key="'warn' + i" class="excel-line warn-line">
+            行 {{ w.row || '-' }} · <b>{{ w.key || w.field }}</b> · {{ w.message }}
+          </div>
+        </div>
+
+        <div class="excel-list-wrap">
+          <div
+            v-for="(skill, key) in excelPreview.skills"
+            :key="key"
+            class="excel-row"
+            :class="isExistingSkill(key) ? 'row-update' : 'row-new'"
+          >
+            <span class="excel-tag" :class="isExistingSkill(key) ? 'tag-update' : 'tag-new'">
+              {{ isExistingSkill(key) ? '修改' : '新增' }}
+            </span>
+            <span class="excel-key">{{ key }}</span>
+            <span class="excel-name">{{ skill.label || skill.name }}</span>
+            <span class="excel-cat">{{ skill.category }}</span>
+          </div>
+        </div>
+
+        <div class="excel-modal-footer">
+          <button class="btn btn-ghost" @click="showExcelModal = false">取消</button>
+          <button
+            class="btn btn-primary"
+            :disabled="(excelPreview.errors && excelPreview.errors.length) || excelLoading"
+            @click="confirmExcelImport"
+          >
+            {{ excelLoading ? '导入中...' : '确认导入' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 隐藏的 Excel 文件选择器 -->
+    <input
+      type="file"
+      ref="excelInput"
+      @change="onExcelSelected"
+      accept=".xlsx,.xls"
+      style="display: none"
+    />
+
 </template>
 
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { glossaryAPI } from '@/api/client.js'
+import {
+  hydrateSkill,
+  serializeSkillToContract,
+  SKILL_CATEGORIES,
+  CATEGORY_LABELS,
+  TARGET_SCOPES,
+  TARGET_SCOPE_LABELS,
+  SKILL_SHAPES,
+  SKILL_SHAPE_LABELS,
+  DAMAGE_KINDS,
+  DAMAGE_KIND_LABELS,
+  ACTION_TYPES,
+  ACTION_TYPE_LABELS,
+  DICE_TYPES,
+  BRANCH_ACTIONS,
+  BRANCH_ACTION_LABELS
+} from '@/contracts/skillContract.js'
 
 const loading = ref(true)
 const loadError = ref('')
@@ -665,6 +771,17 @@ const saveMsgTimeout = ref(null)
 const editMode = ref(false)
 const pendingDeletes = ref([])
 const skillKeyEdits = reactive({})
+
+// Excel 导入（两步法）状态
+const excelInput = ref(null)
+const showExcelModal = ref(false)
+const excelLoading = ref(false)
+const excelPreview = ref({
+  skills: {},
+  counts: { new: 0, update: 0, total: 0 },
+  warnings: [],
+  errors: [],
+})
 
 const editableConfig = reactive({
   _meta: {},
@@ -723,44 +840,123 @@ function onSkillKeyBlur(oldKey) {
 function addNewSkill() {
   const timestamp = Date.now()
   const newKey = 'new_skill_' + timestamp
-  editableConfig.skills[newKey] = {
-    type: 'active',
-    label: '新词条',
+  editableConfig.skills[newKey] = hydrateSkill({
+    key: newKey,
+    name: '新词条',
     category: 'melee',
-    description: '',
-    target_filter: 'enemy',
-    cast_range: 1,
-    aoe_radius: 0,
-    base_damage: 0,
-    status_effects: [],
-    dice_type: '1d6',
-    success_line: 4,
-    success_bonus_damage: 0,
-    is_manual_roll: false,
-    deterministic: true,
-    // Phase 10: 万能语法字段
+    target_scope: 'enemy',
+    cast_range: { min: 1, max: 1 },
+    skill_shape: 'single',
     damage_kind: 'kinetic',
-    min_cast_range: 0,
-    accuracy_mod: 0,
-    evasion_mod: 0,
-    height_bonus_per_diff: 0,
     action_type: 'attack',
-    attack_stat: 'melee',
-    requires_unmoved: false,
-    requires_stealth: false
-  }
+    has_dice: false,
+    dice_type: 6,
+    dice_branches: []
+  })
   skillKeyEdits[newKey] = newKey
 }
 
 // 删除词条
 function deleteSkill(key) {
-  if (!confirm(`确认删除词条「${editableConfig.skills[key]?.label || key}」？此操作需保存后生效。`)) return
+  if (!confirm(`确认删除词条「${editableConfig.skills[key]?.name || editableConfig.skills[key]?.label || key}」？此操作需保存后生效。`)) return
   pendingDeletes.value.push(key)
   delete editableConfig.skills[key]
   delete skillKeyEdits[key]
 }
 
 // 加载配置
+// ───────── 投骰多分支动态表单助手（Step 3） ─────────
+function addBranch(skill) {
+  if (!skill.dice_branches) skill.dice_branches = []
+  skill.dice_branches.push({
+    id: 'br_' + Math.random().toString(36).slice(2, 9),
+    label: `判定${skill.dice_branches.length + 1}`,
+    points: [],
+    effects: []
+  })
+}
+function removeBranch(skill, index) {
+  if (skill.dice_branches) skill.dice_branches.splice(index, 1)
+}
+function addEffect(branch) {
+  if (!branch.effects) branch.effects = []
+  branch.effects.push({ action: 'damage', value: 0, status: null, target: 'enemy' })
+}
+function removeEffect(branch, index) {
+  if (branch.effects) branch.effects.splice(index, 1)
+}
+function parsePointText(text) {
+  const tokens = String(text || '').split(',').map(s => s.trim()).filter(Boolean)
+  const points = []
+  for (const t of tokens) {
+    const m = t.match(/^\[(\d+)\s*,\s*(\d+)\]$/)
+    if (m) {
+      const a = Number(m[1]); const b = Number(m[2])
+      points.push({ kind: 'range', min: Math.min(a, b), max: Math.max(a, b) })
+    } else if (/^\d+$/.test(t)) {
+      points.push({ kind: 'exact', value: Number(t) })
+    }
+  }
+  return points
+}
+function pointText(branch) {
+  return (branch.points || [])
+    .map(p => (p.kind === 'range' ? `[${p.min},${p.max}]` : String(p.value)))
+    .join(', ')
+}
+function setPointText(branch, text) {
+  branch.points = parsePointText(text)
+}
+
+// ── Excel 导入（两步法）──
+function isExistingSkill(key) {
+  return !!editableConfig.skills[key]
+}
+
+function triggerExcelUpload() {
+  excelInput.value?.click()
+}
+
+async function onExcelSelected(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  const fd = new FormData()
+  fd.append('file', file)
+  excelLoading.value = true
+  try {
+    const res = await glossaryAPI.importExcel(fd)
+    excelPreview.value = res.data || excelPreview.value
+    showExcelModal.value = true
+  } catch (err) {
+    saveMsg.value = '✗ Excel 解析失败: ' + (err.response?.data?.message || err.message)
+    console.error('[Glossary] Excel 解析失败:', err)
+  } finally {
+    excelLoading.value = false
+    if (e.target) e.target.value = ''
+  }
+}
+
+async function confirmExcelImport() {
+  if (excelPreview.value.errors && excelPreview.value.errors.length) return
+  excelLoading.value = true
+  try {
+    const res = await glossaryAPI.importApply({
+      skills: excelPreview.value.skills,
+      _delete_skills: [],
+    })
+    saveMsg.value = `✓ 导入成功：新增/更新 ${res.data.applied?.length || 0} 条`
+    showExcelModal.value = false
+    await loadConfig()
+    if (saveMsgTimeout.value) clearTimeout(saveMsgTimeout.value)
+    saveMsgTimeout.value = setTimeout(() => { saveMsg.value = '' }, 5000)
+  } catch (err) {
+    saveMsg.value = '✗ 导入失败: ' + (err.response?.data?.message || err.message)
+    console.error('[Glossary] Excel 导入失败:', err)
+  } finally {
+    excelLoading.value = false
+  }
+}
+
 async function loadConfig() {
   loading.value = true
   loadError.value = ''
@@ -769,7 +965,10 @@ async function loadConfig() {
     const data = res.data
     const glossary = data.glossary || data // 柔性兼容 3006 网关 glossary 包裹层
     editableConfig._meta = { ...glossary._meta }
-    editableConfig.skills = { ...glossary.skills }
+    editableConfig.skills = {}
+    Object.entries(glossary.skills || {}).forEach(([k, sk]) => {
+      editableConfig.skills[k] = hydrateSkill(sk)
+    })
     editableConfig.systems = { ...glossary.systems }
 
     // 初始化 key 编辑缓存
@@ -797,7 +996,9 @@ async function saveConfig() {
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
         generated_from: 'GlossaryView.vue 结构化 CRUD 编辑界面'
       },
-      skills: { ...editableConfig.skills },
+      skills: Object.fromEntries(
+        Object.entries(editableConfig.skills).map(([k, s]) => [k, serializeSkillToContract(s)])
+      ),
       systems: { ...editableConfig.systems }
     }
 
@@ -861,6 +1062,8 @@ const wizardForm = reactive({
   target_on_terrain: '',
   description: '',
   deterministic: true,
+  has_dice: false,
+  dice_branches: []
 })
 
 const wizardStepLabel = computed(() => {
@@ -900,6 +1103,8 @@ function toggleWizard() {
     target_on_terrain: '',
     description: '',
     deterministic: true,
+    has_dice: false,
+    dice_branches: []
   })
 }
 
@@ -908,21 +1113,20 @@ function commitWizardSkill() {
   const statusEffects = wizardForm.status_effects_str
     ? wizardForm.status_effects_str.split(',').map(s => s.trim()).filter(Boolean)
     : []
-  editableConfig.skills[key] = {
-    label: wizardForm.label || '新词条',
+  const wizardRaw = {
+    key: key,
+    name: wizardForm.label || '新词条',
     category: wizardForm.category,
-    description: wizardForm.description || '',
     target_filter: wizardForm.target_filter,
     cast_range: wizardForm.cast_range,
+    min_cast_range: wizardForm.min_cast_range,
     aoe_radius: wizardForm.aoe_radius,
     range_type: wizardForm.range_type || 'radial',
     beam_width: wizardForm.range_type === 'directional_beam' ? (wizardForm.beam_width || 1) : 0,
     base_damage: wizardForm.base_damage,
     status_effects: statusEffects,
     deterministic: wizardForm.deterministic,
-    // Phase 10: 万能语法字段
     damage_kind: wizardForm.damage_kind,
-    min_cast_range: wizardForm.min_cast_range,
     accuracy_mod: wizardForm.accuracy_mod,
     evasion_mod: wizardForm.evasion_mod,
     height_bonus_per_diff: wizardForm.height_bonus_per_diff,
@@ -936,10 +1140,47 @@ function commitWizardSkill() {
     success_line: wizardForm.success_line,
     success_bonus_damage: wizardForm.success_bonus_damage,
     is_manual_roll: wizardForm.is_manual_roll,
+    has_dice: wizardForm.has_dice,
+    dice_branches: wizardForm.has_dice
+      ? wizardForm.dice_branches
+          .map(b => ({
+            points: parseWizardPoints(b.pointsStr),
+            effects: (b.effects || []).map(e => ({ action: e.action, value: Number(e.value) || 0, status: e.status || null }))
+          }))
+          .filter(b => b.points.length && b.effects.length)
+      : []
   }
+  editableConfig.skills[key] = hydrateSkill(wizardRaw)
   skillKeyEdits[key] = key
   showWizard.value = false
-  alert(`词条「${editableConfig.skills[key].label}」已创建！请保存以同步规则。`)
+  alert(`词条「${editableConfig.skills[key].name}」已创建！请保存以同步规则。`)
+}
+
+function addWizardBranch() {
+  wizardForm.dice_branches.push({ pointsStr: '', effects: [{ action: 'damage', value: 0, status: '' }] })
+}
+
+// 将向导输入的点数字符串解析为 points 数组（支持逗号分隔与区间 -）
+function parseWizardPoints(str) {
+  if (!str) return []
+  const out = []
+  String(str).split(',').forEach(part => {
+    const t = part.trim()
+    if (!t) return
+    if (t.includes('-')) {
+      const [a, b] = t.split('-').map(n => parseInt(n, 10))
+      if (!isNaN(a) && !isNaN(b)) out.push([Math.min(a, b), Math.max(a, b)])
+    } else {
+      const n = parseInt(t, 10)
+      if (!isNaN(n)) out.push(n)
+    }
+  })
+  return out
+}
+
+function scrollToSkill(key) {
+  const el = document.getElementById('skill-card-' + key)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function toggleAiImport() {
@@ -1077,6 +1318,20 @@ onMounted(() => {
 .panel-header h2 { margin: 0; font-size: 14px; font-weight: 700; color: #ffb000; letter-spacing: 1px; }
 .panel-badge { font-size: 9px; padding: 2px 10px; background: rgba(19,255,67,0.06); border: 1px solid rgba(19,255,67,0.2); color: rgba(19,255,67,0.6); letter-spacing: 1px; }
 .panel-body { padding: 12px 20px 20px; }
+/* 词条中枢首页 · 总览列表 */
+.overview-list { display: flex; flex-direction: column; gap: 6px; }
+.overview-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: left; cursor: pointer;
+  padding: 8px 12px; background: rgba(0,0,0,0.2);
+  border: 1px solid rgba(159,142,120,0.12);
+  color: #c1e8ff; font-size: 12px; font-family: monospace;
+}
+.overview-item:hover { border-color: rgba(255,176,0,0.4); background: rgba(255,176,0,0.06); }
+.ov-key { color: #ffb000; font-weight: 700; min-width: 120px; }
+.ov-name { color: #c1e8ff; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-cat { font-size: 10px; padding: 2px 8px; border-radius: 2px; background: rgba(159,142,120,0.15); color: #9f8e78; }
+.ov-dice { font-size: 11px; color: #13ff43; }
 
 .empty-state { text-align: center; padding: 40px; color: rgba(193,232,255,0.3); font-size: 12px; }
 
@@ -1173,6 +1428,16 @@ onMounted(() => {
 .wiz-hint { display: block; font-size: 9px; color: rgba(193,232,255,0.25); margin-top: 1px; }
 .wiz-check { margin-bottom: 8px; color: #c1e8ff; font-size: 12px; }
 .wiz-check input { margin-right: 5px; }
+.wiz-sep { border: none; border-top: 1px dashed rgba(159,142,120,0.2); margin: 14px 0 10px; }
+.wiz-branches { margin-top: 6px; display: flex; flex-direction: column; gap: 12px; }
+.wiz-branch { border: 1px solid rgba(19,255,67,0.2); background: rgba(19,255,67,0.03); padding: 10px; }
+.wiz-branch-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #13ff43; margin-bottom: 8px; }
+.wiz-effects { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.wiz-effects select { width: auto; min-width: 120px; }
+.wiz-effects input[type="number"] { width: 80px; }
+.wiz-effects input[type="text"] { width: 130px; }
+.wiz-x { background: rgba(255,64,64,0.15); color: #ff6b6b; border: 1px solid rgba(255,64,64,0.3); padding: 3px 8px; cursor: pointer; font-size: 10px; }
+.wiz-add { background: rgba(19,255,67,0.1); color: #13ff43; border: 1px solid rgba(19,255,67,0.25); padding: 4px 10px; cursor: pointer; font-size: 11px; margin-top: 4px; }
 .wiz-preview { background: rgba(0,0,0,0.2); border: 1px solid rgba(159,142,120,0.1); padding: 10px; }
 .wiz-preview-line { font-size: 11px; color: #c1e8ff; margin-bottom: 5px; }
 .wizard-footer {
@@ -1216,4 +1481,173 @@ onMounted(() => {
 }
 .import-success { color: #4caf50; font-size: 12px; margin-top: 8px; }
 .import-error { color: #f44336; font-size: 12px; margin-top: 8px; }
+/* ===== Step 2/3 结构化三区块 + 投骰多分支 ===== */
+.skill-key-badge {
+  font-size: 11px; font-weight: 700; color: #ffb000; letter-spacing: 1px;
+  padding: 2px 10px; background: rgba(255,176,0,0.08); border: 1px solid rgba(255,176,0,0.25);
+  font-family: inherit;
+}
+.skill-name-badge {
+  font-size: 13px; font-weight: 600; color: #c1e8ff; font-family: inherit; flex: 1;
+}
+
+.edit-block {
+  border: 1px solid rgba(159,142,120,0.12);
+  margin-top: 12px; background: rgba(0,0,0,0.12);
+}
+.block-title {
+  font-size: 12px; font-weight: 700; color: #13ff43; letter-spacing: 1px;
+  padding: 8px 14px; border-bottom: 1px solid rgba(159,142,120,0.1);
+  background: rgba(19,255,67,0.04); cursor: default;
+}
+.block-body {
+  display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 12px 14px;
+}
+.block-row { display: flex; gap: 10px 18px; flex: 1 1 100%; align-items: flex-end; flex-wrap: nowrap; }
+.block-row .param-row { flex: 1; min-width: 160px; }
+.block-row .param-key { min-width: auto; }
+.compat-slot {
+  margin-top: 8px; padding: 0 14px 12px; border-top: 1px dashed rgba(159,142,120,0.1);
+}
+.compat-slot summary {
+  font-size: 10px; color: rgba(0,180,220,0.7); cursor: pointer; letter-spacing: 1px;
+  padding: 8px 0; user-select: none;
+}
+.compat-slot summary:hover { color: #00b4dc; }
+
+.param-row { display: flex; flex-direction: column; gap: 3px; min-width: 180px; }
+.param-row-wide { min-width: 100%; }
+.param-key {
+  font-size: 9px; color: rgba(193,232,255,0.45); letter-spacing: 1px; text-transform: uppercase;
+}
+.param-input, .param-select {
+  padding: 4px 8px; font-size: 11px; background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(159,142,120,0.3); color: #c1e8ff; font-family: inherit; outline: none;
+}
+.param-input:focus, .param-select:focus { border-color: #ffb000; box-shadow: 0 0 0 2px rgba(255,176,0,0.15); }
+.param-text { min-width: 160px; }
+.param-num { width: 56px; }
+.range-inputs { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: rgba(193,232,255,0.6); }
+.range-inputs .param-num { width: 48px; }
+.point-text { min-width: 200px; }
+.param-value { font-size: 11px; color: #c1e8ff; }
+
+.has-dice-row { flex-direction: row; align-items: center; gap: 10px; min-width: auto; }
+.has-dice-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: #13ff43; }
+
+.dice-branch-zone { width: 100%; border-top: 1px dashed rgba(19,255,67,0.2); margin-top: 10px; padding-top: 10px; }
+.legacy-dice-zone { width: 100%; }
+.branches-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding-left: 4px; }
+.branch-card {
+  border: 1px solid rgba(19,255,67,0.2); background: rgba(19,255,67,0.03);
+  padding: 10px 12px;
+}
+.branch-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.branch-title { font-size: 12px; font-weight: 700; color: #ffb000; letter-spacing: 1px; }
+.branch-sub { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.branch-sub-label {
+  font-size: 9px; color: rgba(193,232,255,0.45); letter-spacing: 1px; text-transform: uppercase;
+  padding-top: 5px; min-width: 64px;
+}
+.effect-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.effect-action { min-width: 120px; }
+.btn-mini { padding: 2px 10px; font-size: 10px; letter-spacing: 0; }
+
+/* ── Excel 上传按钮 ── */
+.btn-upload {
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  transition: all 0.2s ease;
+}
+.btn-upload:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+.btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Excel 导入预览模态框 ── */
+.excel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(4px);
+}
+.excel-modal {
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, #11203a 0%, #0b1426 100%);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 0 40px rgba(56, 189, 248, 0.15);
+  overflow: hidden;
+}
+.excel-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+.excel-modal-header h3 { margin: 0; font-size: 15px; color: #e2f4ff; letter-spacing: 1px; }
+.excel-close {
+  background: transparent; border: none; color: #94a3b8; font-size: 16px; cursor: pointer;
+}
+.excel-close:hover { color: #ef4444; }
+
+.excel-counts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px; }
+.count-badge {
+  font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.badge-new { color: #22c55e; border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.1); }
+.badge-update { color: #38bdf8; border-color: rgba(56,189,248,0.4); background: rgba(56,189,248,0.1); }
+.badge-total { color: #94a3b8; border-color: rgba(148,163,184,0.3); background: rgba(148,163,184,0.08); }
+.badge-error { color: #ef4444; border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.12); }
+
+.excel-block { padding: 8px 20px; max-height: 180px; overflow-y: auto; }
+.excel-block-title { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+.err-title { color: #ef4444; }
+.warn-title { color: #f59e0b; }
+.excel-line { font-size: 12px; padding: 3px 0; line-height: 1.5; }
+.err-line { color: #fca5a5; }
+.warn-line { color: #fcd34d; }
+
+.excel-list-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 20px;
+  border-top: 1px solid rgba(56, 189, 248, 0.12);
+  margin-top: 4px;
+}
+.excel-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 6px; border-radius: 8px;
+  border-left: 3px solid transparent;
+  background: rgba(255,255,255,0.02);
+  transition: background 0.15s ease;
+}
+.excel-row:hover { background: rgba(56,189,248,0.06); }
+.row-new { border-left-color: #22c55e; }
+.row-update { border-left-color: #38bdf8; }
+.excel-tag {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+}
+.tag-new { color: #22c55e; background: rgba(34,197,94,0.12); }
+.tag-update { color: #38bdf8; background: rgba(56,189,248,0.12); }
+.excel-key { font-family: monospace; font-size: 12px; color: #cbd5e1; min-width: 90px; }
+.excel-name { flex: 1; font-size: 13px; color: #e2e8f0; }
+.excel-cat { font-size: 11px; color: #94a3b8; }
+
+.excel-modal-footer {
+  display: flex; justify-content: flex-end; gap: 12px;
+  padding: 14px 20px; border-top: 1px solid rgba(56, 189, 248, 0.2);
+}
+.excel-modal-footer .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

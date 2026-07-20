@@ -157,6 +157,7 @@ function createTables(): void {
       faction TEXT DEFAULT 'earth',
       category TEXT DEFAULT 'melee',
       tier INTEGER DEFAULT 1,
+      total_points INTEGER DEFAULT 0,
       sprite_key TEXT,
       stats TEXT NOT NULL DEFAULT '{}',
       skills TEXT DEFAULT '[]',
@@ -240,6 +241,9 @@ function _migrateExistingTablesInner(): void {
   }
   if (!unitColNames.includes('review_status')) {
     safeAlter('units', 'review_status', "ALTER TABLE units ADD COLUMN review_status TEXT DEFAULT 'pending'", 'units 表添加 review_status 列');
+  }
+  if (!unitColNames.includes('total_points')) {
+    safeAlter('units', 'total_points', 'ALTER TABLE units ADD COLUMN total_points INTEGER DEFAULT 0', 'units 表添加 total_points 列');
   }
 
   // Phase 29-DataSecurity: maps 表审核卡口

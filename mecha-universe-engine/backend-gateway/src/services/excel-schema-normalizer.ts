@@ -37,6 +37,7 @@ export interface NormalizedUnit {
   sprite_key: string | null;
   stats: UnitStats;
   skills: UnitSkill[];
+  totalPoints: number;
   attributes: Record<string, unknown>;
   /** 原始解析数据（前端预览用） */
   rawParts: Record<string, ParsedUnit>;
@@ -99,6 +100,7 @@ export function normalizeParsedData(parsed: ParsedResult): NormalizedPreview {
     sprite_key: null,
     stats,
     skills,
+    totalPoints: parsed.basic.totalPoints ?? 0,
     attributes,
     rawParts: parsed.units,
     rawSkills: parsed.skills,
@@ -169,6 +171,8 @@ function mapSkills(rawSkills: ParsedSkill[]): UnitSkill[] {
     id: uuidv4(),
     name: s.name,
     description: s.effect || s.special || '',
+    effect: s.effect || '',
+    type: s.type || '自动',
     script: '',
     cooldown: 0,
     currentCooldown: 0,
@@ -222,6 +226,12 @@ function buildAttributes(
       range: s.range,
       special: s.special,
     });
+  }
+
+  // 按各部位 skillSlots 补齐技能数组（空槽用 null 占位；转换器对 !skill||!skill.name 已兼容跳过）
+  for (const owner of Object.keys(skillsByOwner)) {
+    const slots = (units[owner] && units[owner].skillSlots) || skillsByOwner[owner].length;
+    while (skillsByOwner[owner].length < (slots as number)) skillsByOwner[owner].push(null);
   }
 
   return {

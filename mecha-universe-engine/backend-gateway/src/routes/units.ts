@@ -84,6 +84,33 @@ router.get('/api/units', (req, res) => {
 });
 
 // ========================================
+// Phase 29-Debug: 阵营静态字典端点（已前置到 :unitId 之前，避免路由劫持 404）
+// 从内存常量返回阵营列表，保证 loadFactions() 不再 404
+// ========================================
+const FACTION_DICT: Record<string, { code: string; name: string; logoUrl: string }> = {
+  earth:    { code: 'earth',    name: '地球联合',   logoUrl: '/api/units/factions/logo/earth.png' },
+  bailong:  { code: 'bailong',  name: '拜隆军',     logoUrl: '/api/units/factions/logo/bailong.png' },
+  maxion:   { code: 'maxion',   name: '马克西翁',   logoUrl: '/api/units/factions/logo/maxion.png' },
+};
+
+router.get('/api/units/factions', (_req, res) => {
+  // 动态合并数据库中实际使用到的阵营
+  const usedCodes = all(
+    'SELECT DISTINCT faction FROM units WHERE faction IS NOT NULL AND faction != \'\''
+  ) as { faction: string }[];
+  const dbFactions: Record<string, { code: string; name: string; logoUrl: string }> = {};
+  for (const row of usedCodes) {
+    const code = row.faction;
+    if (!FACTION_DICT[code]) {
+      dbFactions[code] = { code, name: code, logoUrl: `/api/units/factions/logo/${code}.png` };
+    }
+  }
+
+  const allFactions = { ...FACTION_DICT, ...dbFactions };
+  res.json({ factions: Object.values(allFactions) });
+});
+
+// ========================================
 // Phase 30-Fix: 获取单个单位完整数据（编辑回填）
 // ========================================
 router.get('/api/units/:unitId', (req, res) => {
@@ -99,6 +126,7 @@ router.get('/api/units/:unitId', (req, res) => {
     faction: unit.faction,
     category: unit.category,
     tier: unit.tier,
+    totalPoints: unit.total_points ?? 0,
     sprite_key: unit.sprite_key,
     main_image_url: unit.sprite_key || null,
     stats: JSON.parse(unit.stats || '{}'),
@@ -189,33 +217,6 @@ router.post('/api/units/generate', (req, res) => {
     console.error('[Units] AI 生成错误:', err);
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: 'AI 生成失败' });
   }
-});
-
-// ========================================
-// Phase 29-Debug: 阵营静态字典端点
-// 从内存常量返回阵营列表，保证 loadFactions() 不再 404
-// ========================================
-const FACTION_DICT: Record<string, { code: string; name: string; logoUrl: string }> = {
-  earth:    { code: 'earth',    name: '地球联合',   logoUrl: '/api/units/factions/logo/earth.png' },
-  bailong:  { code: 'bailong',  name: '拜隆军',     logoUrl: '/api/units/factions/logo/bailong.png' },
-  maxion:   { code: 'maxion',   name: '马克西翁',   logoUrl: '/api/units/factions/logo/maxion.png' },
-};
-
-router.get('/api/units/factions', (_req, res) => {
-  // 动态合并数据库中实际使用到的阵营
-  const usedCodes = all(
-    'SELECT DISTINCT faction FROM units WHERE faction IS NOT NULL AND faction != \'\''
-  ) as { faction: string }[];
-  const dbFactions: Record<string, { code: string; name: string; logoUrl: string }> = {};
-  for (const row of usedCodes) {
-    const code = row.faction;
-    if (!FACTION_DICT[code]) {
-      dbFactions[code] = { code, name: code, logoUrl: `/api/units/factions/logo/${code}.png` };
-    }
-  }
-
-  const allFactions = { ...FACTION_DICT, ...dbFactions };
-  res.json({ factions: Object.values(allFactions) });
 });
 
 // ========================================
@@ -319,7 +320,7 @@ router.post('/api/units/create-from-json', (req, res) => {
       return;
     }
 
-    const { name, faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {} } = normalized;
+    const { name, faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0 } = normalized;
 
     // Phase 29-DataSecurity: 审核状态机卡口
     const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
@@ -335,9 +336,9 @@ router.post('/api/units/create-from-json', (req, res) => {
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
     run(
-      `INSERT INTO units (id, owner_id, name, faction, category, tier, sprite_key, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?)`,
-      [id, userId, name, faction, category, tier, sprite_key || null, statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, now, now]
+      `INSERT INTO units (id, owner_id, name, faction, category, tier, total_points, sprite_key, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?)`,
+      [id, userId, name, faction, category, tier, totalPoints, sprite_key || null, statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, now, now]
     );
     persistChanges();
 

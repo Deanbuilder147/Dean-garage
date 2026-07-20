@@ -9,13 +9,38 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { authenticate } from '../middleware/auth.js';
+import multer from 'multer';
+import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { UserRole, ErrorCode } from '@mecha/shared-kernel';
+import { parseGlossaryExcel } from '../services/glossary-excel-parser.js';
+import { validateGlossaryExcel } from '../services/glossary-excel-validator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = Router();
+
+// Excel 上传：内存存储（词条库 Excel 通常 < 1MB）
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (_req, file, cb) => {
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/octet-stream',
+      'application/x-excel',
+      'application/x-msexcel',
+    ];
+    const allowedExts = ['.xlsx', '.xls'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('仅支持 .xlsx / .xls 文件'));
+    }
+  },
+});
 
 // 默认配置落地文件路径（容器内 data 目录）
 const GLOSSARY_CONFIG_PATH = path.resolve(__dirname, '../../data/glossary-skill-config.json');
@@ -173,6 +198,106 @@ router.post('/config', authenticate, (req, res) => {
       error: 'GLOSSARY_SAVE_FAILED',
       message: err?.message || '保存配置失败',
     });
+  }
+});
+
+// ================================================================
+// 词条 Excel 导入（两步法 · 步骤一）
+// POST /api/combat-glossary/import-excel
+// 内存解析 + 全量校验 + 预览（不落盘）。errors 非空时前端禁用确认。
+// ================================================================
+router.post('/import-excel', excelUpload.single('file'), authenticate, requireAdmin, (req, res) => {
+  try {
+    const file = (req as any).file;
+    if (!file) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请上传 Excel 文件（.xlsx / .xls）' });
+      return;
+    }
+    console.log(`[Glossary/Excel] 收到文件: ${file.originalname}, ${file.size} bytes`);
+
+    const parsed = parseGlossaryExcel(file.buffer);
+    const validation = validateGlossaryExcel(parsed);
+
+    // 计算新增 / 更新计数（核心技能不可覆盖，不计入）
+    const current = readConfig();
+    const currentSkills = current.skills || {};
+    let newCount = 0;
+    let updateCount = 0;
+    for (const key of Object.keys(parsed.skills)) {
+      if (CORE_SKILLS[key]) continue;
+      if (currentSkills[key]) updateCount++;
+      else newCount++;
+    }
+
+    res.json({
+      valid: validation.valid,
+      skills: parsed.skills,
+      counts: { new: newCount, update: updateCount, total: parsed.meta.skillCount },
+      warnings: validation.warnings,
+      errors: validation.errors,
+    });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error('[Glossary/Excel] 解析异常:', msg);
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `Excel 解析失败: ${msg}` });
+  }
+});
+
+// ================================================================
+// 词条 Excel 导入（两步法 · 步骤二）
+// POST /api/combat-glossary/import-apply
+// 接收预览确认后的 skills 映射，按 key 深度合并写入权威配置。
+// 核心技能不可覆盖 / 不可删除；支持 _delete_skills 删除指令。
+// ================================================================
+router.post('/import-apply', authenticate, requireAdmin, (req, res) => {
+  try {
+    const body = req.body || {};
+    const skills = body.skills || {};
+    const deleteList = Array.isArray(body._delete_skills) ? body._delete_skills : [];
+    if (!skills || typeof skills !== 'object') {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '缺少 skills 数据' });
+      return;
+    }
+
+    const current = readConfig();
+    const currentSkills = current.skills || {};
+    const warnings: string[] = [];
+    const applied: Record<string, any> = {};
+
+    for (const [key, cfg] of Object.entries(skills)) {
+      if (CORE_SKILLS[key]) {
+        warnings.push(`核心技能 ${key} 受保护，已跳过覆盖`);
+        continue;
+      }
+      applied[key] = cfg;
+    }
+
+    const deleted: string[] = [];
+    for (const key of deleteList) {
+      if (CORE_SKILLS[key]) {
+        warnings.push(`核心技能 ${key} 受保护，已跳过删除`);
+        continue;
+      }
+      delete currentSkills[key];
+      deleted.push(key);
+    }
+
+    current.skills = { ...CORE_SKILLS, ...currentSkills, ...applied };
+    writeConfig(current);
+
+    console.log(`[Glossary/Excel] 导入成功: 新增/更新 ${Object.keys(applied).length} 条, 删除 ${deleted.length} 条`);
+
+    res.json({
+      success: true,
+      applied: Object.keys(applied),
+      deleted,
+      warnings,
+      skillCount: Object.keys(current.skills || {}).length,
+    });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    console.error('[Glossary/Excel] 落盘失败:', msg);
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `词条导入落盘失败: ${msg}` });
   }
 });
 

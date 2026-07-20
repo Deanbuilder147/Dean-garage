@@ -141,7 +141,13 @@ export const combatAPI = {
 // Phase 29-Debug: 词条库解耦 — 独立 /combat-glossary 端点，脱离 battleId 沙盒
 export const glossaryAPI = {
   getConfig: () => apiClient.get('/combat-glossary/config'),
-  saveConfig: (data) => apiClient.post('/combat-glossary/config', data)
+  saveConfig: (data) => apiClient.post('/combat-glossary/config', data),
+  // Excel 导入（两步法）：步骤一预览 / 步骤二落盘
+  importExcel: (formData) =>
+    apiClient.post('/combat-glossary/import-excel', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  importApply: (data) => apiClient.post('/combat-glossary/import-apply', data),
 };
 
 // Phase 29-I: 鹦鹉螺号置换 — 房间写操作主权已移交 3006 onlineBattleAPI

@@ -24,6 +24,7 @@ import {
 } from '../battleStateFactory.js';
 import { BattlePhase } from '@mecha/shared-kernel';
 import type { BattleState, BattleUnit, HexCoord, UnitStats } from '@mecha/shared-kernel';
+import { getSkillExecutor } from '../combatBridge.js';
 
 const router = Router();
 
@@ -409,6 +410,131 @@ router.post('/api/combat/:battleId/damage', async (req: Request, res: Response) 
   }
 });
 
+/**
+ * 桥接 .cjs 核心战斗引擎：将网关 BattleUnit 适配为 skillExecutor 期望的扁平化单位形状。
+ */
+function toExecutorUnit(u: any): any {
+  const s = u?.currentStats || u?.stats || {};
+  return {
+    id: u?.unitId ?? u?.id,
+    q: u?.position?.q ?? u?.q ?? 0,
+    r: u?.position?.r ?? u?.r ?? 0,
+    hp: s.hp ?? 0,
+    max_hp: s.maxHp ?? s.maxHp ?? s.hp ?? 0,
+    attack: s.attack ?? 0,
+    melee: s.attack ?? s.melee ?? 0,
+    ranged: s.attack ?? s.ranged ?? 0,
+    defense: s.defense ?? 0,
+    shield: s.shield ?? 0,
+    mobility: s.mobility ?? 0,
+    faction: u?.ownerId ?? u?.faction ?? 'neutral',
+    equipment: u?.equipment ?? {},
+    has_moved: u?.has_moved ?? false,
+    stealth: u?.stealth ?? false,
+    z: u?.z ?? u?.height ?? 0,
+    height: u?.height ?? 0,
+    skills: u?.skills ?? [],
+  };
+}
+
+/**
+ * POST /api/combat/:battleId/skill
+ * 桥接 services/combat-service 的 .cjs 核心战斗引擎执行技能施法/结算。
+ * 真实战斗路径现经 .cjs（含海豹骰子掷骰 + 多分支命中），替代此前未在生产生效的 TS 死代码。
+ *
+ * Body（沿用 /damage 约定的「客户端直传单位对象」模式）：
+ *  - skillType: string (必填)        词条库技能 key
+ *  - caster: object (必填)            施法单位（扁平化形状；或提供 casterUnitId 从战局取）
+ *  - target: object (可选)            目标单位（self/无目标技能可省略；或提供 targetUnitId）
+ *  - context: object (可选)           附加上下文（allUnits / battleState 等，透传给 .cjs）
+ *  - skillDefinition: object (可选)   内联技能定义（has_dice + dice_branches 等），
+ *        请求级注入 .cjs 实时 config，用于测试掷骰分支而不污染持久配置
+ *  - casterUnitId / targetUnitId: string (可选) 从内存战局取单位并回写伤害/治疗
+ */
+router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
+  const { battleId } = req.params;
+  const {
+    skillType,
+    caster,
+    target,
+    context,
+    skillDefinition,
+    casterUnitId,
+    targetUnitId,
+  } = req.body || {};
+
+  if (!skillType) {
+    res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'skillType 为必填项' });
+    return;
+  }
+
+  const battle = battleStore.get(battleId);
+
+  let exeCaster: any;
+  let exeTarget: any = null;
+  let writeBackTarget: any = null;
+
+  if (casterUnitId) {
+    if (!battle) { res.status(404).json({ success: false, error: 'BATTLE_NOT_FOUND' }); return; }
+    const u = battle.units.get(String(casterUnitId));
+    if (!u) { res.status(404).json({ success: false, error: 'CASTER_UNIT_NOT_FOUND' }); return; }
+    exeCaster = toExecutorUnit(u);
+  } else if (caster) {
+    exeCaster = caster;
+  } else {
+    res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: '需提供 casterUnitId 或 caster' });
+    return;
+  }
+
+  if (targetUnitId) {
+    if (!battle) { res.status(404).json({ success: false, error: 'BATTLE_NOT_FOUND' }); return; }
+    const u = battle.units.get(String(targetUnitId));
+    if (!u) { res.status(404).json({ success: false, error: 'TARGET_UNIT_NOT_FOUND' }); return; }
+    exeTarget = toExecutorUnit(u);
+    writeBackTarget = u;
+  } else if (target) {
+    exeTarget = target;
+  }
+
+  try {
+    const executor = getSkillExecutor();
+    const result = executor.executeUniversalSkill(
+      skillType,
+      exeCaster,
+      exeTarget,
+      {
+        ...(context || {}),
+        allUnits: battle ? Array.from(battle.units.values()).map(toExecutorUnit) : (context?.allUnits || []),
+        battleState: battle || context?.battleState || null,
+      },
+      skillDefinition || null,
+    );
+
+    // 回写伤害/治疗到内存战局目标单位
+    if (writeBackTarget && result && result.triggered !== false) {
+      const st = writeBackTarget.currentStats || (writeBackTarget.currentStats = {});
+      if (typeof result.final_damage === 'number' && result.final_damage > 0) {
+        st.hp = Math.max(0, (st.hp ?? 0) - result.final_damage);
+      }
+      if (typeof result.heal_amount === 'number' && result.heal_amount > 0) {
+        const maxHp = st.maxHp ?? st.hp ?? 0;
+        st.hp = Math.min(maxHp, (st.hp ?? 0) + result.heal_amount);
+      }
+    }
+
+    res.json({
+      success: true,
+      battleId,
+      skillType,
+      engine: 'combat-service/.cjs',
+      result,
+    });
+  } catch (err: any) {
+    console.error(`[Gateway:3006] [SKILL ERROR] 战局 ${battleId}:`, err);
+    res.status(500).json({ success: false, error: String(err?.message || err) });
+  }
+});
+
 // ============================================
 // ★ Phase 30-Deploy: 单位部署端点 — 将 pendingUnit 注入战场
 // ============================================
@@ -423,6 +549,7 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
   const { unit_id, q, r, unit_data } = req.body || {};
 
   if (!unit_id || q === undefined || r === undefined) {
+    console.error('[DEPLOY-UNIT] 400 拦截: 缺必填参数 | req.body=', JSON.stringify(req.body));
     res.status(400).json({ error: 'VALIDATION_ERROR', message: 'unit_id, q, r 为必填项' });
     return;
   }

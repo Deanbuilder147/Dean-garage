@@ -19,6 +19,7 @@
 
 const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./configLoader.cjs');
 const ConditionEvaluator = require('./conditionEvaluator.cjs');
+const BranchEvaluator = require('./branchEvaluator.cjs');
 
 
 class SkillExecutor {
@@ -47,6 +48,14 @@ class SkillExecutor {
             // Phase 5: 基础通用字段
             type: cfg.type || 'active',
             label: cfg.label || skillType,
+            name: cfg.name || cfg.label || (typeof skillType === 'string' ? skillType : ''),
+            // Step 4 接线：透传投骰多分支模型（dice 命名空间或顶层 has_dice/dice_type/dice_branches），
+            // 使 executeUniversalSkill 能进入 _executeBranchModelSkill，打通前端配置的多判定投骰词条。
+            dice: cfg.dice
+                ? cfg.dice
+                : (cfg.has_dice
+                    ? { has_dice: cfg.has_dice, dice_type: cfg.dice_type, dice_branches: cfg.dice_branches || [] }
+                    : null),
             category: cfg.category || 'melee',
             description: cfg.description || '',
             deterministic: cfg.deterministic !== false,
@@ -137,9 +146,11 @@ class SkillExecutor {
      * @param {Object} context - 额外上下文 { allUnits, battleState, skillRange }
      * @returns {Object} 统一执行结果
      */
-    executeUniversalSkill(skillType, unit, target, context = {}) {
-        const cfg = getSkillConfig(skillType);
-        const uf = this._getUniversalFields(skillType);
+    executeUniversalSkill(skillType, unit, target, context = {}, inlineSkillDef = null) {
+        let cfg = getSkillConfig(skillType);
+        if (!cfg && inlineSkillDef) cfg = inlineSkillDef;
+        const lookupKey = (cfg === inlineSkillDef) ? cfg : skillType;
+        const uf = this._getUniversalFields(lookupKey);
 
         if (!cfg) {
             return { triggered: false, message: `技能 ${skillType} 未在词条库中定义` };
@@ -211,6 +222,13 @@ class SkillExecutor {
         }
 
         // === 状语·骰子判定 (Adverbial - Dice) ===
+        // 新投骰多分支模型（方案 Step 4）：has_dice + dice_branches 由配置驱动，零硬编码分支
+        const newDiceModel =
+          uf.dice && uf.dice.has_dice &&
+          Array.isArray(uf.dice.dice_branches) && uf.dice.dice_branches.length > 0;
+        if (newDiceModel) {
+          return this._executeBranchModelSkill(skillType, unit, target, uf, cfg, heightBonus, heightDiff, context);
+        }
         const dice = this._evaluateDice(cfg);
         const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
 
@@ -394,6 +412,72 @@ class SkillExecutor {
             };
         }
 
+        return result;
+    }
+
+    // ============================================================
+    // 新投骰多分支模型 (Phase 对齐方案 Step 4)
+    // 由 dice_branches 配置驱动：投骰 → 命中分支 → 顺序执行其下全部效果
+    // ============================================================
+    _executeBranchModelSkill(skillType, unit, target, uf, cfg, heightBonus, heightDiff, context) {
+        const roll = BranchEvaluator.rollDice(uf.dice.dice_type);
+        const hits = BranchEvaluator.evaluateBranches(uf.dice.dice_branches, roll);
+        const ectx = BranchEvaluator.newEffectContext();
+        BranchEvaluator.applyBranchEffects(hits.flatMap((h) => h.effects), ectx);
+
+        const result = {
+            triggered: true,
+            type: skillType,
+            action_type: uf.action_type || 'attack',
+            damage_kind: uf.damage_kind,
+            active: true,
+            roll,
+            dice_type: uf.dice.dice_type,
+            hit: hits.length > 0,
+            outcome: hits.length > 0 ? 'success' : 'failure',
+            height_bonus: heightBonus,
+            height_diff: heightDiff,
+            status_effects: [],
+            log: [`投骰=${roll} 命中分支 ${hits.length} 个`].concat(ectx.log)
+        };
+
+        if (hits.length === 0) {
+            result.bonus_value = 0;
+            result.damage = 0;
+            result.message = `${uf.name || uf.label}: 投骰=${roll} 未命中任何判定分支，技能未生效`;
+            return result;
+        }
+
+        const bonus = ectx.bonus + (Number(uf.success_bonus_damage) || 0);
+        if (uf.action_type === 'attack' || (ectx.damage > 0 && uf.action_type !== 'heal')) {
+            const base = ectx.damage > 0 ? ectx.damage : Number(uf.base_damage) || 0;
+            const finalDamage = base + bonus + heightBonus;
+            result.damage = finalDamage;
+            result.final_damage = finalDamage;
+            result.base_damage = Number(uf.base_damage) || 0;
+            result.bonus_value = finalDamage;
+        } else {
+            result.bonus_value = bonus;
+        }
+
+        if (ectx.heal > 0) {
+            result.heal = ectx.heal;
+            result.heal_amount = ectx.heal;
+        }
+
+        for (const s of ectx.statuses) {
+            result.status_effects.push({ status: s.status, target: s.target });
+        }
+
+        // 命中/机动修正：回写 context 供结算管线使用
+        result.accuracy_mod = (Number(uf.accuracy_mod) || 0) + ectx.accuracyMod;
+        result.mobility_mod = ectx.mobilityMod;
+        if (context) {
+            if (result.accuracy_mod) context.accuracy_mod = (context.accuracy_mod || 0) + result.accuracy_mod;
+            if (result.mobility_mod) context.mobility_mod = (context.mobility_mod || 0) + result.mobility_mod;
+        }
+
+        result.message = `${uf.name || uf.label}: 投骰=${roll} 命中 ${hits.length} 分支 → ${ectx.log.join('; ')}`;
         return result;
     }
 

@@ -8,7 +8,9 @@
 import DamagePipe from './combatCore/damagePipe.cjs';
 import EquipmentDurability from './combatCore/equipmentDurability.cjs';
 import SkillExecutor from './combatCore/skillExecutor.cjs';
-import { getGlossaryConfig } from './combatCore/configLoader.cjs';
+import SkillRegistry from './combatCore/skillRegistry.cjs';
+import { getGlossaryConfig, getSystemConfig } from './combatCore/configLoader.cjs';
+import { getDamageType } from './combatCore/skillContract.cjs';
 
 
 class CombatResolver {
@@ -27,6 +29,10 @@ class CombatResolver {
         this.durability.reset();
         this.skillExecutor.resetStableForBattle();
         if (allUnits && allUnits.length > 0) {
+            // 注册各单位装备耐久快照（否则 EquipmentDurability 全部静默 no-op）
+            for (const unit of allUnits) {
+                this.durability.register(unit);
+            }
             this.initSkillCounters(allUnits);
         }
     }
@@ -251,6 +257,9 @@ class CombatResolver {
             ? this.skillExecutor._getUniversalFields(resolvedSkill.type)
             : {};
 
+        // Step 5: 配置驱动权威伤害种类——优先词条 damage_kind，缺失回退 weaponType
+        const damageKind = getDamageType(skillUf, attacker.weaponType);
+
         // 伤害计算 (Phase 10: 传入 terrainDefs 和新字段)
         const damageResult = DamagePipe.calculate({
             attacker: {
@@ -282,6 +291,8 @@ class CombatResolver {
             attack_type: attackType,
             sniper_mobility_reduction: sniperMobilityReduction,
             terrainDefs,
+            // Step 5: 显式注入归一化伤害种类（覆盖 weaponType）
+            damage_kind: damageKind,
             // Phase 10: 万能语法字段注入管道
             is_manual_roll: skillUf.is_manual_roll || false,
             dice_type: skillUf.dice_type || '1d6',
@@ -293,9 +304,20 @@ class CombatResolver {
         result.totalDamage += damageResult.final_damage;
         result.damage_pipe = damageResult;
 
-        // 4. 耐久度结算
-        const duraChanges = this.durability.resolveTurn(attacker, defender, options.turn);
-        if (duraChanges && duraChanges.length) {
+        // 4. 耐久度结算（对齐 EquipmentDurability 真实方法：防御方承伤减伤 + 攻击方武器耐久）
+        const duraChanges = [];
+        // 4a. 防御方承受伤害 → 防具/全覆式装甲(kinetic)/抗性涂层(beam) 减伤并消耗耐久
+        const defResult = this.durability.applyDamage(
+            defender,
+            damageResult.final_damage,
+            damageKind
+        );
+        if (defResult && defResult.changes.length) {
+            duraChanges.push(...defResult.changes);
+        }
+        // 4b. 攻击方武器耐久消耗（每次攻击 -1）
+        this.durability.consumeWeaponDurability(attacker);
+        if (duraChanges.length) {
             result.durabilityChanges = duraChanges;
         }
 
@@ -317,54 +339,11 @@ class CombatResolver {
         const bonuses = [];
         for (const skill of attacker.skills) {
             if (!skill || !skill.active) continue;
-
-            const uf = this.skillExecutor._getUniversalFields(skill.type);
-
-            if (skill.type === 'assist') {
-                const assistResult = this.skillExecutor.executeAssist(attacker, false);
-                if (assistResult.triggered) {
-                    bonuses.push({
-                        type: 'assist',
-                        value: assistResult.bonus,
-                        bonus_value: assistResult.bonus
-                    });
-                }
-            }
-            if (skill.type === 'blockade') {
-                const blockadeResult = this.skillExecutor.executeBlockade(attacker, undefined, false);
-                if (blockadeResult.triggered) {
-                    bonuses.push({
-                        type: 'blockade',
-                        value: blockadeResult.mobility_reduction,
-                        bonus_value: blockadeResult.mobility_reduction
-                    });
-                }
-            }
-            if (skill.type === 'counter') {
-                bonuses.push({
-                    type: 'counter',
-                    value: 2,
-                    bonus_value: 2
-                });
-            }
-            if (skill.type === 'focused_fire' && resolvedSkill && resolvedSkill.type === 'focused_fire') {
-                const ff = this.skillExecutor.executeFocusedFire();
-                bonuses.push({
-                    type: 'focused_fire',
-                    value: ff.bonus,
-                    bonus_value: ff.bonus
-                });
-            }
-            if (skill.type === 'guard') {
-                const guardResult = this.skillExecutor.executeGuard(attacker, false);
-                if (guardResult.triggered) {
-                    bonuses.push({
-                        type: 'guard',
-                        value: guardResult.reduction,
-                        bonus_value: guardResult.reduction
-                    });
-                }
-            }
+            // 动态注册表路由：按 skill.type 查找提取器，未注册则跳过（无硬编码分支）
+            const extractor = SkillRegistry.getBonusExtractor(skill.type);
+            if (!extractor) continue;
+            const b = extractor({ executor: this.skillExecutor, unit: attacker, skill, resolvedSkill });
+            if (b) bonuses.push(b);
         }
 
         return bonuses.length > 0 ? { bonuses } : null;

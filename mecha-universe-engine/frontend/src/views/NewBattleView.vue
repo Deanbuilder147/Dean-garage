@@ -2765,6 +2765,7 @@ onMounted(async () => {
     console.error('[BattleInit] getBattleState 失败:', e.message || e)
     // 自动创建战斗会话
     try {
+      console.warn('[BattleInit] getBattleState 失败，兜底 createBattle 使用硬编码 battlefield_id=1（maps 表为 UUID，易 404）。请确认房间真实 mapId。')
       const res = await combatAPI.createBattle({ battlefield_id: 1 })
       const newId = res.data?.id || res.data?.battle?.id || res.data?.battle_id || route.params.id
       if (newId !== route.params.id) {

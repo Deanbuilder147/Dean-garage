@@ -93,6 +93,8 @@ class DamagePipe {
         const attacker = config.attacker || {};
         const defender = config.defender || {};
         const terrainDefs = config.terrainDefs || {};
+        // Step 5: 权威伤害种类——优先 config.damage_kind（词条贡献），缺失回退 weaponType
+        const damageKind = config.damage_kind || attacker.weaponType || 'kinetic';
 
         // ---- 阶段 1: 基础攻击力（近战=格斗 / 远程=射击） ----
         const baseAttack = attackType === 'melee'
@@ -129,19 +131,19 @@ class DamagePipe {
         result.stages.height_bonus = heightBonus;
 
         // ---- 阶段 7: 地形伤害类型修正 ----
-        const terrainKindMods = this._applyTerrainKindModifiers(defender, attacker.weaponType, terrainDefs);
+        const terrainKindMods = this._applyTerrainKindModifiers(defender, damageKind, terrainDefs);
         result.stages.terrain_kind_modifiers = terrainKindMods;
 
         // ---- 阶段 8: 防御减免（泛化） ----
-        const defense = this._calcDefense(defender, attacker, terrainDefs);
+        const defense = this._calcDefense(defender, attacker, terrainDefs, damageKind);
         result.stages.defense = defense;
 
         // ---- 阶段 9: 武器克制惩罚（泛化） ----
-        const weaponPenalty = this._calcWeaponPenalty(attacker, defender);
+        const weaponPenalty = this._calcWeaponPenalty(attacker, defender, damageKind);
         result.stages.weapon_penalty = weaponPenalty;
 
         // ---- 阶段 10: 装备/技能伤害减免（泛化） ----
-        const armorReduction = this._calcArmorReduction(attacker, defender);
+        const armorReduction = this._calcArmorReduction(attacker, defender, damageKind);
         result.stages.armor_reduction = armorReduction;
 
         // ---- 阶段 11: 手动摇骰追加伤害 ----
@@ -230,22 +232,22 @@ class DamagePipe {
 
     /**
      * 地形伤害类型修正
-     * 根据防御方所在地形的 damage_kind_modifiers 字典，对特定武器类型施加倍率修正
+     * 根据防御方所在地形的 damage_kind_modifiers 字典，对特定伤害种类施加倍率修正
      *
      * @param {Object} defender - 防御方
-     * @param {string} weaponType - 攻击方武器类型
+     * @param {string} damageKind - 攻击者实际伤害种类（权威来源，非 weaponType）
      * @param {Object} terrainDefs - 地形定义字典
      * @returns {{ terrain_id: string, damage_kind: string, modifier: number, defense_bonus: number }}
      */
-    static _applyTerrainKindModifiers(defender, weaponType, terrainDefs) {
+    static _applyTerrainKindModifiers(defender, damageKind, terrainDefs) {
         const terrainId = defender.terrain || 'moon';
         const terrainDef = terrainDefs[terrainId] || {};
         const kindMods = terrainDef.damage_kind_modifiers || DEFAULT_TERRAIN_KIND_MODIFIERS;
-        const modifier = kindMods[weaponType] || 1.0;
+        const modifier = kindMods[damageKind] || 1.0;
         const defenseBonus = terrainDef.defense_bonus ?? 0;
         return {
             terrain_id: terrainId,
-            damage_kind: weaponType,
+            damage_kind: damageKind,
             modifier,
             defense_bonus: defenseBonus
         };
@@ -256,11 +258,12 @@ class DamagePipe {
      * 基础防御 + 护盾 + Buff + 地形防御 + 装备防御修正
      *
      * @param {Object} defender - 防御方
-     * @param {Object} attacker - 攻击方（用于获取 weaponType）
+     * @param {Object} attacker - 攻击方
      * @param {Object} terrainDefs - 地形定义字典
+     * @param {string} damageKind - 攻击者实际伤害种类（权威来源，非 weaponType）
      * @returns {{ base: number, shield: number, buffs: number, terrain: number, equipment_reduction: number, total: number }}
      */
-    static _calcDefense(defender, attacker, terrainDefs) {
+    static _calcDefense(defender, attacker, terrainDefs, damageKind) {
         const baseDefense = defender.defense || 5;
         const shieldValue = defender.shield || 0;
         const defenseBuffs = this._sumBuffs(defender.buffs || [], 'defense');
@@ -270,11 +273,11 @@ class DamagePipe {
         const terrainDef = terrainDefs[terrainId] || {};
         const terrainBonus = terrainDef.defense_bonus ?? 0;
 
-        // 泛化装备防御修正
+        // 泛化装备防御修正（以权威伤害种类匹配 damage_kind_modifiers）
         let eqReduction = 0;
         const eq = defender.equipment || {};
         if (eq.defense_modifiers) {
-            const weaponType = attacker.weaponType || 'kinetic';
+            const weaponType = damageKind || attacker.weaponType || 'kinetic';
             eqReduction = eq.defense_modifiers[weaponType] || 0;
         }
 
@@ -290,14 +293,15 @@ class DamagePipe {
 
     /**
      * 武器克制惩罚（泛化）
-     * 攻击方 weaponType == 防御方 resistance → 惩罚值
+     * 攻击方实际伤害种类 == 防御方 resistance → 惩罚值
      *
      * @param {Object} attacker - 攻击方
      * @param {Object} defender - 防御方
+     * @param {string} damageKind - 攻击者实际伤害种类（权威来源，非 weaponType）
      * @returns {number} 惩罚值
      */
-    static _calcWeaponPenalty(attacker, defender) {
-        const attackerWeaponType = attacker.weaponType || null;
+    static _calcWeaponPenalty(attacker, defender, damageKind) {
+        const attackerWeaponType = damageKind || null;
         const defenderResistance = defender.resistance || null;
         if (!attackerWeaponType || !defenderResistance) return 0;
         if (attackerWeaponType === defenderResistance) return WEAPON_COUNTER_PENALTY;
@@ -307,15 +311,16 @@ class DamagePipe {
     /**
      * 装备/技能伤害减免（泛化）
      * 遍历防御方所有装备槽位和技能，查找 damage_kind_modifiers 字典，
-     * 根据攻击方 weaponType 累加减免值
+     * 根据攻击方实际伤害种类累加减免值
      *
      * @param {Object} attacker - 攻击方
      * @param {Object} defender - 防御方
+     * @param {string} damageKind - 攻击者实际伤害种类（权威来源，非 weaponType）
      * @returns {number} 总减免值
      */
-    static _calcArmorReduction(attacker, defender) {
+    static _calcArmorReduction(attacker, defender, damageKind) {
         let reduction = 0;
-        const weaponType = attacker.weaponType || 'kinetic';
+        const weaponType = damageKind || attacker.weaponType || 'kinetic';
         const eq = defender.equipment || {};
 
         // 遍历所有装备槽位
@@ -388,7 +393,7 @@ class DamagePipe {
      * 计算对地形的伤害
      */
     static calculateTerrainDamage(attacker, terrainDef, config) {
-        const weaponType = attacker.weaponType || 'kinetic';
+        const weaponType = config.damage_kind || attacker.weaponType || 'kinetic';
         const baseDamage = attacker.attack || 10;
         const terrainResistance = terrainDef.resistance || {};
         const resistance = terrainResistance[weaponType] || 1.0;

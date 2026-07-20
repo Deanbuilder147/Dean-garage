@@ -357,13 +357,16 @@ class UnitConverter {
             '再动': 'reactivate'
         };
 
+        const CN_TYPE_MAP = { '自动': 'active', '手动': 'manual', '被动': 'passive' };
         const name = skill.name || '';
-        const combatType = TYPE_MAP[name] || 'unknown';
+        // 优先采用库存 skill.type（中文类型标签），TYPE_MAP[name] 仅作兜底
+        const combatType = CN_TYPE_MAP[skill.type] || TYPE_MAP[name] || 'unknown';
 
         const tag = {
             id: `${slot}_skill_${index}`,
             name,
             type: combatType,
+            effect: skill.effect || '',
             attribute: skill.attribute === '光束' ? 'energy' : skill.attribute === '实体' ? 'kinetic' : (skill.attribute || 'kinetic'),
             slot: slot,
             active: true,
@@ -374,7 +377,7 @@ class UnitConverter {
             targetType: this._getTargetType(combatType),
             needTarget: this._needTarget(combatType),
             initCounter: this._getInitCounter(combatType),
-            description: skill.description || this._getSkillDesc(combatType),
+            description: [skill.effect, skill.description].filter(Boolean).join('；') || this._getSkillDesc(combatType),
             original: skill
         };
 

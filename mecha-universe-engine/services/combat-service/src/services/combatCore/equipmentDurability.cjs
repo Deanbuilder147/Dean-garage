@@ -8,17 +8,19 @@
  *   防具（装甲/盾牌）：固定 5，每次抵消伤害消耗 1
  *   载具（推进器）：结构 × 1 = 可被攻击次数
  *   背包（辅助）：  固定 5，被击中消耗
- *   全覆式装甲：  固定 5，对实体武器 -2 减免，消耗后失效
- *   抗性涂层：    固定 5，对光束武器 -2 减免，消耗后失效
+ *   全覆式装甲：  固定 5，对实体武器 -3 减免，消耗后失效
+ *   抗性涂层：    固定 5，对光束武器 -3 减免，消耗后失效
  * 
  * 防具抵消规则：
  *   每次承受攻击时，若防具耐久 > 0：
  *     防具抵消 3 点伤害 → 耐久度 -1
  *     溢出伤害由单位 HP 承伤
  *   若装备了全覆式装甲 + 抗性涂层：
- *     对 kinetic 武器额外 -2，全覆式装甲耐久 -1
- *     对 energy 武器额外 -2，抗性涂层耐久 -1
+ *     对 kinetic(实体) 武器额外 -3，全覆式装甲耐久 -1
+ *     对 beam(光束，含 energy/laser/em 别名) 武器额外 -3，抗性涂层耐久 -1
  */
+
+const { normalizeDamageKind } = require('./skillContract.cjs');
 
 class EquipmentDurability {
     constructor() {
@@ -62,24 +64,29 @@ class EquipmentDurability {
             },
             // 特殊装备耐久度
             special_full_armor: (unit.equipment && unit.equipment.full_armor) ? 5 : 0,
-            special_coating: (unit.equipment && unit.equipment.coating) ? 5 : 0
+            special_coating: (unit.equipment && unit.equipment.coating) ? 5 : 0,
+            special_shield_gen: (unit.equipment && unit.equipment.shield_gen) ? 5 : 0,
+            special_reactive_armor: (unit.equipment && unit.equipment.reactive_armor) ? 5 : 0
         };
     }
 
     /**
      * 应用伤害到防具/特殊装备（在 DamagePipe 计算完成后调用）
      * 防具每次抵消 3 点伤害，消耗 1 耐久
-     * 全覆式装甲对 kinetic 额外 -2，抗性涂层对 energy 额外 -2
+     * 全覆式装甲对 kinetic(实体) 额外 -3，抗性涂层对 beam(光束) 额外 -3
      *
      * @param {Object} unit - 防御方单位
      * @param {number} incomingDamage - 原始伤害
-     * @param {string} weaponType - 攻击方武器类型 'energy' | 'kinetic'
+     * @param {string} weaponType - 攻击方伤害种类（经别名归一：energy/laser/em→beam）
      * @returns {Object} { remaining_damage, absorbed, changes[] }
      */
     applyDamage(unit, incomingDamage, weaponType = 'kinetic') {
         if (!unit || incomingDamage <= 0) {
             return { remaining_damage: incomingDamage || 0, absorbed: 0, changes: [] };
         }
+
+        // P0-2: 武器类型归一为权威伤害种类（energy/laser/em 等别名统一映射为 beam）
+        const dk = normalizeDamageKind(weaponType);
 
         const uid = unit.id || unit.unit_id;
         if (!this._state[uid]) {
@@ -118,9 +125,9 @@ class EquipmentDurability {
             }
         }
 
-        // 2. 全覆式装甲抵消（kinetic 武器）
-        if (remaining > 0 && state.special_full_armor > 0 && weaponType === 'kinetic') {
-            const absorbAmount = Math.min(remaining, 2);
+        // 2. 全覆式装甲抵消（kinetic 实体武器）
+        if (remaining > 0 && state.special_full_armor > 0 && dk === 'kinetic') {
+            const absorbAmount = Math.min(remaining, 3);
             remaining -= absorbAmount;
             absorbed += absorbAmount;
             state.special_full_armor -= 1;
@@ -137,9 +144,9 @@ class EquipmentDurability {
             }
         }
 
-        // 3. 抗性涂层抵消（energy 武器）
-        if (remaining > 0 && state.special_coating > 0 && weaponType === 'energy') {
-            const absorbAmount = Math.min(remaining, 2);
+        // 3. 抗性涂层抵消（beam 光束武器，含 energy/laser/em 别名）
+        if (remaining > 0 && state.special_coating > 0 && dk === 'beam') {
+            const absorbAmount = Math.min(remaining, 3);
             remaining -= absorbAmount;
             absorbed += absorbAmount;
             state.special_coating -= 1;
@@ -162,6 +169,37 @@ class EquipmentDurability {
             changes,
             message: `耐久度结算：吸收 ${absorbed} 点伤害，${remaining} 点由 HP 承受`
         };
+    }
+
+    /**
+     * 按槽位消耗指定量耐久度（通用入口，供阻断/火力覆盖等场景调用）
+     * 支持常规槽位（left_hand/right_hand/extra）与特殊槽位（special_full_armor 等）。
+     * 消耗至 0 时同步关闭对应 equipment 开关。
+     *
+     * @param {Object} unit - 单位
+     * @param {string} slot - 槽位名（如 'special_full_armor'）
+     * @param {number} [amount=1] - 消耗数量
+     * @returns {{ consumed: number, broken: boolean }}
+     */
+    consumeDurability(unit, slot, amount = 1) {
+        if (!unit) return { consumed: 0, broken: false };
+        const uid = unit.id || unit.unit_id;
+        if (!this._state[uid]) return { consumed: 0, broken: false };
+        const cur = this._state[uid][slot];
+        if (typeof cur !== 'number') return { consumed: 0, broken: false };
+
+        const before = cur;
+        const after = Math.max(0, cur - amount);
+        this._state[uid][slot] = after;
+
+        // 耐久归零 → 关闭对应装备开关
+        if (after <= 0 && unit.equipment) {
+            const flag = slot.startsWith('special_') ? slot.slice('special_'.length) : slot;
+            if (Object.prototype.hasOwnProperty.call(unit.equipment, flag)) {
+                unit.equipment[flag] = false;
+            }
+        }
+        return { consumed: before - after, broken: after <= 0 };
     }
 
     /**

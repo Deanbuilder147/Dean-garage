@@ -57,6 +57,24 @@ RUN cp package.json package.json.bak && \
 # 复制编译产物
 COPY --from=builder /build/backend-gateway/dist ./dist
 
+# ============================================================
+# 桥接 combat-service 核心 .cjs 战斗引擎（零 npm 依赖；含 vendor 海豹骰子引擎）
+# 此前 .cjs 后端改造从未在生产生效（容器不打包 combat-service，真实战斗路径走 TS 版）。
+# 现将其整体 COPY 进镜像，由 combatBridge.ts 通过 createRequire 加载。
+# ============================================================
+COPY services/combat-service ./services/combat-service/
+
+# 统一词条库配置路径：
+#   - 前端/网关 glossary 写入 /app/data/glossary-skill-config.json
+#   - .cjs 引擎读取 combat-service/src/config/glossary-skill-config.json
+# 通过 symlink 让两者指向同一文件，确立单点真相，避免两份配置分裂。
+RUN mkdir -p /app/data && \
+    if [ ! -f /app/data/glossary-skill-config.json ] && [ -f /app/services/combat-service/src/config/glossary-skill-config.json ]; then \
+      cp /app/services/combat-service/src/config/glossary-skill-config.json /app/data/glossary-skill-config.json; \
+    fi && \
+    rm -f /app/services/combat-service/src/config/glossary-skill-config.json && \
+    ln -s /app/data/glossary-skill-config.json /app/services/combat-service/src/config/glossary-skill-config.json
+
 RUN mkdir -p /data
 
 ENV NODE_ENV=production
