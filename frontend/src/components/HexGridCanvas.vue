@@ -90,6 +90,7 @@ let dragStartX = 0, dragStartY = 0, dragStartOX = 0, dragStartOY = 0
 let _windowDragMove = null
 let _windowDragEnd = null
 let _resizeTimer = null
+let _resizeObserver = null   // Phase 18-A: ResizeObserver 防飞图
 let hlQ = -1, hlR = -1
 let isFirstDraw = true
 
@@ -572,11 +573,34 @@ function redraw() { draw() }
 //  生命周期
 // ================================================================
 
+/** Phase 18-A: ResizeObserver 精确监听容器尺寸变化 (替代 window resize 盲猜) */
+function setupResizeObserver() {
+  const container = canvasContainer.value
+  if (!container || typeof ResizeObserver === 'undefined') return
+  _resizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const { width, height } = entry.contentRect
+      const canvas = mapCanvas.value
+      if (!canvas) continue
+      // 仅当容器实际尺寸变化时同步 canvas 位图
+      if (Math.abs(canvas.width - width) > 1 || Math.abs(canvas.height - height) > 1) {
+        canvas.width = width
+        canvas.height = height
+        centerGrid()
+        draw()
+      }
+    }
+  })
+  _resizeObserver.observe(container)
+}
+
 onMounted(async () => {
   await nextTick()
   initCanvas()
   setupEvents()
-  // debounce resize: 避免高频触发导致重绘风暴
+  // Phase 18-A: ResizeObserver 精确监听 (优先于 window resize 兜底)
+  setupResizeObserver()
+  // debounce resize: 兜底 window 级变化 (浏览器缩放、侧边栏等)
   window.addEventListener('resize', () => {
     if (_resizeTimer) clearTimeout(_resizeTimer)
     _resizeTimer = setTimeout(handleWindowResize, 150)
@@ -584,6 +608,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  // Phase 18-A: 清理 ResizeObserver
+  if (_resizeObserver) {
+    _resizeObserver.disconnect()
+    _resizeObserver = null
+  }
   // 彻底清理 window 级事件监听，消灭内存泄漏风险
   window.removeEventListener('resize', handleWindowResize)
   if (_resizeTimer) {

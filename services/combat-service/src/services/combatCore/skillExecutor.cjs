@@ -18,6 +18,7 @@
  */
 
 const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./configLoader.cjs');
+const ConditionEvaluator = require('./conditionEvaluator.cjs');
 
 
 class SkillExecutor {
@@ -73,6 +74,7 @@ class SkillExecutor {
             dice_type: cfg.dice_type || '1d6',
             success_line: cfg.success_line ?? 4,
             success_bonus_damage: cfg.success_bonus_damage ?? 0,
+            dice_ranges: Array.isArray(cfg.dice_ranges) ? cfg.dice_ranges : null,  // Phase 19: 分段骰
             is_manual_roll: cfg.is_manual_roll || false,
 
             // 谓语 Predicate（动作类型）
@@ -83,6 +85,8 @@ class SkillExecutor {
             // 主语 Subject（施放条件）
             requires_unmoved: cfg.requires_unmoved ?? false,
             requires_stealth: cfg.requires_stealth ?? false,
+            requires_hp_below: cfg.requires_hp_below ?? 0,      // Phase 18-A: HP阈值条件
+            target_on_terrain: cfg.target_on_terrain || '',     // Phase 18-A: 地形限定条件
             hp_threshold_percent: cfg.hp_threshold_percent ?? 0,
             condition: cfg.condition ?? '',
             stat_comparison: cfg.stat_comparison ?? '',
@@ -141,12 +145,43 @@ class SkillExecutor {
             return { triggered: false, message: `技能 ${skillType} 未在词条库中定义` };
         }
 
-        // === 主语检查 (Subject Checks) ===
+        // === 主语检查 (Subject Checks - 直接字段) ===
         if (uf.requires_unmoved && unit.has_moved) {
             return { triggered: false, message: `${uf.label} 需要本回合未移动` };
         }
         if (uf.requires_stealth && !unit.stealth) {
             return { triggered: false, message: `${uf.label} 需要隐身状态` };
+        }
+
+        // === Phase 18-A: 平铺条件评估 (ConditionEvaluator 泛化拦截) ===
+        // 将技能平面条件字段 { requires_hp_below, target_on_terrain } 交给条件评估器 AND 链判定
+        if (uf.requires_hp_below > 0 || uf.target_on_terrain) {
+            const flatCtx = {
+                unit: {
+                    hp: unit.hp,
+                    maxHp: unit.max_hp || unit.maxHp || 100,
+                    current_hp: unit.current_hp ?? unit.hp,
+                    has_moved: unit.has_moved,
+                    stealth: unit.stealth,
+                },
+                target: target ? {
+                    terrain: target.terrain,
+                } : null,
+                targetTerrain: target?.terrain,
+            };
+            const flatConditions = {};
+            if (uf.requires_hp_below > 0) flatConditions.requires_hp_below = uf.requires_hp_below;
+            if (uf.target_on_terrain) flatConditions.target_on_terrain = uf.target_on_terrain;
+            if (!ConditionEvaluator.evaluateFlat(flatConditions, flatCtx)) {
+                // 定位原因
+                if (uf.requires_hp_below > 0 && (unit.hp ?? unit.current_hp) >= uf.requires_hp_below) {
+                    return { triggered: false, message: `${uf.label} 需要HP低于${uf.requires_hp_below}（当前HP=${unit.hp ?? unit.current_hp}）` };
+                }
+                if (uf.target_on_terrain && target?.terrain !== uf.target_on_terrain) {
+                    return { triggered: false, message: `${uf.label} 目标必须站在${uf.target_on_terrain}地形（当前=${target?.terrain || '未知'}）` };
+                }
+                return { triggered: false, message: `${uf.label} 平铺条件未满足` };
+            }
         }
 
         // === 宾语距离检查 (Object Range Check) ===
@@ -234,7 +269,15 @@ class SkillExecutor {
 
         // 构建消息
         let msgParts = [`${uf.label}`];
-        if (dice.roll > 0) msgParts.push(`掷${dice.diceType}=${dice.roll}${dice.isSuccess ? '>=' + dice.successLine : '<' + dice.successLine}`);
+        if (dice.roll > 0) {
+            // Phase 19: dice_ranges 分段模式下显示区间标签，否则显示传统 successLine
+            if (dice.rangeLabel) {
+                const rangeTag = dice.isSuccess ? `[${dice.rangeLabel}]` : `[未命中]`;
+                msgParts.push(`掷${dice.diceType}=${dice.roll} ${rangeTag}`);
+            } else {
+                msgParts.push(`掷${dice.diceType}=${dice.roll}${dice.isSuccess ? '>=' + dice.successLine : '<' + dice.successLine}`);
+            }
+        }
         if (heightBonus > 0) msgParts.push(`高地+${heightBonus}`);
         msgParts.push(`伤害${finalDamage}`);
         result.message = msgParts.join(', ');
@@ -375,10 +418,46 @@ class SkillExecutor {
 
     _evaluateDice(skillCfg) {
         if (!skillCfg) return { roll: 0, diceType: '1d6', successLine: 4, isSuccess: false, bonusDamage: 0 };
+
         const diceType = skillCfg.dice_type || '1d6';
+        const roll = this._rollDice(diceType);
+
+        // ============================================================
+        //  Phase 19: 多档位分段骰系统 (dice_ranges)
+        //  优先级高于旧版 success_line 单一阈值
+        //  配置格式: dice_ranges: [{ min:1, max:X, action:"...", bonus_damage:N }, ...]
+        // ============================================================
+        if (Array.isArray(skillCfg.dice_ranges) && skillCfg.dice_ranges.length > 0) {
+            const range = skillCfg.dice_ranges.find(r => roll >= r.min && roll <= r.max);
+            if (range) {
+                return {
+                    roll,
+                    diceType,
+                    successLine: null,
+                    range_min: range.min,
+                    range_max: range.max,
+                    range_action: range.action || '',
+                    isSuccess: range.action !== 'miss',
+                    bonusDamage: range.bonus_damage || (range.action === 'critical' ? (skillCfg.success_bonus_damage ?? 0) : 0),
+                    rangeLabel: range.label || range.action || '',
+                    rangeDamageMultiplier: range.damage_multiplier ?? 1.0,
+                    // 透传 range 原始配置供后续判决使用
+                    _range: range
+                };
+            }
+            // 掷骰结果落空（不在任何区间内），视为失败
+            return {
+                roll, diceType, successLine: null,
+                isSuccess: false, bonusDamage: 0,
+                range_min: 0, range_max: 0, range_action: 'miss',
+                rangeLabel: 'miss', rangeDamageMultiplier: 1.0,
+                _range: null
+            };
+        }
+
+        // 降级：传统 success_line 单一阈值（向后兼容）
         const successLine = skillCfg.success_line ?? 4;
         const bonusDamage = skillCfg.success_bonus_damage ?? 0;
-        const roll = this._rollDice(diceType);
         const isSuccess = roll >= successLine;
         return {
             roll,
@@ -396,7 +475,9 @@ class SkillExecutor {
             return { damage: baseDamage, dice: null };
         }
         const dice = this._evaluateDice(cfg);
-        const finalDamage = baseDamage + dice.bonusDamage;
+        // Phase 19: dice_ranges 分段模式下，use rangeDamageMultiplier
+        const mult = (dice.rangeDamageMultiplier != null) ? dice.rangeDamageMultiplier : 1.0;
+        const finalDamage = Math.round((baseDamage + (dice.bonusDamage || 0)) * mult);
         return { damage: finalDamage, dice };
     }
 

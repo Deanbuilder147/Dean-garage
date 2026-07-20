@@ -1,0 +1,41 @@
+{
+  "version": "29.0.0-p1",
+  "description": "Phase 29-P1 — 大一统规则母体属性别名映射。前端加载此文件后，将底层的 prop_XX 键映射为玩家可读的显示文案。",
+  "attributeAliases": {
+    "_comment": "键 = 底层数据库 attributes 字典的 key，值 = 前端展示名 / 日文别名 / 简称",
+    "prop_01": { "zh": "格斗", "ja": "格闘", "abbr": "WS" },
+    "prop_02": { "zh": "射击", "ja": "射撃", "abbr": "BS" },
+    "prop_03": { "zh": "防御", "ja": "防御", "abbr": "DF" },
+    "prop_04": { "zh": "回避", "ja": "回避", "abbr": "AV" },
+    "prop_05": { "zh": "命中", "ja": "命中", "abbr": "HT" },
+    "prop_06": { "zh": "技量", "ja": "技量", "abbr": "SK" },
+    "prop_07": { "zh": "速度", "ja": "速度", "abbr": "SP" },
+    "prop_08": { "zh": "装甲", "ja": "装甲", "abbr": "AR" },
+    "prop_09": { "zh": "HP", "ja": "HP", "abbr": "HP" },
+    "prop_10": { "zh": "EN", "ja": "EN", "abbr": "EN" },
+    "prop_11": { "zh": "移动力", "ja": "移動力", "abbr": "MV" },
+    "prop_12": { "zh": "射程", "ja": "射程", "abbr": "RG" },
+    "prop_13": { "zh": "特殊技能", "ja": "特殊スキル", "abbr": "SPC" }
+  },
+  "categoryAliases": {
+    "melee": { "zh": "格斗机", "ja": "格闘機" },
+    "ranged": { "zh": "射击机", "ja": "射撃機" },
+    "defender": { "zh": "防御机", "ja": "防御機" },
+    "support": { "zh": "支援机", "ja": "支援機" },
+    "ace": { "zh": "王牌机", "ja": "エース機" }
+  },
+  "factionAliases": {
+    "earth": { "zh": "地球联邦", "ja": "地球連邦" },
+    "colony": { "zh": "殖民卫星", "ja": "コロニー" },
+    "mars": { "zh": "火星势力", "ja": "火星勢力" },
+    "jupiter": { "zh": "木星船团", "ja": "木星船団" }
+  },
+  "tierLabels": {
+    "1": "E级",
+    "2": "D级",
+    "3": "C级",
+    "4": "B级",
+    "5": "A级",
+    "6": "S级"
+  }
+}

@@ -1,6 +1,6 @@
 <template>
 
-    <main class="main-content">
+    <div class="page-container w-full h-full flex flex-col overflow-y-auto">
       <header class="page-header">
         <h1>[ 整备室 ]</h1>
         <div class="header-meta">
@@ -31,18 +31,18 @@
         <div class="select-section">
           <h3>⚔ 胜利条件 <span class="section-hint">选择本场战斗的胜利方式</span></h3>
           <div class="victory-conditions-grid">
-            <label v-for="vc in victoryConditionOptions" :key="vc.value" class="vc-option" :class="{ active: selectedVictoryConditions.includes(vc.value) }">
-              <input type="checkbox" :value="vc.value" v-model="selectedVictoryConditions" />
+            <label v-for="vc in victoryConditionOptions" :key="vc.value" :for="`vc-${vc.value}`" class="vc-option" :class="{ active: selectedVictoryConditions.includes(vc.value) }">
+              <input :id="`vc-${vc.value}`" type="checkbox" :value="vc.value" v-model="selectedVictoryConditions" />
               <span class="vc-icon">{{ vc.icon }}</span>
               <span class="vc-label">{{ vc.label }}</span>
               <span class="vc-desc">{{ vc.desc }}</span>
             </label>
           </div>
           <div v-if="selectedVictoryConditions.includes('hold_position')" class="vc-extra">
-            <label>坚守至第 <input type="number" v-model="holdRound" min="1" max="20" class="vc-round-input" /> 轮</label>
+            <label for="hold-round">坚守至第 <input id="hold-round" type="number" v-model="holdRound" min="1" max="20" class="vc-round-input" /> 轮</label>
           </div>
           <div v-if="selectedVictoryConditions.includes('destroy_facility')" class="vc-extra">
-            <label>设施坐标: Q <input type="number" v-model="facilityQ" class="vc-coord-input" /> R <input type="number" v-model="facilityR" class="vc-coord-input" /></label>
+            <label for="facility-q">设施坐标: Q <input id="facility-q" type="number" v-model="facilityQ" class="vc-coord-input" /> R <input id="facility-r" type="number" v-model="facilityR" class="vc-coord-input" /></label>
           </div>
         </div>
       </div>
@@ -53,12 +53,14 @@
           <h3>★ ACE单位设置 <span class="section-hint">可选：指定阵营ACE（只有ACE能发动特殊能力）</span></h3>
           <div v-for="fg in factionGroups" :key="fg.key" class="ace-faction-row">
             <span class="ace-faction-label" :style="{color: fg.color}">{{ fg.label }}</span>
-            <select v-model="factionRoles[fg.key]" class="ace-select faction-role-select" @change="onRoleChange(fg.key)">
+            <label :for="`role-${fg.key}`" class="sr-only">阵营角色</label>
+            <select :id="`role-${fg.key}`" v-model="factionRoles[fg.key]" class="ace-select faction-role-select" @change="onRoleChange(fg.key)">
               <option value="attack">⚔ 攻击阵营</option>
               <option value="defense">🛡 防守阵营</option>
               <option value="ambush">🗡 偷袭阵营</option>
             </select>
-            <select v-model="aceSelections[fg.key]" class="ace-select">
+            <label :for="`ace-${fg.key}`" class="sr-only">ACE选择</label>
+            <select :id="`ace-${fg.key}`" v-model="aceSelections[fg.key]" class="ace-select">
               <option :value="null">-- 不设ACE（全员可用） --</option>
               <option v-for="unit in fg.units" :key="unit.id" :value="unit.id">{{ unit.name || ('Unit-' + unit.id) }}</option>
             </select>
@@ -99,8 +101,9 @@
             <div v-if="chatLogs.length === 0" class="chat-empty">等待通讯...</div>
           </div>
           <div class="chat-input-row">
+            <label for="chat-message-input" class="sr-only">消息</label>
             <span class="prompt">&gt;</span>
-            <input v-model="chatInput" type="text" placeholder="输入消息..." @keydown.enter="sendChat" />
+            <input id="chat-message-input" v-model="chatInput" type="text" placeholder="输入消息..." @keydown.enter="sendChat" />
           </div>
         </div>
       </div>
@@ -111,13 +114,15 @@
           {{ starting ? '启动中...' : '出击' }}
         </button>
       </div>
-    </main></template>
+    </div></template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { combatAPI, commAPI, hangarAPI } from '@/api/client'
+// Phase 29-I: 鹦鹉螺号置换 — 房间数据主权移交 3006 onlineBattleAPI (SQLite 执政)
+// commAPI 仅保留 sendMessage (Socket.io 实时通道)
+import { combatAPI, commAPI, hangarAPI, onlineBattleAPI } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -185,9 +190,9 @@ onMounted(async () => {
     availableUnits.value = []
   }
 
-  // 加载房间信息
+  // Phase 29-I: 加载房间信息（从 3006 SQLite 获取）
   try {
-    const roomRes = await commAPI.getRoom(roomId)
+    const roomRes = await onlineBattleAPI.getRoom(roomId)
     room.value = roomRes.data
   } catch (e) {
     console.error('加载房间失败:', e)
@@ -214,38 +219,58 @@ function sendChat() {
   chatInput.value = ''
 }
 
+// ================================================================
+//  Phase 18-C: 装备 DKM 防爆器 — 整备室出击侧数据源清洗
+//  确保 deployPool 提交前所有 unit.equipment 三槽位完整
+//  与 NewBattleView.vue 的 sanitizeUnitEquipment 保持同构
+// ================================================================
+function sanitizeUnitEquipment(unit) {
+  if (!unit || typeof unit !== 'object') return unit
+  unit.equipment = unit.equipment || {}
+  const slots = ['left_hand', 'right_hand', 'other']
+  let fixed = 0
+  slots.forEach(slot => {
+    if (!unit.equipment[slot] || typeof unit.equipment[slot] !== 'object') {
+      unit.equipment[slot] = {
+        damage_kind_modifiers: { kinetic: 0, beam: 0, explosive: 0, corrosive: 0 }
+      }
+      fixed++
+    } else {
+      const dkm = unit.equipment[slot].damage_kind_modifiers
+      if (!dkm || typeof dkm !== 'object') {
+        unit.equipment[slot].damage_kind_modifiers = { kinetic: 0, beam: 0, explosive: 0, corrosive: 0 }
+        fixed++
+      } else {
+        const kinds = ['kinetic', 'beam', 'explosive', 'corrosive']
+        let patched = false
+        kinds.forEach(k => {
+          if (!(k in dkm)) { dkm[k] = 0; patched = true }
+        })
+        if (patched) fixed++
+      }
+    }
+  })
+  if (fixed > 0) {
+    console.log(`[PrepRoom-Sanitizer] 单位 "${unit.name || unit.id}": 修复 ${fixed} 个装备槽位`)
+  }
+  return unit
+}
+
 async function startBattle() {
   if (selectedIds.value.length === 0) return
   starting.value = true
   localStorage.setItem('selectedUnitIds', JSON.stringify(selectedIds.value))
     localStorage.setItem('factionRoles', JSON.stringify({...factionRoles}))
     localStorage.setItem('aceSelections', JSON.stringify({...aceSelections}))
+
+  // Phase 27: 先创建战场（获取合法 battleId），再上传部署池
   let battleId = room.value?.room?.battle_id || room.value?.battle_id
-
-  // P12: 将选中的棋子完整数据传给后端部署池
-  try {
-    const selectedUnits = availableUnits.value.filter(u => selectedIds.value.includes(u.id))
-    const token = localStorage.getItem('token')
-    await fetch(`/api/combat/${battleId}/pending-units`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : ''
-      },
-      body: JSON.stringify({ units: selectedUnits })
-    })
-    console.log(`[startBattle] 已上传 ${selectedUnits.length} 个棋子到后端部署池`)
-  } catch (e) {
-    console.warn('[startBattle] 部署池上传失败（将回退到 localStorage）:', e.message)
-  }
-
-  if (roomId) {
-    try { await commAPI.sendMessage(roomId, { type: 'start', units: selectedIds.value }) } catch (e) {}
-  }
   if (!battleId) {
     try {
-      const res = await combatAPI.createBattle({ battlefield_id: 1 })
-      const newBattleId = res.data?.id || res.data?.battle?.id || res.data?.battle_id
+      const res = await combatAPI.createBattle({
+        battlefield_id: room.value?.room?.mapId || room.value?.mapId || 1
+      })
+      battleId = res.data?.battle?.id || res.data?.battle_id || res.data?.id
 
       // 发送胜利条件
       try {
@@ -254,16 +279,15 @@ async function startBattle() {
           victoryData.target_q = facilityQ.value
           victoryData.target_r = facilityR.value
         }
-        await combatAPI.setVictoryConditions(newBattleId, victoryData)
+        await combatAPI.setVictoryConditions(battleId, victoryData)
       } catch (e) { console.warn('胜利条件设置失败:', e) }
 
       // 发送ACE设置
       for (const [faction, unitId] of Object.entries(aceSelections)) {
         if (unitId) {
-          try { await combatAPI.setAceUnit(newBattleId, { faction, unit_id: unitId }) } catch (e) { console.warn('ACE设置失败:', faction, e) }
+          try { await combatAPI.setAceUnit(battleId, { faction, unit_id: unitId }) } catch (e) { console.warn('ACE设置失败:', faction, e) }
         }
       }
-      battleId = res.data?.id || res.data?.battle?.id
     } catch (e) {
       console.warn('createBattle failed:', e.message || e)
       alert("创建战斗失败，请重新登录后重试")
@@ -271,8 +295,28 @@ async function startBattle() {
       return
     }
   }
+
+  // Phase 27: 战场创建后，将选中棋子完整数据写入后端部署池
+  if (battleId) {
+    try {
+      const selectedUnits = availableUnits.value.filter(u => selectedIds.value.includes(u.id))
+      // Phase 18-C: 出击前强制清洗装备槽位，从源头截断空值崩溃
+      selectedUnits.forEach(u => sanitizeUnitEquipment(u))
+      console.log(`[PrepRoom] deployPool 已防爆清洗 ${selectedUnits.length} 个棋子装备`)
+      await combatAPI.setPendingUnits(battleId, { units: selectedUnits })
+      console.log(`[startBattle] 已上传 ${selectedUnits.length} 个棋子到后端部署池`)
+    } catch (e) {
+      console.warn('[startBattle] 部署池上传失败（将回退到 localStorage）:', e.message)
+    }
+  }
+
+  if (roomId) {
+    try { await commAPI.sendMessage(roomId, { type: 'start', units: selectedIds.value }) } catch (e) {}
+  }
+
   starting.value = false
-  router.push('/battle/' + battleId)
+  // Phase 18-C: 硬导航直达 PC 战斗视图，跳过 redirectByDevice 中间件，消除重定向黑屏
+  router.push('/battle-pc/' + battleId)
 }
 
 function navigateTo(path) { router.push(path) }
@@ -281,7 +325,7 @@ function navigateTo(path) { router.push(path) }
 <style scoped>
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-.page-container { height: 100vh; display: flex; flex-direction: column; background: #001620; color: #c1e8ff; font-family: 'Noto Sans SC', system-ui, sans-serif; overflow: hidden; }
+.page-container { display: flex; flex-direction: column; background: #001620; color: #c1e8ff; font-family: 'Noto Sans SC', system-ui, sans-serif; }
 .icon { width: 1em; height: 1em; display: inline-block; vertical-align: middle; fill: currentColor; flex-shrink: 0; }
 
 /* ===== NAV (shared) ===== */
@@ -633,7 +677,7 @@ function navigateTo(path) { router.push(path) }
 .footer-right .muted { color: rgba(255,176,0,0.35); }
 
 @media (max-width: 1024px) {
-  .main-content { margin-left: 0; padding: 80px 20px 60px; }
+  .page-container { padding: 80px 20px 60px; }
   .footer { left: 0 !important; }
   .unit-grid { grid-template-columns: 1fr; }
   .room-info { flex-direction: column; }

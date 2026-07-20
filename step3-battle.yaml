@@ -1,0 +1,41 @@
+- generic [ref=e4]:
+  - complementary [ref=e5]:
+    - complementary [ref=e6]:
+      - button "收起侧边栏" [ref=e7] [cursor=pointer]:
+        - img [ref=e8]
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e13]:
+            - paragraph [ref=e14]: "[ 指挥官 ]"
+            - paragraph [ref=e15]: "军衔: AC-01"
+          - button "↩ 退出" [ref=e16] [cursor=pointer]
+        - navigation [ref=e17]:
+          - link "首页" [ref=e18] [cursor=pointer]:
+            - /url: /home
+            - img [ref=e19]
+            - generic [ref=e22]: 首页
+          - link "单位编辑器" [ref=e23] [cursor=pointer]:
+            - /url: /units
+            - img [ref=e24]
+            - generic [ref=e26]: 单位编辑器
+          - link "地图编辑器" [ref=e27] [cursor=pointer]:
+            - /url: /battlefield-edit
+            - img [ref=e28]
+            - generic [ref=e33]: 地图编辑器
+          - link "战术部署" [ref=e34] [cursor=pointer]:
+            - /url: /battlefields
+            - img [ref=e35]
+            - generic [ref=e39]: 战术部署
+          - link "词条库" [ref=e40] [cursor=pointer]:
+            - /url: /glossary
+            - img [ref=e41]
+            - generic [ref=e43]: 词条库
+          - generic [ref=e45] [cursor=pointer]:
+            - img [ref=e46]
+            - generic [ref=e48]: 战场指挥
+        - generic [ref=e49]:
+          - generic [ref=e50]:
+            - generic [ref=e51]: 📋 行动记录
+            - generic [ref=e52]: "0"
+          - generic [ref=e54]: 等待行动...
+  - main [ref=e55]

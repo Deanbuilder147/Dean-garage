@@ -1,10 +1,10 @@
 // =======================================================================
-//   Unit Sprite Resolver — 2D 棋子切图资源映射字典 (Phase 3)
+//   Unit Sprite Resolver — 2D 棋子切图资源映射字典 (Phase 28-D)
 // =======================================================================
-// Phase 3 新增:
-//   - 多帧动画切片: getFrameIndex(actionState) 基于时间的帧计数
-//   - 文件命名扩展: {unitCode}_{direction}_{actionState}_f{frame}.png
-//   - init() 新增帧配置参数
+// Phase 28-D 升级:
+//   - 废弃旧 9 视图 (0-8)，全面切换为新 7 视图 (0-6) 大一统引擎
+//   - direction 范围: 0=正面特写, 1-6=六角格六方向
+//   - 资产命名: {unitCode}_{0-6}_idle.png
 // =======================================================================
 // 设计原则:
 //   - 严禁在 Canvas 绘制函数中硬编码图片路径
@@ -123,18 +123,18 @@ export const unitSpriteResolver = {
   },
 
   /**
-   * 获取单位纹理切片 (Phase 3 升级版)
+   * 获取单位纹理切片 (Phase 28-D 升级版)
    *
    * 降级优先级链:
    *   1. {unitCode}_{direction}_{actionState}_f{frame}    (精确多帧)
    *   2. {unitCode}_{direction}_{actionState}             (精确单帧)
    *   3. {unitCode}_{direction}_idle                     (该朝向降级为待机)
-   *   4. {unitCode}_0_idle                               (降级为正北待机)
+   *   4. {unitCode}_0_idle                               (降级为正面特写)
    *   5. {fallbackUnitCode}_0_idle                       (降级为通用单位)
    *   6. null                                            (无可用资源)
    *
    * @param {string} unitCode         - 机体代号
-   * @param {number} direction        - 朝向 (0-8)
+   * @param {number} direction        - 朝向 (0-6: 0=正面, 1-6=六方向)
    * @param {string} actionState      - 动作状态
    * @param {string} [fallbackUnitCode='DEFAULT'] - 降级机体代号
    * @returns {SpriteTexture|null} 纹理对象，图片未加载完成返回 null
@@ -173,7 +173,7 @@ export const unitSpriteResolver = {
    * @returns {Promise<void>}
    */
   async preload(unitCodes) {
-    const directions = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    const directions = [0, 1, 2, 3, 4, 5, 6]  // Phase 28-D: 7 视图 (0-6)
     const actions = ['idle', 'move', 'attack', 'damaged']
     const promises = []
 
@@ -205,11 +205,24 @@ export const unitSpriteResolver = {
   _loadToCache(key) {
     if (this._cache[key]) return Promise.resolve()
     const img = new Image()
-    img.src = `/assets/sprites/units/${key}.png`
+    const primarySrc = `/assets/sprites/units/${key}.png`
+    const fallbackSrc = `/api/hangar/units/sprites/${key}.png`
+    img.src = primarySrc
+    // 异步 fallback: 主路径失败后尝试 API 路径
+    img.onerror = () => {
+      if (img.src === primarySrc) {
+        img.src = fallbackSrc
+      }
+    }
     this._cache[key] = img
     return new Promise((resolve) => {
       img.onload = resolve
-      img.onerror = resolve // 缺失切片不阻塞
+      // 第二次 onerror 不阻塞
+      if (!img._fallbackHandler) {
+        img._fallbackHandler = true
+        const origError = img.onerror
+        img.addEventListener('error', () => resolve(), { once: true })
+      }
     })
   },
 
@@ -237,7 +250,22 @@ export const unitSpriteResolver = {
     // 触发异步加载
     if (this._mode === 'standalone' && !this._cache[key]) {
       const img = new Image()
-      img.src = `/assets/sprites/units/${key}.png`
+      const primarySrc = `/assets/sprites/units/${key}.png`
+      const fallbackSrc = `/api/hangar/units/sprites/${key}.png`
+      img.onload = () => {
+        // Phase 26: 图片加载完成后派发全局事件，通知 Canvas 进行重绘
+        window.dispatchEvent(new CustomEvent('unit-sprite-loaded', { detail: { key } }))
+      }
+      // Phase 28-D: 主路径失败后自动尝试 API fallback
+      img.onerror = () => {
+        if (img.src === primarySrc) {
+          img.src = fallbackSrc
+        } else {
+          // 两种路径都失败，触发重绘走 fallback 圆形+字母
+          window.dispatchEvent(new CustomEvent('unit-sprite-loaded', { detail: { key, error: true } }))
+        }
+      }
+      img.src = primarySrc
       this._cache[key] = img
     }
     // atlas 模式 — 暂不实现

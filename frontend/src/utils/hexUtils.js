@@ -305,11 +305,18 @@ export const TERRAIN_COLORS = {
   repair_station: { name: '维修站', color: '#ff9800' },
   spawn_earth:  { name: '出生(地)', color: '#13ff43' },
   spawn_maxion: { name: '出生(马)', color: '#ff4d4d' },
-  spawn:        { name: '出生点',   color: '#ffb000' }
+  spawn:        { name: '出生点',   color: '#ffb000' },
+  // Phase 29-GlossaryMerge: 词条库复活地形（与 glossary-skill-config.json terrains 对齐）
+  plain:        { name: '平原',     color: '#7a9b4f' },
+  ruins:        { name: '废墟',     color: '#696969' },
+  crystal:      { name: '晶矿',     color: '#7b68ee' },
+  rubble:       { name: '残骸',     color: '#8b7d6b' },
+  city_building:{ name: '城市建筑', color: '#b8860b' }
 }
 
 // ================================================================
-//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（16 种）
+//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（21 种）
+//  Phase 29-GlossaryMerge: +5 词条库复活地形 (plain/ruins/crystal/rubble/city_building)
 //  规则：TERRAIN_COLORS 提供颜色/名称，此处统一追加 cost
 //  新增或修改地形时，只需改此处与 TERRAIN_COLORS 即可。
 // ================================================================
@@ -329,7 +336,13 @@ export const UNIVERSAL_TERRAIN_MAP = {
   repair_station: { ...TERRAIN_COLORS.repair_station, cost: 1 },
   spawn_earth:  { ...TERRAIN_COLORS.spawn_earth, cost: 0 },
   spawn_maxion: { ...TERRAIN_COLORS.spawn_maxion, cost: 0 },
-  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0 }
+  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0 },
+  // Phase 29-GlossaryMerge: 词条库复活地形 — 与 glossary-skill-config.json terrains 100% 对齐
+  plain:        { ...TERRAIN_COLORS.plain, cost: 1 },
+  ruins:        { ...TERRAIN_COLORS.ruins, cost: 2 },
+  crystal:      { ...TERRAIN_COLORS.crystal, cost: 2 },
+  rubble:       { ...TERRAIN_COLORS.rubble, cost: 2 },
+  city_building:{ ...TERRAIN_COLORS.city_building, cost: 1 }
 }
 
 /**
@@ -405,6 +418,97 @@ export function drawHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFl
 // ---- 等距视角坐标转换 ----
 
 /**
+ * ISO 等距正向变换：2D 平面坐标 → ISO 屏幕坐标
+ * CTM 等价: x' = x*scaleX + y*shearX,  y' = x*shearY + y*scaleY
+ * @param {number} px 2D X
+ * @param {number} py 2D Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ * @returns {{ x: number, y: number }}
+ */
+export function isoTransformPoint(px, py, iso) {
+  return {
+    x: px * iso.scaleX + py * iso.shearX,
+    y: px * iso.shearY + py * iso.scaleY
+  }
+}
+
+/**
+ * ISO 等距逆向变换：ISO 屏幕坐标 → 2D 平面坐标
+ * 2×2 仿射逆矩阵: det = scaleX*scaleY - shearX*shearY
+ * @param {number} px ISO 屏幕 X
+ * @param {number} py ISO 屏幕 Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ * @returns {{ x: number, y: number }}
+ */
+export function isoInverseTransformPoint(px, py, iso) {
+  const det = iso.scaleX * iso.scaleY - iso.shearX * iso.shearY
+  return {
+    x: (px * iso.scaleY - iso.shearX * py) / det,
+    y: (iso.scaleX * py - iso.shearY * px) / det
+  }
+}
+
+/**
+ * 绘制等距六边形路径（对 6 个顶点逐点施加 ISO 变换）
+ * 在纯净 2D Canvas 上直接 lineTo，无需 ctx.transform
+ * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
+ * @param {number} cx 2D 中心 X
+ * @param {number} cy 2D 中心 Y
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ */
+export function drawIsoHexPath(ctx, cx, cy, iso) {
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 2
+    const hx = cx + HEX_RADIUS * Math.cos(angle)
+    const hy = cy + HEX_RADIUS * Math.sin(angle)
+    const pt = isoTransformPoint(hx, hy, iso)
+    if (i === 0) ctx.moveTo(pt.x, pt.y)
+    else ctx.lineTo(pt.x, pt.y)
+  }
+  ctx.closePath()
+}
+
+/**
+ * 绘制等距扁六边形路径（顶角/底角扁平化 + ISO 逐顶点变换）
+ * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
+ * @param {number} cx 2D 中心 X
+ * @param {number} cy 2D 中心 Y
+ * @param {number} cellW 单元格宽度
+ * @param {number} cellH 单元格高度
+ * @param {number} topFlat 顶角扁平度 (0=尖顶, 0.5=全平)
+ * @param {number} bottomFlat 底角扁平度 (0=尖底, 0.5=全平)
+ * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
+ */
+export function drawIsoHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFlat, iso) {
+  const hw = cellW / 2
+  const hh = cellH / 2
+  const sideTopY = cy - hh + topFlat * cellH
+  const sideBotY = cy + hh - bottomFlat * cellH
+
+  const vertices = [
+    { x: cx, y: cy - hh },              // 顶点
+    { x: cx + hw, y: sideTopY },        // 右上
+    { x: cx + hw, y: sideBotY },        // 右下
+    { x: cx, y: cy + hh },              // 底点
+    { x: cx - hw, y: sideBotY },        // 左下
+    { x: cx - hw, y: sideTopY }         // 左上
+  ]
+
+  ctx.beginPath()
+  for (let i = 0; i < 6; i++) {
+    const pt = isoTransformPoint(vertices[i].x, vertices[i].y, iso)
+    if (i === 0) ctx.moveTo(pt.x, pt.y)
+    else ctx.lineTo(pt.x, pt.y)
+  }
+  ctx.closePath()
+}
+
+// ================================================================
+//  旧版坐标变换（向后兼容，已在 Phase 30 中弃用）
+// ================================================================
+
+/**
  * 将六角格中心坐标映射到屏幕像素（支持等距变换）
  * 变换链: scale(zoom) → translate(ox,oy) → shear/scale → rotate
  */
@@ -477,11 +581,11 @@ export function screenToWorld(px, py, params) {
 }
 
 // --- 等距视角默认参数（已校准基准值，与 baseline 预设完全一致）---
-// 校准值：shearX=0.25, shearY=0.44, scaleX=1.00, scaleY=0.39, rot=-24
+// 校准值：shearX=0.38, shearY=0, scaleX=1.00, scaleY=0.39, rot=-24
 // 单元=64×72, 顶角=25%, 底角=25%
 export const ISO_DEFAULTS = {
-  shearX: 0.25,    // 斜切X
-  shearY: 0.44,    // 斜切Y（已校准）
+  shearX: 0.38,    // 斜切X
+  shearY: 0,       // 斜切Y（默认0）
   scaleX: 1.00,    // 缩放X
   scaleY: 0.39,    // 缩放Y（已校准）
   rotation: -24,   // 旋转°（已校准）
@@ -501,49 +605,65 @@ export const ISO_PRESETS = {
 
 
 // =======================================================================
-//   9-View Direction Enum — 2D 棋子 9 视图朝向系统 (Phase 2)
+//   7-View Direction Enum — 2D 棋子 7 视图朝向系统 (Phase 28-D)
+//   ⚠️ 已废弃旧 9 视图 (0-8) 体系，全量切换为 0-6 大一统引擎
+// =======================================================================
+//   编码契约:
+//     0 = 默认正面特写（格纳库/整备室默认无位移状态）
+//     1 = 正右（Pointy-Hex 顺时针起点）
+//     2 = 右下   3 = 左下   4 = 正左   5 = 左上   6 = 右上
+//
+//   资产命名: {unitCode}_{0-6}_idle.png
+//   运行时 Schema: unit.direction (int 0-6) + unit.actionState (str 'idle')
 // =======================================================================
 
-/** 9 视图方向常量 */
+/** 7 视图方向常量 */
 export const DIRECTIONS = Object.freeze({
-  N:  0,
-  NE: 1,
-  E:  2,
-  SE: 3,
-  S:  4,
-  SW: 5,
-  W:  6,
-  NW: 7,
-  TOP: 8,
+  FRONT: 0,
+  E:  1,   // 正右
+  SE: 2,   // 右下
+  SW: 3,   // 左下
+  W:  4,   // 正左
+  NW: 5,   // 左上
+  NE: 6,   // 右上
 })
 
 /** 方向标签映射 */
 export const DIRECTION_LABELS = Object.freeze({
-  0: 'N',  1: 'NE', 2: 'E',  3: 'SE',
-  4: 'S',  5: 'SW', 6: 'W',  7: 'NW',
-  8: 'TOP',
+  0: '正面',
+  1: '正右',
+  2: '右下',
+  3: '左下',
+  4: '正左',
+  5: '左上',
+  6: '右上',
 })
 
 /** 方向总数 */
-export const DIRECTION_COUNT = 9
+export const DIRECTION_COUNT = 7
 
 /**
- * 根据六角格坐标增量自动计算朝向（角度量化法）
+ * 根据六角格坐标增量自动计算朝向（角度量化法 v2.0）
  *
- * 使用 atan2 将 (dq, dr) 映射到最近的 8 方向之一。
- * 8 扇区各 45°，角度从正东 (0°) 顺时针旋转（屏幕坐标系 Y 向下）。
+ * 使用 atan2 将屏幕像素坐标差 (dx, dy) 映射到最近的 6 方向之一。
+ * 6 扇区各 60°，角度从正东 (0°) 顺时针旋转（屏幕坐标系 Y 向下）。
  *
- *   扇区分布:
- *     0(N):  337.5°–22.5°   4(S):  157.5°–202.5°
- *     1(NE): 22.5°–67.5°    5(SW): 202.5°–247.5°
- *     2(E):  67.5°–112.5°   6(W):  247.5°–292.5°
- *     3(SE): 112.5°–157.5°  7(NW): 292.5°–337.5°
+ *   扇区分布 (每个扇区 60°，中心偏移 +30°):
+ *     1(正右): -30°– 30° (即 330°–30°)
+ *     2(右下):  30°– 90°
+ *     3(左下):  90°–150°
+ *     4(正左): 150°–210°
+ *     5(左上): 210°–270°
+ *     6(右上): 270°–330°
+ *
+ *   绝杀 Even-R 奇偶行判定死锁：不使用固定 Delta 硬匹配，
+ *   统一采用 atan2 角度量化，100% 准确、永不死锁。
  *
  * @param {number} fromQ - 起始列
  * @param {number} fromR - 起始行
  * @param {number} toQ   - 目标列
  * @param {number} toR   - 目标行
- * @returns {number|null} direction (0-7)，同格返回 null
+ * @returns {number|null} direction (1-6)，同格返回 null
  */
 export function computeDirection(fromQ, fromR, toQ, toR) {
   if (fromQ === toQ && fromR === toR) return null
@@ -555,32 +675,36 @@ export function computeDirection(fromQ, fromR, toQ, toR) {
   let angle = Math.atan2(dy, dx) * (180 / Math.PI)
   if (angle < 0) angle += 360
 
-  // 8 方向扇区量化 (每个扇区 45°)
-  // 偏移 -22.5° 使扇区边界对齐:
-  const adjusted = (angle + 22.5) % 360
-  const octant = Math.floor(adjusted / 45) % 8
-  return octant
+  // 6 扇区量化 (每个扇区 60°，偏移 +30° 使扇区边界对齐)
+  // 公式: sector = floor((angle + 30) % 360 / 60)
+  // direction = sector + 1 (输出 1-6)
+  const sector = Math.floor(((angle + 30) % 360) / 60)
+  return sector + 1
 }
 
 /**
  * 严格邻格版本的 computeDirection（仅当 to 在 from 的 6 邻格内时返回方向）
- * 使用 hexUtils.getHexNeighbors 精确验证。
+ *
+ * 使用 getHexNeighbors 验证邻格关系（处理 Even-R 奇偶行偏移），
+ * 然后通过 atan2 角度量化计算方向（避开奇偶行 Delta 歧义）。
  *
  * @param {number} fromQ
  * @param {number} fromR
  * @param {number} toQ
  * @param {number} toR
  * @param {Function} getNeighborsFn - getHexNeighbors 函数引用
- * @returns {number|null} direction (0-7)，非邻格返回 null
+ * @returns {number|null} direction (1-6)，非邻格返回 null
  */
 export function computeDirectionStrict(fromQ, fromR, toQ, toR, getNeighborsFn) {
-  if (!getNeighborsFn) return computeDirection(fromQ, fromR, toQ, toR)
+  if (fromQ === toQ && fromR === toR) return null
 
-  const neighbors = getNeighborsFn(fromQ, fromR)
-  const idx = neighbors.findIndex(n => n.q === toQ && n.r === toR)
-  if (idx === -1) return null
+  // 邻格关系验证（处理 Even-R 奇偶行偏移）
+  if (getNeighborsFn) {
+    const neighbors = getNeighborsFn(fromQ, fromR)
+    const isAdjacent = neighbors.some(n => n.q === toQ && n.r === toR)
+    if (!isAdjacent) return null
+  }
 
-  // getHexNeighbors 返回 [NE, E, SE, SW, W, NW] → 映射到方向码 [1,2,3,5,6,7]
-  const NEIGHBOR_TO_DIRECTION = [1, 2, 3, 5, 6, 7]
-  return NEIGHBOR_TO_DIRECTION[idx]
+  // 统一使用 atan2 角度量化法计算方向（绝杀奇偶行 Delta 歧义）
+  return computeDirection(fromQ, fromR, toQ, toR)
 }

@@ -19,59 +19,109 @@
       </div>
 
       <!-- Login Form -->
-      <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="form-body">
-        <div class="input-group">
-          <label>用户名</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="loginForm.username" type="text" placeholder="输入用户名" />
-          </div>
+      <!-- Phase 29-I: 鹦鹉螺号置换 — 大一统元驱动规范表单 ID -->
+      <form v-if="mode === 'login'" @submit.prevent="handleLogin" class="login-form">
+        <div class="login-field-row flex flex-col mb-4">
+          <label for="universe-username" class="login-label text-sm mb-2 cursor-pointer select-none">
+            账号 / 邮箱
+          </label>
+          <input
+            id="universe-username"
+            name="username"
+            type="text"
+            v-model="loginForm.username"
+            autocomplete="username"
+            placeholder="请输入您的账号"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
-        <div class="input-group">
-          <label>密码</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="loginForm.password" type="password" placeholder="输入密码" />
-          </div>
+
+        <div class="login-field-row flex flex-col mb-6">
+          <label for="universe-password" class="login-label text-sm mb-2 cursor-pointer select-none">
+            密码
+          </label>
+          <input
+            id="universe-password"
+            name="password"
+            type="password"
+            v-model="loginForm.password"
+            autocomplete="current-password"
+            placeholder="请输入密码"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
+
         <div v-if="error" class="error-msg">{{ error }}</div>
-        <button type="submit" class="btn-primary" :disabled="loading">
-          {{ loading ? '连接中...' : '接入系统' }}
+        <button type="submit" class="btn-login" :disabled="loading">
+          {{ loading ? '连接中...' : '进入系统' }}
         </button>
       </form>
 
       <!-- Register Form -->
-      <form v-if="mode === 'register'" @submit.prevent="handleRegister" class="form-body">
-        <div class="input-group">
-          <label>用户名</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="regForm.username" type="text" placeholder="选择呼号" />
-          </div>
+      <!-- Phase 29-I: 鹦鹉螺号置换 — 注册表单 ID 统一规范 -->
+      <form v-if="mode === 'register'" @submit.prevent="handleRegister" class="login-form">
+        <div class="login-field-row flex flex-col mb-4">
+          <label for="universe-reg-username" class="login-label text-sm mb-2 cursor-pointer select-none">
+            账号 / 邮箱
+          </label>
+          <input
+            id="universe-reg-username"
+            name="username"
+            type="text"
+            v-model="regForm.username"
+            autocomplete="username"
+            placeholder="请输入您的账号"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
-        <div class="input-group">
-          <label>邮箱</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="regForm.email" type="email" placeholder="通信频道" />
-          </div>
+
+        <div class="login-field-row flex flex-col mb-4">
+          <label for="universe-reg-email" class="login-label text-sm mb-2 cursor-pointer select-none">
+            邮箱
+          </label>
+          <input
+            id="universe-reg-email"
+            name="email"
+            type="email"
+            v-model="regForm.email"
+            autocomplete="email"
+            placeholder="请输入邮箱"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
-        <div class="input-group">
-          <label>密码</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="regForm.password" type="password" placeholder="设置密钥" />
-          </div>
+
+        <div class="login-field-row flex flex-col mb-4">
+          <label for="universe-reg-password" class="login-label text-sm mb-2 cursor-pointer select-none">
+            密码
+          </label>
+          <input
+            id="universe-reg-password"
+            name="new-password"
+            type="password"
+            v-model="regForm.password"
+            autocomplete="new-password"
+            placeholder="请输入密码"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
-        <div class="input-group">
-          <label>确认密码</label>
-          <div class="input-row">
-            <span class="prompt">&gt;</span>
-            <input v-model="regForm.verifyPassword" type="password" placeholder="再次确认密钥" />
-          </div>
+
+        <div class="login-field-row flex flex-col mb-6">
+          <label for="universe-reg-verify" class="login-label text-sm mb-2 cursor-pointer select-none">
+            确认密码
+          </label>
+          <input
+            id="universe-reg-verify"
+            name="verify-password"
+            type="password"
+            v-model="regForm.verifyPassword"
+            autocomplete="new-password"
+            placeholder="请再次输入密码"
+            class="login-input p-2 bg-[#002233] text-white border border-white/10 rounded focus:border-[#ffb000]/50"
+          />
         </div>
+
         <div v-if="error" class="error-msg">{{ error }}</div>
-        <button type="submit" class="btn-primary" :disabled="loading">
+        <button type="submit" class="btn-login" :disabled="loading">
           {{ loading ? '注册中...' : '创建档案' }}
         </button>
       </form>
@@ -235,63 +285,39 @@ async function handleRegister() {
   margin-bottom: 4px;
 }
 
-.form-body {
+/* === Standardized Login Form === */
+.login-form {
   padding: 24px 32px 32px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 8px;
 }
 
-.input-group label {
+.login-field-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-label {
   display: block;
-  font-size: 10px;
   font-weight: 700;
   color: #ffd597;
   text-transform: uppercase;
   letter-spacing: 2px;
-  margin-bottom: 6px;
 }
-.input-row {
-  display: flex;
-  align-items: center;
-  border-bottom: 2px solid rgba(159,142,120,0.3);
-  transition: border-color 0.2s;
-  padding: 4px 0;
-}
-.input-row:focus-within {
-  border-bottom-color: #ffb000;
-}
-.prompt {
-  color: #ffb000;
-  font-weight: 700;
-  font-size: 16px;
-  margin-right: 10px;
-  font-family: 'Fira Code', monospace;
-}
-.input-row input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: #c1e8ff;
+
+.login-input {
   font-family: 'Fira Code', monospace;
   font-size: 14px;
   outline: none;
-  padding: 6px 0;
-}
-.input-row input::placeholder {
-  color: rgba(193,232,255,0.25);
+  transition: border-color 0.2s;
 }
 
-.error-msg {
-  background: rgba(255,77,77,0.1);
-  border-left: 3px solid #ff4d4d;
-  padding: 10px 14px;
-  color: #ff6b6b;
-  font-size: 12px;
-  font-family: 'Fira Code', monospace;
+.login-input::placeholder {
+  color: rgba(193, 232, 255, 0.25);
 }
 
-.btn-primary {
+.btn-login {
   width: 100%;
   padding: 14px;
   background: #ffb000;
@@ -305,9 +331,19 @@ async function handleRegister() {
   transition: background 0.15s, transform 0.1s;
   margin-top: 4px;
 }
-.btn-primary:hover { background: #ffc840; }
-.btn-primary:active { transform: scale(0.97); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-login:hover { background: #ffc840; }
+.btn-login:active { transform: scale(0.97); }
+.btn-login:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.error-msg {
+  background: rgba(255,77,77,0.1);
+  border-left: 3px solid #ff4d4d;
+  padding: 10px 14px;
+  color: #ff6b6b;
+  font-size: 12px;
+  font-family: 'Fira Code', monospace;
+}
 
 .modal-footer-dec {
   padding: 14px 32px;

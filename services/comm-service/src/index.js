@@ -4,7 +4,11 @@ dotenv.config();
 /**
  * 通讯服务 (Comm Service)
  * 端口：3005
- * 职责：WebSocket 连接管理、实时消息广播、房间管理、玩家状态同步
+ * Phase 29-I 鹦鹉螺号置换后职责：
+ *   - WebSocket 连接管理 (Socket.io)
+ *   - 实时消息广播（保留 sendMessage 通道）
+ *   - 微信观战流缓冲队列（watchBufferQueue + 5秒延迟阻尼）
+ *   - 房间数据主权已移交 3006 online-battle-service (SQLite 统一执政)
  */
 
 import express from 'express';
@@ -93,10 +97,66 @@ app.get('/api/comm/stats/rooms', (req, res) => {
 });
 
 // ============================================
-// 房间路由 - 注意：子路由必须放在 :roomId 之前！
+// Phase 29-I: 鹦鹉螺号置换 — 微信观战缓冲队列
+// ============================================
+// 内存先进先出队列，接收 3004 战斗引擎流数据
+// 5 秒延迟阻尼后进行 Socket.io 广播，为微信小程序观战提供流式输入端
+const watchBufferQueue = [];
+let watchFlushTimer = null;
+const MAX_BUFFER_SIZE = 200; // FIFO 容量上限
+
+// 观战流馈入端点（3004 战斗引擎推送）
+app.post('/api/comm/watch-feed', (req, res) => {
+  const { battleId, events } = req.body;
+  if (!battleId || !events) {
+    return res.status(400).json({ error: 'battleId 和 events 为必填项' });
+  }
+
+  watchBufferQueue.push({
+    battleId,
+    events,
+    timestamp: Date.now()
+  });
+
+  // FIFO 容量限制：淘汰旧数据
+  while (watchBufferQueue.length > MAX_BUFFER_SIZE) {
+    watchBufferQueue.shift();
+  }
+
+  // 5 秒阻尼延迟：累积批量广播，避免高频轰炸
+  if (watchFlushTimer) clearTimeout(watchFlushTimer);
+  watchFlushTimer = setTimeout(() => {
+    while (watchBufferQueue.length > 0) {
+      const item = watchBufferQueue.shift();
+      if (item) {
+        io.to(`battle-${item.battleId}`).emit('watch-stream', {
+          battleId: item.battleId,
+          events: item.events,
+          timestamp: item.timestamp
+        });
+      }
+    }
+  }, 5000);
+
+  res.json({ success: true, buffered: watchBufferQueue.length });
+});
+
+// 观战缓冲状态查询
+app.get('/api/comm/watch-buffer-status', (req, res) => {
+  res.json({
+    queueSize: watchBufferQueue.length,
+    hasPendingFlush: !!watchFlushTimer,
+    maxSize: MAX_BUFFER_SIZE
+  });
+});
+
+// ============================================
+// Phase 29-I: 鹦鹉螺号置换 — 以下房间 HTTP 写入端点已废弃
+// 数据主权全部移交 3006 online-battle-service (SQLite 持久化)
 // ============================================
 
-// 创建房间 (需要认证)
+// [已废弃] 创建房间 — 主权已移交 3006 POST /api/rooms
+/*
 app.post('/api/comm/rooms', authenticate, async (req, res) => {
   const { battlefield_id, max_players = 6 } = req.body;
 
@@ -161,7 +221,10 @@ app.post('/api/comm/rooms', authenticate, async (req, res) => {
     res.status(500).json({ error: '创建房间失败', message: error.message });
   }
 });
+*/
 
+// [已废弃] 以下所有房间操作端点已整体移交 3006 online-battle-service (SQLite)
+/*
 // 加入房间 (必须在 /:roomId 之前定义，需要认证)
 app.post('/api/comm/rooms/:roomId/join', authenticate, (req, res) => {
   const { roomId } = req.params;
@@ -516,6 +579,11 @@ app.get('/api/comm/rooms/:roomId', authenticate, async (req, res) => {
     players: Array.from(roomState.players.values())
   });
 });
+*/
+
+// Phase 29-I 鹦鹉螺号置换完成：以上房间端点全部废弃，数据主权归 3006
+// 3005 保留职责：Socket.io 实时通讯 + 观战流缓冲队列
+// ============================================
 
 // Socket.io 实时通讯
 setupSocketHandlers(io);

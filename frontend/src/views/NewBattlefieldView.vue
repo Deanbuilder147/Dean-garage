@@ -1,6 +1,5 @@
 <template>
-  <div class="page-container">
-    <main class="main-content">
+  <div class="page-container w-full h-full flex flex-col overflow-y-auto">
       <header class="page-header">
         <h1>[ 六角格战场编辑器 ]</h1>
         <div class="header-meta">
@@ -18,7 +17,6 @@
         <div class="info-item"><span class="info-label">当前画笔</span><span class="info-value" :style="{ color: currentTerrainColor }">{{ brushName }}</span></div>
         <button class="btn-save" @click="saveMap" :disabled="saving">{{ saving ? '保存中...' : '保存地图' }}</button>
         <button class="btn-export" @click="exportJSON">📤 导出 JSON</button>
-        <button class="btn-export" @click="showTerrainMgr=true;loadTerrainDefinitions()">[ 地形管理 ]</button>
         <button class="btn-export" @click="showNewMapModal = true">[ 新建地图 ]</button>
         <div class="map-load-group">
           <select v-model="selectedMapFile" @change="onSelectMapFile" class="map-load-select">
@@ -31,23 +29,18 @@
         </div>
       </div>
 
-      <!-- HexGridCanvas 组件 (mode="edit") -->
-      <HexGridCanvas
+      <!-- HexGridCanvasEngine — 大一统无状态渲染内核 (Phase 29-P0) -->
+      <HexGridCanvasEngine
         ref="hexGrid"
-        mode="edit"
-        :grid-width="gridW"
-        :grid-height="gridH"
-        :spacing-h="spacingH"
-        :spacing-v="spacingV"
-        :iso-shear-x="isoShearX"
-        :iso-shear-y="isoShearY"
-        :draw-fn="editorDrawFn"
-        @hex-click="onHexClick"
-        @hex-hover="onHexHover"
-        @hex-contextmenu="onHexContextMenu"
+        :grid-data="gridData"
+        :highlight-cells="editorHighlights"
+        :iso-config="isoConfig"
+        :show-hover="true"
+        :use-terrain-cache="false"
+        @cell-clicked="handleEditorBrush"
       />
 
-      <!-- Terrain Palette -->
+      <!-- Terrain Palette (Phase 30: 地形管理物理合并至此) -->
       <div class="terrain-palette">
         <span class="palette-label">地形画笔:</span>
         <button
@@ -59,22 +52,23 @@
           <span class="terrain-swatch" :style="{ background: getTerrainColor(t.id) }"></span>
           {{ t.name }}
         </button>
+        <button class="t-btn terrain-mgr-btn" @click="showTerrainMgr=true;loadTerrainDefinitions()">[ 管理 ]</button>
       </div>
 
 
-    <!-- Phase9: 区间批量地形修改器 -->
+    <!-- Phase9: 区间批量地形修改器 (Phase 30: 支持 Excel "A1:C5" 坐标法) -->
     <div class="batch-panel">
       <div class="batch-title">[ 区间批量修改 ]</div>
       <div class="batch-row">
-        <label class="batch-label">起点</label>
-        <input v-model.number="batchStartQ" type="number" min="0" class="batch-input" placeholder="Q" />
-        <input v-model.number="batchStartR" type="number" min="0" class="batch-input" placeholder="R" />
-        <label class="batch-label">终点</label>
-        <input v-model.number="batchEndQ" type="number" min="0" class="batch-input" placeholder="Q" />
-        <input v-model.number="batchEndR" type="number" min="0" class="batch-input" placeholder="R" />
+        <label class="batch-label" for="batch-start-coord">起点</label>
+        <input id="batch-start-coord" v-model="batchCoordStr" type="text" class="batch-coord-input" placeholder="如: A1 或 D5" @input="parseBatchCoords" />
+        <label class="batch-label" for="batch-end-coord">→ 终点</label>
+        <input id="batch-end-coord" v-model="batchEndCoordStr" type="text" class="batch-coord-input" placeholder="如: C5 或 F9" @input="parseBatchCoords" />
+        <span v-if="batchCoordError" class="batch-error">{{ batchCoordError }}</span>
       </div>
       <div class="batch-row">
-        <select v-model="batchTerrain" class="batch-select">
+        <label for="batch-terrain-select" class="batch-label">目标地形</label>
+        <select id="batch-terrain-select" v-model="batchTerrain" class="batch-select">
           <option v-for="t in allTerrainTypes" :key="t.id" :value="t.id">{{ t.name }}</option>
         </select>
         <button class="btn-batch" @click="applyBatchTerrain">批量修改</button>
@@ -106,14 +100,14 @@
 
         <!-- 3D 视角动态调节滑块 -->
         <div class="spacing-group iso-group">
-          <span class="spacing-label">3D 倾斜X</span>
-          <input type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-slider" />
-          <input type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-input" />
+          <label class="spacing-label" for="iso-shear-x-num">3D 倾斜X</label>
+          <input id="iso-shear-x-range" type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-slider" />
+          <input id="iso-shear-x-num" type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-input" />
         </div>
         <div class="spacing-group iso-group">
-          <span class="spacing-label">3D 倾斜Y</span>
-          <input type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-slider" />
-          <input type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-input" />
+          <label class="spacing-label" for="iso-shear-y-num">3D 倾斜Y</label>
+          <input id="iso-shear-y-range" type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-slider" />
+          <input id="iso-shear-y-num" type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-input" />
         </div>
         <div class="spacing-group iso-save-group">
           <button class="btn-save-iso" @click="saveViewConfig" :disabled="savingViewConfig">
@@ -128,7 +122,7 @@
           <button class="spacing-btn" @click="hexGrid?.zoomReset()">1:1</button>
         </div>
       </div>
-    </main></div>
+    </div>
 
 
     <!-- Phase 13.5: 新建地图弹窗 -->
@@ -141,14 +135,14 @@
         <div class="terrain-mgr-body" style="display:flex;flex-direction:column;gap:16px;padding:20px;">
           <div style="display:flex;gap:20px;align-items:center;">
             <div style="flex:1;">
-              <label style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">宽度 (列) · 10–200</label>
-              <input v-model.number="newMapWidth" type="number" min="10" max="200"
+              <label for="new-map-width" style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">宽度 (列) · 10–200</label>
+              <input id="new-map-width" v-model.number="newMapWidth" type="number" min="10" max="200"
                 style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
             </div>
             <span style="color:rgba(255,176,0,0.4);font-size:18px;margin-top:20px;">×</span>
             <div style="flex:1;">
-              <label style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">高度 (行) · 10–200</label>
-              <input v-model.number="newMapHeight" type="number" min="10" max="200"
+              <label for="new-map-height" style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">高度 (行) · 10–200</label>
+              <input id="new-map-height" v-model.number="newMapHeight" type="number" min="10" max="200"
                 style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
             </div>
           </div>
@@ -172,19 +166,21 @@
         <div class="terrain-mgr-body">
           <div v-for="(def, key) in editableTerrains" :key="key" class="tm-item">
             <div class="tm-item-header">
-              <input v-model="editableTerrains[key].name" class="tm-input-name" placeholder="地形名" />
+              <label :for="`tm-name-${key}`" class="sr-only">地形名</label>
+              <input :id="`tm-name-${key}`" v-model="editableTerrains[key].name" class="tm-input-name" placeholder="地形名" />
               <span class="tm-swatch" :style="{background: editableTerrains[key].color||'#888'}"></span>
-              <input v-model="editableTerrains[key].color" class="tm-input-color" placeholder="#hex" />
+              <label :for="`tm-color-${key}`" class="sr-only">颜色</label>
+              <input :id="`tm-color-${key}`" v-model="editableTerrains[key].color" class="tm-input-color" placeholder="#hex" />
             </div>
             <div class="tm-row">
-              <label>移动消耗<input v-model.number="editableTerrains[key].move_cost" type="number" min="0" class="tm-input-num" /></label>
-              <label>防御修正<input v-model.number="editableTerrains[key].defense_bonus" type="number" class="tm-input-num" /></label>
-              <label>可破坏<input type="checkbox" v-model="editableTerrains[key].is_destructible" /></label>
+              <label :for="`tm-move-${key}`">移动消耗<input :id="`tm-move-${key}`" v-model.number="editableTerrains[key].move_cost" type="number" min="0" class="tm-input-num" /></label>
+              <label :for="`tm-def-${key}`">防御修正<input :id="`tm-def-${key}`" v-model.number="editableTerrains[key].defense_bonus" type="number" class="tm-input-num" /></label>
+              <label :for="`tm-destruct-${key}`">可破坏<input :id="`tm-destruct-${key}`" type="checkbox" v-model="editableTerrains[key].is_destructible" /></label>
             </div>
             <div v-if="editableTerrains[key].is_destructible" class="tm-row">
-              <label>最大HP<input v-model.number="editableTerrains[key].max_hp" type="number" min="1" class="tm-input-num" /></label>
-              <label>破坏后→
-                <select v-model="editableTerrains[key].destroyed_transform_to" class="tm-select">
+              <label :for="`tm-hp-${key}`">最大HP<input :id="`tm-hp-${key}`" v-model.number="editableTerrains[key].max_hp" type="number" min="1" class="tm-input-num" /></label>
+              <label :for="`tm-transform-${key}`">破坏后→
+                <select :id="`tm-transform-${key}`" v-model="editableTerrains[key].destroyed_transform_to" class="tm-select">
                   <option v-for="k in Object.keys(editableTerrains)" :key="k" :value="k">{{ editableTerrains[k]?.name || k }}</option>
                 </select>
               </label>
@@ -210,13 +206,12 @@ import { ref, reactive, computed, onMounted, nextTick, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { mapAPI, glossaryAPI } from '@/api/client'
 import {
-  HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS,
   DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR,
-  pointyTopCenter, drawHexPath, formatCoord,
   UNIVERSAL_TERRAIN_MAP,
   ISO_DEFAULTS,
+  parseCoord, parseCoordRange, colToLetter,
 } from '../utils/hexUtils.js'
-import HexGridCanvas from '@/components/HexGridCanvas.vue'
+import HexGridCanvasEngine from '@/components/HexGridCanvasEngine.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -228,11 +223,14 @@ const terrainMap = reactive({})
 
 // ---- 画笔状态 ----
 const brush = ref('moon')
-// Phase9: 批量地形修改器状态
+// Phase9: 批量地形修改器状态 (Phase 30: 支持 Excel 坐标格式 "A1:C5")
 const batchStartQ = ref(0)
 const batchStartR = ref(0)
 const batchEndQ = ref(0)
 const batchEndR = ref(0)
+const batchCoordStr = ref('')
+const batchEndCoordStr = ref('')
+const batchCoordError = ref('')
 const batchTerrain = ref('moon')
 const batchResult = ref('')
 
@@ -253,8 +251,8 @@ const newMapError = ref('')
 const hexGrid = ref(null)
 
 // ---- 3D 视角动态参数 (绑定到 HexGridCanvas 的 isoShearX/isoShearY props) ----
-const isoShearX = ref(ISO_DEFAULTS.shearX)  // 默认 0.25
-const isoShearY = ref(ISO_DEFAULTS.shearY)  // 默认 0.44
+const isoShearX = ref(ISO_DEFAULTS.shearX)  // 默认 0.38
+const isoShearY = ref(ISO_DEFAULTS.shearY)  // 默认 0
 
 // ---- 动态间距 (ref 以支持实时 prop 绑定) ----
 const spacingH = ref(DEFAULT_SPACING_H)      // 1.00
@@ -268,6 +266,48 @@ const totalCellCount = computed(() => gridW.value * gridH.value)
 const nonEmptyCellCount = computed(() =>
   Object.values(terrainMap).filter(v => v && extractTerrainId(v) !== 'moon').length
 )
+
+// ================================================================
+//  gridData — 大一统引擎的数据入口 (Phase 29-P0)
+//  将 terrainMap { "q,r": id } 转换为引擎所需 cells 数组
+// ================================================================
+const gridData = computed(() => ({
+  width: gridW.value,
+  height: gridH.value,
+  cells: Object.entries(terrainMap)
+    .filter(([_, val]) => val !== undefined && val !== null)
+    .map(([key, val]) => {
+      const [qs, rs] = key.split(',')
+      return {
+        q: parseInt(qs, 10),
+        r: parseInt(rs, 10),
+        terrain: extractTerrainId(val)
+      }
+    }),
+  topologyParam: {
+    spacingH: spacingH.value,
+    spacingV: spacingV.value,
+    offsetFactor: offsetFactor.value,
+  }
+}))
+
+// ================================================================
+//  isoConfig — ISO 视角参数 (响应式传递给引擎)
+// ================================================================
+const isoConfig = computed(() => ({
+  shearX: isoShearX.value,
+  shearY: isoShearY.value,
+  scaleX: ISO_DEFAULTS.scaleX,
+  scaleY: ISO_DEFAULTS.scaleY,
+  rotation: ISO_DEFAULTS.rotation,
+  topFlat: ISO_DEFAULTS.topFlat,
+  bottomFlat: ISO_DEFAULTS.bottomFlat,
+}))
+
+// ================================================================
+//  editorHighlights — 编辑器悬停高亮 (由外壳自行管理)
+// ================================================================
+const editorHighlights = ref([])
 
 // ---- 地形调色板 (从全项目唯一真理 UNIVERSAL_TERRAIN_MAP 派生) ----
 const terrainTypes = Object.entries(UNIVERSAL_TERRAIN_MAP).map(([id, def]) => ({
@@ -293,11 +333,12 @@ const terrainSaveMsg = ref('')
 // 从 glossary API 加载全量地形定义
 async function loadTerrainDefinitions() {
   try {
-    const res = await fetch('/api/combat/glossary-config')
-    const data = await res.json()
-    if (data.terrains) {
+    const { data } = await glossaryAPI.getConfig()
+    // Phase 29-GlossaryMerge: API 返回 { glossary: { terrains: {...} } }，修正取值路径
+    const terrains = data.glossary?.terrains || data.terrains
+    if (terrains) {
       Object.keys(editableTerrains).forEach(k => delete editableTerrains[k])
-      Object.entries(data.terrains).forEach(([k, v]) => {
+      Object.entries(terrains).forEach(([k, v]) => {
         editableTerrains[k] = { ...v }
       })
     }
@@ -328,23 +369,15 @@ function deleteTerrainType(key) {
 
 async function saveTerrainConfig() {
   try {
-    const current = await fetch('/api/combat/glossary-config').then(r => r.json())
+    const { data: current } = await glossaryAPI.getConfig()
     current.terrains = JSON.parse(JSON.stringify(editableTerrains))
     current._meta = current._meta || {}
     current._meta.date = new Date().toISOString().replace('T',' ').substring(0,19)
-    const res = await fetch('/api/combat/glossary-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(current)
-    })
-    if (res.ok) {
-      terrainSaveMsg.value = '地形库保存成功!'
-      addLog('terrain', '地形库配置已保存')
-    } else {
-      terrainSaveMsg.value = '保存失败: ' + (await res.json()).error
-    }
+    await glossaryAPI.saveConfig(current)
+    terrainSaveMsg.value = '地形库保存成功!'
+    addLog('terrain', '地形库配置已保存')
   } catch (e) {
-    terrainSaveMsg.value = '网络错误: ' + e.message
+    terrainSaveMsg.value = '保存失败: ' + (e.response?.data?.error || e.message)
   }
   setTimeout(() => { terrainSaveMsg.value = '' }, 3000)
 }
@@ -381,86 +414,16 @@ function getTerrainColor(id) {
 }
 
 // ================================================================
-//  HexGridCanvas drawFn — 地形网格渲染
-//  ctx 已由组件应用完整 CTM (translate → scale → ISO shear)，
-//  父层直接以 pointyTopCenter 标准坐标绘制即可
+//  大一统画布事件处理器 (Phase 29-P0)
+//  地形渲染 100% 内建于引擎，外壳仅负责策略改写
 // ================================================================
 
-function hexToRGBA(hex, alpha) {
-  const _hex = hex.replace('#', '')
-  const r = parseInt(_hex.slice(0, 2), 16)
-  const g = parseInt(_hex.slice(2, 4), 16)
-  const b = parseInt(_hex.slice(4, 6), 16)
-  return `rgba(${r},${g},${b},${alpha})`
-}
-
-function editorDrawFn(ctx, { hlQ, hlR }) {
-  const h = spacingH.value
-  const v = spacingV.value
-
-  for (let r = 0; r < gridH.value; r++) {
-    for (let q = 0; q < gridW.value; q++) {
-      const { flatX: cx, flatY: cy } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
-
-      // 地形填充 (Phase 13: 兼容旧版字符串和新版结构化对象)
-      const rawCell = terrainMap[`${q},${r}`]
-      const tid = extractTerrainId(rawCell)
-      const terrainDef = terrainTypes.find(t => t.id === tid) || terrainTypes[0]
-      ctx.fillStyle = hexToRGBA(terrainDef.color, 0.35)
-      drawHexPath(ctx, cx, cy)
-      ctx.fill()
-
-      // 边框
-      ctx.strokeStyle = 'rgba(159,142,120,0.2)'
-      ctx.lineWidth = 1
-      drawHexPath(ctx, cx, cy)
-      ctx.stroke()
-
-      // 坐标标签
-      ctx.fillStyle = 'rgba(193,232,255,0.6)'
-      ctx.font = 'bold 12px "Fira Code", monospace'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
-      ctx.fillText(formatCoord(q, r), cx, cy + 2)
-
-      // 悬停高亮
-      if (hlQ === q && hlR === r) {
-        ctx.strokeStyle = '#ffb000'
-        ctx.lineWidth = 2.5
-        drawHexPath(ctx, cx, cy)
-        ctx.stroke()
-        ctx.fillStyle = 'rgba(0,0,0,0.8)'
-        ctx.font = 'bold 13px "Fira Code", monospace'
-        ctx.textBaseline = 'bottom'
-        ctx.fillText(terrainDef.name, cx, cy - HEX_RADIUS - 2)
-      }
-    }
-  }
-}
-
-// ================================================================
-//  HexGridCanvas 事件处理器
-//  ================================================================
-
-/** 左键点击 — 涂抹当前画笔地形 */
-function onHexClick({ q, r }) {
+/** cell-clicked → 涂抹当前画笔地形 (策略外壳) */
+function handleEditorBrush({ q, r }) {
   if (q >= 0 && q < gridW.value && r >= 0 && r < gridH.value) {
     terrainMap[`${q},${r}`] = brush.value
-    hexGrid.value?.redraw()
-  }
-}
-
-/** 鼠标悬停 — HexGridCanvas 内部处理悬停坐标显示 */
-function onHexHover({ q, r }) {
-  // 悬停逻辑由 HexGridCanvas 内部 + drawFn 的 hlQ/hlR 处理
-  // 额外编辑器悬停逻辑可在此扩展
-}
-
-/** 右键点击 — 擦除地形 (恢复为默认 moon) */
-function onHexContextMenu({ q, r }) {
-  if (q >= 0 && q < gridW.value && r >= 0 && r < gridH.value) {
-    delete terrainMap[`${q},${r}`]
-    hexGrid.value?.redraw()
+    // terrainMap 变化 → reactive watch → gridData cells 变化 → 引擎自动 invalidateTerrain
+    hexGrid.value?.invalidateTerrain()
   }
 }
 
@@ -479,8 +442,41 @@ function addLog(type, message) {
 //  UI 操作
 // ================================================================
 
+// Phase 30-Fix: 使用 hexUtils.js 统一坐标解析器，删除本地重复实现
+function parseBatchCoords() {
+  batchCoordError.value = ''
+  if (!batchCoordStr.value && !batchEndCoordStr.value) return
+
+  // 尝试完整范围解析 "A1:C5"
+  const comboStr = batchCoordStr.value + (batchEndCoordStr.value ? ':' + batchEndCoordStr.value : '')
+  const range = parseCoordRange(comboStr)
+  if (range) {
+    batchStartQ.value = range.minQ; batchEndQ.value = range.maxQ
+    batchStartR.value = range.minR; batchEndR.value = range.maxR
+    return
+  }
+
+  // 单独解析起点/终点
+  const start = batchCoordStr.value.trim() ? parseCoord(batchCoordStr.value) : null
+  const end = batchEndCoordStr.value.trim() ? parseCoord(batchEndCoordStr.value) : null
+
+  if (batchCoordStr.value.trim() && !start) {
+    batchCoordError.value = `起点格式无效: "${batchCoordStr.value}" (应为 A1 格式)`
+    return
+  }
+  if (batchEndCoordStr.value.trim() && !end) {
+    batchCoordError.value = `终点格式无效: "${batchEndCoordStr.value}" (应为 A1 格式)`
+    return
+  }
+
+  if (start) { batchStartQ.value = start.q; batchStartR.value = start.r }
+  if (end) { batchEndQ.value = end.q; batchEndR.value = end.r }
+}
+
 // Phase9: 批量应用地形
 function applyBatchTerrain() {
+  // Phase 30: 从 Excel 坐标再解析一次 (用户可能直接输入后立即点击)
+  if (batchCoordStr.value.trim()) parseBatchCoords()
   const sq = Math.min(batchStartQ.value, batchEndQ.value)
   const eq = Math.max(batchStartQ.value, batchEndQ.value)
   const sr = Math.min(batchStartR.value, batchEndR.value)
@@ -495,7 +491,7 @@ function applyBatchTerrain() {
     }
   }
   batchResult.value = `已修改 ${count} 个格子为 ${batchTerrain.value}`
-  hexGrid.value?.redraw()
+  hexGrid.value?.invalidateTerrain()
   addLog('batch', `区间[${sq},${sr}]→[${eq},${er}] 地形 → ${batchTerrain.value} (${count}格)`)
   setTimeout(() => { batchResult.value = '' }, 3000)
 }
@@ -524,8 +520,7 @@ function navigateTo(path) { router.push(path) }
 // Phase 13: 从后端拉取地图文件列表
 async function fetchMapFileList() {
   try {
-    const res = await fetch('/api/map/list')
-    const data = await res.json()
+    const { data } = await mapAPI.getMapList()
     mapFileList.value = data.maps || []
     if (mapFileList.value.length > 0) {
       addLog('info', `发现 ${mapFileList.value.length} 个已保存的地图文件`)
@@ -541,23 +536,7 @@ async function onSelectMapFile() {
   if (!filename) return
   mapLoadStatus.value = '加载中...'
   try {
-    const res = await fetch(`/api/map/list?id=${encodeURIComponent(filename)}`)
-    if (!res.ok && res.status === 404) {
-      // 回退: 使用原有 getBattlefields 加载
-      const { data } = await mapAPI.getBattlefields()
-      const maps = data?.battlefields || data?.maps || []
-      const found = maps.find(m => String(m.id) === filename || m.name === filename.replace('.json', ''))
-      if (found) {
-        await loadMapData(found)
-        mapLoadStatus.value = `✓ 已加载: ${found.name || filename}`
-        setTimeout(() => { mapLoadStatus.value = '' }, 3000)
-        return
-      }
-      mapLoadStatus.value = '✗ 地图未找到'
-      setTimeout(() => { mapLoadStatus.value = '' }, 3000)
-      return
-    }
-    const data = await res.json()
+    const { data } = await mapAPI.getMapById(filename)
     if (data) {
       await loadMapData(data)
       mapLoadStatus.value = `✓ 已加载: ${(data).name || filename}`
@@ -590,7 +569,15 @@ async function loadMapData(mapData) {
     if (hc.spacingV !== undefined) spacingV.value = hc.spacingV
     if (hc.offsetFactor !== undefined) offsetFactor.value = hc.offsetFactor
   }
-  hexGrid.value?.redraw()
+  // 强制等待 Vue 在微任务队列中完成对 terrainMap 的数据更新与计算流传播
+  await nextTick()
+  await nextTick()
+  if (hexGrid.value) {
+    hexGrid.value.invalidateTerrain() // 标记地形脏缓存
+    if (typeof hexGrid.value.redraw === 'function') {
+      hexGrid.value.redraw()         // 强制触发大一统 Canvas 全量物理重绘
+    }
+  }
   addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && terrainMap[k] !== 'moon').length} 个地形格子)`)
 }
 
@@ -613,15 +600,7 @@ onMounted(async () => {
       }
     }
     if (mapData) {
-      battlefield.value = mapData
-      const rawTerrain = mapData.terrain
-      if (rawTerrain) {
-        const t = typeof rawTerrain === 'string' ? JSON.parse(rawTerrain) : rawTerrain
-        if (t && typeof t === 'object') {
-          Object.entries(t).forEach(([key, val]) => { terrainMap[key] = val })
-        }
-      }
-      addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && terrainMap[k] !== 'moon').length} 个地形格子)`)
+      await loadMapData(mapData) // 复用统一加载管线（含 double nextTick + redraw）
     } else {
       addLog('info', '未找到已保存的地图，开始创建新地图')
     }
@@ -631,7 +610,20 @@ onMounted(async () => {
   await nextTick()
   // Phase 13: 异步拉取地图文件列表
   fetchMapFileList().catch(() => {})
-  // HexGridCanvas 在 onMounted 中自行初始化 Canvas + 事件绑定
+
+  // Phase 29-P0: 右键擦除 — 直接监听引擎 Canvas 的 contextmenu 事件
+  // 引擎内部已 preventDefault，外壳层反算坐标 → 擦除地形
+  const canvas = hexGrid.value?.mainCanvas
+  if (canvas) {
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      const hex = hexGrid.value?.getHexAtEvent(e)
+      if (hex && hex.q >= 0 && hex.q < gridW.value && hex.r >= 0 && hex.r < gridH.value) {
+        delete terrainMap[`${hex.q},${hex.r}`]
+        hexGrid.value?.invalidateTerrain()
+      }
+    })
+  }
 })
 
 // ---- 保存 3D 视角配置到后端 ----
@@ -701,9 +693,9 @@ function createNewMap() {
   showNewMapModal.value = false
   saveStatus.value = `已创建 ${w}×${h} 地图`
 
-  // 触发 HexGridCanvas 重绘 + 滑槽边界重算
+  // 触发引擎重绘 + 滑槽边界重算
   nextTick(() => {
-    hexGrid.value?.redraw()
+    hexGrid.value?.invalidateTerrain()
   })
 
   addLog('system', `新建地图: ${w}×${h} (${w * h} 格)`)
@@ -780,13 +772,11 @@ function exportJSON() {
 .icon { width: 1em; height: 1em; display: inline-block; vertical-align: middle; fill: currentColor; flex-shrink: 0; }
 .icon-lg { font-size: 2.5rem; }
 
-.main-content {
-  height: 100vh;
+.page-container {
   overflow: hidden;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  width: 100%;
 }
 
 .page-header {

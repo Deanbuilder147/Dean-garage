@@ -9,7 +9,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import battlesRouter from './routes/battles.js';
-import campaignRouter from './routes/campaign.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -32,7 +31,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// 健康检查
+// 健康检查（兼容 Docker healthcheck 探测路径 /health 和标准路径 /api/health）
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'combat-service',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -45,8 +53,7 @@ app.get('/api/health', (req, res) => {
 // 战场路由
 app.use('/api/combat', battlesRouter);
 
-// 战役路由 (Phase 15: 单机沙盒剧情模式)
-app.use('/api/campaign', campaignRouter);
+
 
 // 404 处理
 app.use((req, res) => {

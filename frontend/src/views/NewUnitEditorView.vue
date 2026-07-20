@@ -1,6 +1,6 @@
 <template>
 
-    <main class="main-content">
+    <div class="page-container w-full h-full flex flex-col overflow-y-auto">
       <div v-if="errors.length > 0" class="error-box">
         <strong>⚠ 验证失败：</strong>
         <ul><li v-for="(err, i) in errors" :key="i">{{ err }}</li></ul>
@@ -48,32 +48,33 @@
         <section class="form-section">
           <h3>基础信息</h3>
           <div class="form-row">
-            <label>机体番号 *</label>
-            <input v-model="form.name" type="text" placeholder="例如: RX-78-2"
+            <label for="unit-name-field">机体番号 *</label>
+            <input id="unit-name-field" name="name" v-model="form.name" type="text" placeholder="例如: RX-78-2"
                    :class="{ 'error-input': highlightFields.name }" @input="clearHighlight('name')">
           </div>
           <div class="form-row">
-            <label>行动代号</label>
-            <input v-model="form.codename" type="text" placeholder="例如: 高达"
+            <label for="unit-codename-field">行动代号</label>
+            <input id="unit-codename-field" name="codename" v-model="form.codename" type="text" placeholder="例如: 高达"
                    :class="{ 'error-input': highlightFields.codename }" @input="clearHighlight('codename')">
           </div>
           <div class="form-row">
-            <label>所属阵营</label>
+            <label for="unit-faction-field">所属阵营</label>
             <div class="faction-row">
-              <select v-model="selectedFaction" :disabled="factionConfirmed">
+              <select id="unit-faction-field" name="faction" v-model="form.faction" class="faction-select w-48">
                 <option value="">选择阵营...</option>
-                <option value="earth">地球联合</option>
-                <option value="bailong">拜隆军</option>
-                <option value="maxion">马克西翁</option>
+                <option v-for="f in factions" :key="f.code" :value="f.code">{{ f.name }}</option>
               </select>
-              <button v-if="!factionConfirmed && selectedFaction" @click="confirmFaction" class="btn-small btn-primary">确认</button>
-              <button v-if="factionConfirmed" @click="changeFaction" class="btn-small btn-ghost">更换</button>
+              <button class="btn btn-accent btn-small" @click="openAddFaction">+ 添加阵营</button>
+              <div class="faction-logo-box">
+                <img v-if="getFactionLogo(form.faction)" :src="getFactionLogo(form.faction)" alt="阵营Logo" class="faction-logo-img">
+                <span v-else class="faction-logo-placeholder">{{ getFactionName(form.faction)?.[0] || '?' }}</span>
+              </div>
             </div>
           </div>
           <div class="form-row">
-            <label>主机体图片</label>
+            <label for="unit-image-field">主机体图片</label>
             <div class="file-upload-wrapper">
-              <input type="file" ref="imageInputRef" @change="uploadImage" accept="image/*" class="file-input-hidden">
+              <input id="unit-image-field" name="main_image" type="file" ref="imageInputRef" @change="uploadImage" accept="image/*" class="file-input-hidden">
               <button type="button" @click="$refs.imageInputRef.click()" class="btn-file-upload">
                 选择文件...
               </button>
@@ -84,14 +85,44 @@
           </div>
         </section>
 
+        <!-- Phase 28-D: 机体七视图配置区 -->
+        <section class="form-section">
+          <h3>七视图 (<span class="faction-code">{{ form.codename || form.name || '???' }}</span>)</h3>
+          <p class="section-desc">按 0-6 朝向配置精灵图，命名规范: {{ (form.codename || form.name || 'UNIT') }}_[0-6]_idle.png</p>
+          <div class="views-grid">
+            <div v-for="dv in directionViews" :key="dv.value" class="view-slot">
+              <div class="view-label">{{ dv.label }}</div>
+              <div class="view-drop-zone"
+                   @click="triggerViewUpload(dv.value)"
+                   @dragover.prevent
+                   @drop.prevent="handleViewDrop($event, dv.value)">
+                <img v-if="viewPreviews[dv.value]" :src="viewPreviews[dv.value]" class="view-preview-img">
+                <span v-else class="view-placeholder">{{ dv.value }}</span>
+              </div>
+              <input type="file" :ref="el => viewInputs[dv.value] = el" @change="e => handleViewUpload(e, dv.value)" accept="image/png" class="file-input-hidden">
+              <button class="btn-small btn-accent" @click="clearView(dv.value)" v-if="viewPreviews[dv.value]">清除</button>
+            </div>
+          </div>
+          <div class="views-actions">
+            <button class="btn btn-accent" @click="uploadAllViews" :disabled="!allViewsFilled || viewUploading">
+              {{ viewUploading ? '上传中...' : '批量上传七视图' }}
+            </button>
+            <button class="btn btn-secondary" @click="generateAIViews" :disabled="viewUploading">
+              AI 动态生成七视图
+            </button>
+          </div>
+          <p v-if="viewUploading" class="import-status">正在上传七视图...</p>
+          <p v-if="viewError" class="error-text">{{ viewError }}</p>
+        </section>
+
         <!-- 主机体 -->
         <section class="form-section">
           <h3>主机体 <span class="points-badge">{{ mainTotal }}/40点</span></h3>
           <div class="stats-grid">
-            <div class="stat-input"><label>格斗</label><div class="stepper"><button @click="adjustStat('main','格斗',-1)">-</button><input type="number" v-model.number="form.main_格斗" min="0" max="40" :class="{ 'error-input': highlightFields.main_格斗 }" @input="clearHighlight('main_格斗')"><button @click="adjustStat('main','格斗',1)">+</button></div></div>
-            <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('main','射击',-1)">-</button><input type="number" v-model.number="form.main_射击" min="0" max="40" :class="{ 'error-input': highlightFields.main_射击 }" @input="clearHighlight('main_射击')"><button @click="adjustStat('main','射击',1)">+</button></div></div>
-            <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('main','结构',-1)">-</button><input type="number" v-model.number="form.main_结构" min="0" max="40" :class="{ 'error-input': highlightFields.main_结构 }" @input="clearHighlight('main_结构')"><button @click="adjustStat('main','结构',1)">+</button></div></div>
-            <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('main','机动',-1)">-</button><input type="number" v-model.number="form.main_机动" min="0" max="40" :class="{ 'error-input': highlightFields.main_机动 }" @input="clearHighlight('main_机动')"><button @click="adjustStat('main','机动',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-main-格斗">格斗</label><div class="stepper"><button @click="adjustStat('main','格斗',-1)">-</button><input id="stat-main-格斗" name="main_格斗" type="number" v-model.number="form.main_格斗" min="0" max="40" :class="{ 'error-input': highlightFields.main_格斗 }" @input="clearHighlight('main_格斗')"><button @click="adjustStat('main','格斗',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-main-射击">射击</label><div class="stepper"><button @click="adjustStat('main','射击',-1)">-</button><input id="stat-main-射击" name="main_射击" type="number" v-model.number="form.main_射击" min="0" max="40" :class="{ 'error-input': highlightFields.main_射击 }" @input="clearHighlight('main_射击')"><button @click="adjustStat('main','射击',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-main-结构">结构</label><div class="stepper"><button @click="adjustStat('main','结构',-1)">-</button><input id="stat-main-结构" name="main_结构" type="number" v-model.number="form.main_结构" min="0" max="40" :class="{ 'error-input': highlightFields.main_结构 }" @input="clearHighlight('main_结构')"><button @click="adjustStat('main','结构',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-main-机动">机动</label><div class="stepper"><button @click="adjustStat('main','机动',-1)">-</button><input id="stat-main-机动" name="main_机动" type="number" v-model.number="form.main_机动" min="0" max="40" :class="{ 'error-input': highlightFields.main_机动 }" @input="clearHighlight('main_机动')"><button @click="adjustStat('main','机动',1)">+</button></div></div>
           </div>
           <div class="hp-display">HP: {{ mainHP }}</div>
           <SkillsEditor title="主机体技能" v-model="form.main_skills" :max-slots="3" />
@@ -99,13 +130,13 @@
 
         <!-- 跟随 -->
         <section class="form-section">
-          <h3><label class="check-row"><input type="checkbox" v-model="form.has_royroy">跟随 (Royroy)</label><span v-if="form.has_royroy" class="points-badge">{{ royroyTotal }}/25点</span></h3>
+          <h3><label class="check-row" for="unit-has-royroy"><input id="unit-has-royroy" name="has_royroy" type="checkbox" v-model="form.has_royroy">跟随 (Royroy)</label><span v-if="form.has_royroy" class="points-badge">{{ royroyTotal }}/25点</span></h3>
           <div v-if="form.has_royroy">
             <div class="stats-grid">
-              <div class="stat-input"><label>格斗</label><div class="stepper"><button @click="adjustStat('royroy','格斗',-1)">-</button><input type="number" v-model.number="form.royroy_格斗" min="0" max="25"><button @click="adjustStat('royroy','格斗',1)">+</button></div></div>
-              <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('royroy','射击',-1)">-</button><input type="number" v-model.number="form.royroy_射击" min="0" max="25"><button @click="adjustStat('royroy','射击',1)">+</button></div></div>
-              <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('royroy','结构',-1)">-</button><input type="number" v-model.number="form.royroy_结构" min="0" max="25"><button @click="adjustStat('royroy','结构',1)">+</button></div></div>
-              <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('royroy','机动',-1)">-</button><input type="number" v-model.number="form.royroy_机动" min="0" max="25"><button @click="adjustStat('royroy','机动',1)">+</button></div></div>
+              <div class="stat-input"><label for="stat-royroy-格斗">格斗</label><div class="stepper"><button @click="adjustStat('royroy','格斗',-1)">-</button><input id="stat-royroy-格斗" name="royroy_格斗" type="number" v-model.number="form.royroy_格斗" min="0" max="25"><button @click="adjustStat('royroy','格斗',1)">+</button></div></div>
+              <div class="stat-input"><label for="stat-royroy-射击">射击</label><div class="stepper"><button @click="adjustStat('royroy','射击',-1)">-</button><input id="stat-royroy-射击" name="royroy_射击" type="number" v-model.number="form.royroy_射击" min="0" max="25"><button @click="adjustStat('royroy','射击',1)">+</button></div></div>
+              <div class="stat-input"><label for="stat-royroy-结构">结构</label><div class="stepper"><button @click="adjustStat('royroy','结构',-1)">-</button><input id="stat-royroy-结构" name="royroy_结构" type="number" v-model.number="form.royroy_结构" min="0" max="25"><button @click="adjustStat('royroy','结构',1)">+</button></div></div>
+              <div class="stat-input"><label for="stat-royroy-机动">机动</label><div class="stepper"><button @click="adjustStat('royroy','机动',-1)">-</button><input id="stat-royroy-机动" name="royroy_机动" type="number" v-model.number="form.royroy_机动" min="0" max="25"><button @click="adjustStat('royroy','机动',1)">+</button></div></div>
             </div>
             <div class="hp-display">HP: {{ royroyHP }}</div>
             <SkillsEditor title="跟随技能" v-model="form.royroy_skills" :max-slots="2" />
@@ -117,22 +148,22 @@
         <section class="form-section">
           <h3>左手装备 <span v-if="form.left_type !== 'none'" class="points-badge">{{ leftTotal }}/15点</span></h3>
           <div class="form-row">
-            <select v-model="form.left_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-left-type" name="left_type" v-model="form.left_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.left_type !== 'none'" class="stats-grid">
-            <div class="stat-input"><label>格斗</label><div class="stepper"><button @click="adjustStat('left','格斗',-1)">-</button><input type="number" v-model.number="form.left_格斗" min="0" max="15"><button @click="adjustStat('left','格斗',1)">+</button></div></div>
-            <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('left','射击',-1)">-</button><input type="number" v-model.number="form.left_射击" min="0" max="15"><button @click="adjustStat('left','射击',1)">+</button></div></div>
-            <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('left','结构',-1)">-</button><input type="number" v-model.number="form.left_结构" min="0" max="15"><button @click="adjustStat('left','结构',1)">+</button></div></div>
-            <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('left','机动',-1)">-</button><input type="number" v-model.number="form.left_机动" min="0" max="15"><button @click="adjustStat('left','机动',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-left-格斗">格斗</label><div class="stepper"><button @click="adjustStat('left','格斗',-1)">-</button><input id="stat-left-格斗" name="left_格斗" type="number" v-model.number="form.left_格斗" min="0" max="15"><button @click="adjustStat('left','格斗',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-left-射击">射击</label><div class="stepper"><button @click="adjustStat('left','射击',-1)">-</button><input id="stat-left-射击" name="left_射击" type="number" v-model.number="form.left_射击" min="0" max="15"><button @click="adjustStat('left','射击',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-left-结构">结构</label><div class="stepper"><button @click="adjustStat('left','结构',-1)">-</button><input id="stat-left-结构" name="left_结构" type="number" v-model.number="form.left_结构" min="0" max="15"><button @click="adjustStat('left','结构',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-left-机动">机动</label><div class="stepper"><button @click="adjustStat('left','机动',-1)">-</button><input id="stat-left-机动" name="left_机动" type="number" v-model.number="form.left_机动" min="0" max="15"><button @click="adjustStat('left','机动',1)">+</button></div></div>
           </div>
           <div v-if="form.left_type !== 'none'" class="dkm-section">
             <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
             <div class="dkm-grid">
-              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.left_dkm_beam" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.left_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.left_dkm_explosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.left_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.left_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-left-dkm-beam">光束</label><input id="stat-left-dkm-beam" name="left_dkm_beam" type="number" v-model.number="form.left_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-left-dkm-kinetic">动能</label><input id="stat-left-dkm-kinetic" name="left_dkm_kinetic" type="number" v-model.number="form.left_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-left-dkm-explosive">爆炸</label><input id="stat-left-dkm-explosive" name="left_dkm_explosive" type="number" v-model.number="form.left_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-left-dkm-corrosive">腐蚀</label><input id="stat-left-dkm-corrosive" name="left_dkm_corrosive" type="number" v-model.number="form.left_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-left-dkm-thermal">热熔</label><input id="stat-left-dkm-thermal" name="left_dkm_thermal" type="number" v-model.number="form.left_dkm_thermal" step="0.1" min="-5" max="5" /></div>
             </div>
           </div>
           <SkillsEditor v-if="form.left_type !== 'none'" title="左手技能" v-model="form.left_skills" :max-slots="getSkillSlots(form.left_type)" />
@@ -142,22 +173,22 @@
         <section class="form-section">
           <h3>右手装备 <span v-if="form.right_type !== 'none'" class="points-badge">{{ rightTotal }}/15点</span></h3>
           <div class="form-row">
-            <select v-model="form.right_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-right-type" name="right_type" v-model="form.right_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.right_type !== 'none'" class="stats-grid">
-            <div class="stat-input"><label>格斗</label><div class="stepper"><button @click="adjustStat('right','格斗',-1)">-</button><input type="number" v-model.number="form.right_格斗" min="0" max="15"><button @click="adjustStat('right','格斗',1)">+</button></div></div>
-            <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('right','射击',-1)">-</button><input type="number" v-model.number="form.right_射击" min="0" max="15"><button @click="adjustStat('right','射击',1)">+</button></div></div>
-            <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('right','结构',-1)">-</button><input type="number" v-model.number="form.right_结构" min="0" max="15"><button @click="adjustStat('right','结构',1)">+</button></div></div>
-            <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('right','机动',-1)">-</button><input type="number" v-model.number="form.right_机动" min="0" max="15"><button @click="adjustStat('right','机动',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-right-格斗">格斗</label><div class="stepper"><button @click="adjustStat('right','格斗',-1)">-</button><input id="stat-right-格斗" name="right_格斗" type="number" v-model.number="form.right_格斗" min="0" max="15"><button @click="adjustStat('right','格斗',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-right-射击">射击</label><div class="stepper"><button @click="adjustStat('right','射击',-1)">-</button><input id="stat-right-射击" name="right_射击" type="number" v-model.number="form.right_射击" min="0" max="15"><button @click="adjustStat('right','射击',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-right-结构">结构</label><div class="stepper"><button @click="adjustStat('right','结构',-1)">-</button><input id="stat-right-结构" name="right_结构" type="number" v-model.number="form.right_结构" min="0" max="15"><button @click="adjustStat('right','结构',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-right-机动">机动</label><div class="stepper"><button @click="adjustStat('right','机动',-1)">-</button><input id="stat-right-机动" name="right_机动" type="number" v-model.number="form.right_机动" min="0" max="15"><button @click="adjustStat('right','机动',1)">+</button></div></div>
           </div>
           <div v-if="form.right_type !== 'none'" class="dkm-section">
             <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
             <div class="dkm-grid">
-              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.right_dkm_beam" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.right_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.right_dkm_explosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.right_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.right_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-right-dkm-beam">光束</label><input id="stat-right-dkm-beam" name="right_dkm_beam" type="number" v-model.number="form.right_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-right-dkm-kinetic">动能</label><input id="stat-right-dkm-kinetic" name="right_dkm_kinetic" type="number" v-model.number="form.right_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-right-dkm-explosive">爆炸</label><input id="stat-right-dkm-explosive" name="right_dkm_explosive" type="number" v-model.number="form.right_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-right-dkm-corrosive">腐蚀</label><input id="stat-right-dkm-corrosive" name="right_dkm_corrosive" type="number" v-model.number="form.right_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-right-dkm-thermal">热熔</label><input id="stat-right-dkm-thermal" name="right_dkm_thermal" type="number" v-model.number="form.right_dkm_thermal" step="0.1" min="-5" max="5" /></div>
             </div>
           </div>
           <SkillsEditor v-if="form.right_type !== 'none'" title="右手技能" v-model="form.right_skills" :max-slots="getSkillSlots(form.right_type)" />
@@ -167,22 +198,22 @@
         <section class="form-section">
           <h3>其它装备 <span v-if="form.extra_type !== 'none'" class="points-badge">{{ extraTotal }}/{{ extraPointLimit }}点</span></h3>
           <div class="form-row">
-            <select v-model="form.extra_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-extra-type" name="extra_type" v-model="form.extra_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.extra_type !== 'none'" class="stats-grid">
-            <div class="stat-input"><label>格斗</label><div class="stepper"><button @click="adjustStat('extra','格斗',-1)">-</button><input type="number" v-model.number="form.extra_格斗" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','格斗',1)">+</button></div></div>
-            <div class="stat-input"><label>射击</label><div class="stepper"><button @click="adjustStat('extra','射击',-1)">-</button><input type="number" v-model.number="form.extra_射击" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','射击',1)">+</button></div></div>
-            <div class="stat-input"><label>结构</label><div class="stepper"><button @click="adjustStat('extra','结构',-1)">-</button><input type="number" v-model.number="form.extra_结构" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','结构',1)">+</button></div></div>
-            <div class="stat-input"><label>机动</label><div class="stepper"><button @click="adjustStat('extra','机动',-1)">-</button><input type="number" v-model.number="form.extra_机动" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','机动',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-extra-格斗">格斗</label><div class="stepper"><button @click="adjustStat('extra','格斗',-1)">-</button><input id="stat-extra-格斗" name="extra_格斗" type="number" v-model.number="form.extra_格斗" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','格斗',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-extra-射击">射击</label><div class="stepper"><button @click="adjustStat('extra','射击',-1)">-</button><input id="stat-extra-射击" name="extra_射击" type="number" v-model.number="form.extra_射击" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','射击',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-extra-结构">结构</label><div class="stepper"><button @click="adjustStat('extra','结构',-1)">-</button><input id="stat-extra-结构" name="extra_结构" type="number" v-model.number="form.extra_结构" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','结构',1)">+</button></div></div>
+            <div class="stat-input"><label for="stat-extra-机动">机动</label><div class="stepper"><button @click="adjustStat('extra','机动',-1)">-</button><input id="stat-extra-机动" name="extra_机动" type="number" v-model.number="form.extra_机动" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','机动',1)">+</button></div></div>
           </div>
           <div v-if="form.extra_type !== 'none'" class="dkm-section">
             <label class="dkm-title">damage_kind_modifiers (Phase 11)</label>
             <div class="dkm-grid">
-              <div class="dkm-cell"><label>光束</label><input type="number" v-model.number="form.extra_dkm_beam" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>动能</label><input type="number" v-model.number="form.extra_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>爆炸</label><input type="number" v-model.number="form.extra_dkm_explosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>腐蚀</label><input type="number" v-model.number="form.extra_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
-              <div class="dkm-cell"><label>热熔</label><input type="number" v-model.number="form.extra_dkm_thermal" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-extra-dkm-beam">光束</label><input id="stat-extra-dkm-beam" name="extra_dkm_beam" type="number" v-model.number="form.extra_dkm_beam" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-extra-dkm-kinetic">动能</label><input id="stat-extra-dkm-kinetic" name="extra_dkm_kinetic" type="number" v-model.number="form.extra_dkm_kinetic" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-extra-dkm-explosive">爆炸</label><input id="stat-extra-dkm-explosive" name="extra_dkm_explosive" type="number" v-model.number="form.extra_dkm_explosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-extra-dkm-corrosive">腐蚀</label><input id="stat-extra-dkm-corrosive" name="extra_dkm_corrosive" type="number" v-model.number="form.extra_dkm_corrosive" step="0.1" min="-5" max="5" /></div>
+              <div class="dkm-cell"><label for="stat-extra-dkm-thermal">热熔</label><input id="stat-extra-dkm-thermal" name="extra_dkm_thermal" type="number" v-model.number="form.extra_dkm_thermal" step="0.1" min="-5" max="5" /></div>
             </div>
           </div>
           <SkillsEditor v-if="form.extra_type !== 'none'" title="其它技能" v-model="form.extra_skills" :max-slots="getSkillSlots(form.extra_type)" />
@@ -190,14 +221,43 @@
           <p v-if="form.extra_type === '防具' && form.extra_结构 < 10" class="hint warning">⚠ 防具结构&lt;10，效果不生效</p>
         </section>
       </div>
-    </main>
+    </div>
+
+    <!-- Phase 28: 添加阵营模态弹窗 -->
+    <div v-if="showAddFaction" class="modal-overlay" @click.self="showAddFaction=false">
+      <div class="modal">
+        <h3>添加阵营</h3>
+        <div class="form-row">
+          <label for="faction-code-field">阵营 Code *</label>
+          <input id="faction-code-field" name="faction_code" v-model="newFaction.code" type="text" placeholder="如: neon" :disabled="factionUploading">
+        </div>
+        <div class="form-row">
+          <label for="faction-name-field">阵营名称 *</label>
+          <input id="faction-name-field" name="faction_name" v-model="newFaction.name" type="text" placeholder="如: 霓虹战线" :disabled="factionUploading">
+        </div>
+        <div class="form-row">
+          <label for="faction-logo-field">阵营 Logo (仅 PNG)</label>
+          <input id="faction-logo-field" name="faction_logo" type="file" ref="factionImageRef" @change="handleFactionImage" accept="image/png" :disabled="factionUploading">
+        </div>
+        <p v-if="factionUploading" class="import-status">正在上传...</p>
+        <p v-if="factionError" class="error-text">{{ factionError }}</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" @click="cancelAddFaction" :disabled="factionUploading">取消</button>
+          <button class="btn btn-primary" @click="submitFaction" :disabled="factionUploading">{{ factionUploading ? '上传中...' : '确认添加' }}</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Excel导入弹窗 步骤1 -->
     <div v-if="showImportDialog && !previewData" class="modal-overlay" @click.self="showImportDialog=false">
       <div class="modal">
         <h3>Excel导入</h3>
         <p>请上传设定器格式的Excel文件</p>
-        <input type="file" @change="handleFileSelect" accept=".xlsx,.xls" ref="fileInputRef">
+        <div class="excel-upload-row">
+          <input id="excel-import-field" name="excel_file" type="file" @change="handleFileSelect" accept=".xlsx,.xls" ref="fileInputRef" class="file-input-hidden">
+          <button type="button" class="btn btn-ghost" @click="fileInputRef.click()">选择文件</button>
+          <span class="excel-file-status">{{ importFileName || '未选择任何文件' }}</span>
+        </div>
         <p v-if="importing" class="import-status">正在解析...</p>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="showImportDialog=false" :disabled="importing">取消</button>
@@ -213,7 +273,7 @@
           <h4>⚠ 待填写项</h4><ul><li v-for="(w,i) in previewWarnings" :key="i">{{ w }}</li></ul>
         </div>
         <div class="preview-content">
-          <div class="preview-section"><h4>基础信息</h4><p><strong>机体番号:</strong> {{ previewData.name||'(未填写)' }}</p><p><strong>行动代号:</strong> {{ previewData.codename||'(未填写)' }}</p><p><strong>阵营:</strong> {{ getFactionName(previewData.faction) }}</p></div>
+          <div class="preview-section"><h4>基础信息</h4><p><strong>机体番号:</strong> {{ previewData.name||'(未填写)' }}</p><p><strong>行动代号:</strong> {{ previewData.codename||'(未填写)' }}</p><p><strong>阵营:</strong> {{ getFactionName(previewData.faction) || '(未填写)' }}</p></div>
           <div class="preview-section"><h4>主机体</h4><p>格斗: {{ previewData.main_格斗 }} | 射击: {{ previewData.main_射击 }} | 结构: {{ previewData.main_结构 }} | 机动: {{ previewData.main_机动 }}</p><p v-if="previewData.main_skills?.length"><strong>技能:</strong> {{ previewData.main_skills.map(s=>s.name==='null'?'(空)':s.name).join(', ') }}</p><p v-else class="empty-field">技能: (未填写)</p></div>
           <div v-if="previewData.has_royroy" class="preview-section"><h4>跟随 (Royroy)</h4><p>格斗: {{ previewData.royroy_格斗 }} | 射击: {{ previewData.royroy_射击 }} | 结构: {{ previewData.royroy_结构 }} | 机动: {{ previewData.royroy_机动 }}</p></div>
           <div v-if="previewData.left_type!=='none'" class="preview-section"><h4>左手装备 ({{ previewData.left_type }})</h4><p>格斗: {{ previewData.left_格斗 }} | 射击: {{ previewData.left_射击 }} | 结构: {{ previewData.left_结构 }} | 机动: {{ previewData.left_机动 }}</p></div>
@@ -245,7 +305,6 @@ import SkillsEditor from '@/components/SkillsEditor.vue'
 const router = useRouter()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
-const FACTION_MAP = { earth:'地球联合', bailong:'拜隆军', maxion:'马克西翁' }
 
 const units = ref([])
 const editingUnit = ref(null)
@@ -257,11 +316,110 @@ const confirming = ref(false)
 const previewData = ref(null)
 const previewWarnings = ref([])
 const fileInputRef = ref(null)
+const importFileName = ref('')
 const imageInputRef = ref(null)
 const imageFileName = ref('')
 const form = ref(createEmptyForm())
-const selectedFaction = ref('')
-const factionConfirmed = ref(false)
+
+// Phase 28: 动态阵营管理
+const factions = ref([])
+const showAddFaction = ref(false)
+const factionUploading = ref(false)
+const factionError = ref('')
+const factionImageRef = ref(null)
+const factionImageFile = ref(null)
+const newFaction = ref({ code: '', name: '' })
+
+// Phase 28-D: 七视图上传管理
+const directionViews = [
+  { value: 0, label: '0 正面' },
+  { value: 1, label: '1 正右' },
+  { value: 2, label: '2 右下' },
+  { value: 3, label: '3 左下' },
+  { value: 4, label: '4 正左' },
+  { value: 5, label: '5 左上' },
+  { value: 6, label: '6 右上' },
+]
+const viewFiles = ref({})       // { 0: File, 1: File, ... }
+const viewPreviews = ref({})    // { 0: dataURL, ... }
+const viewInputs = ref({})      // { 0: inputElement, ... }
+const viewUploading = ref(false)
+const viewError = ref('')
+const allViewsFilled = computed(() => directionViews.every(dv => viewFiles.value[dv.value]))
+
+function triggerViewUpload(dv) {
+  const input = viewInputs.value[dv]
+  if (input) input.click()
+}
+
+function handleViewUpload(e, dv) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.type !== 'image/png') {
+    viewError.value = `方向 ${dv}: 仅支持 PNG 格式`
+    return
+  }
+  viewError.value = ''
+  viewFiles.value = { ...viewFiles.value, [dv]: file }
+  // 生成预览
+  const reader = new FileReader()
+  reader.onload = (ev) => { viewPreviews.value = { ...viewPreviews.value, [dv]: ev.target.result } }
+  reader.readAsDataURL(file)
+}
+
+function handleViewDrop(e, dv) {
+  const file = e.dataTransfer.files[0]
+  if (!file) return
+  if (file.type !== 'image/png') {
+    viewError.value = `方向 ${dv}: 仅支持 PNG 格式`
+    return
+  }
+  viewError.value = ''
+  viewFiles.value = { ...viewFiles.value, [dv]: file }
+  const reader = new FileReader()
+  reader.onload = (ev) => { viewPreviews.value = { ...viewPreviews.value, [dv]: ev.target.result } }
+  reader.readAsDataURL(file)
+}
+
+function clearView(dv) {
+  const newFiles = { ...viewFiles.value }; delete newFiles[dv]; viewFiles.value = newFiles
+  const newPreviews = { ...viewPreviews.value }; delete newPreviews[dv]; viewPreviews.value = newPreviews
+  if (viewInputs.value[dv]) viewInputs.value[dv].value = ''
+}
+
+async function uploadAllViews() {
+  if (!allViewsFilled.value) { viewError.value = '请填充全部 7 个方向的图片'; return }
+  const unitCode = (form.value.codename || form.value.name || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '')
+  viewUploading.value = true; viewError.value = ''
+
+  try {
+    for (const dv of directionViews) {
+      const fd = new FormData()
+      fd.append('image', viewFiles.value[dv.value])
+      fd.append('unitCode', unitCode)
+      fd.append('direction', String(dv.value))
+      await hangarAPI.uploadUnitView(fd)
+    }
+    viewError.value = ''
+    alert('七视图上传成功！')
+    // 清空临时文件缓存
+    viewFiles.value = {}
+    viewPreviews.value = {}
+  } catch (e) {
+    viewError.value = '上传失败: ' + e.message
+  } finally {
+    viewUploading.value = false
+  }
+}
+
+function generateAIViews() {
+  // AI 动态生成七视图 — 预留接口，调用合作商 API
+  const unitCode = (form.value.codename || form.value.name || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!unitCode) { viewError.value = '请先填写机体番号或行动代号'; return }
+  alert(`AI 七视图生成接口预留: 将为核心 "${unitCode}" 生成 0-6 七个角度的 PNG 精灵图。
+当前为合作商 API 对接预留位，请确认 API Key 后启用。`)
+  viewError.value = ''
+}
 
 function createEmptyForm() {
   return {
@@ -298,20 +456,98 @@ function adjustStat(prefix, stat, delta) {
 }
 
 function clearHighlight(field) { if(highlightFields.value[field]){ delete highlightFields.value[field]; highlightFields.value={...highlightFields.value} } }
-function getFactionName(f) { return FACTION_MAP[f]||f }
+
+// Phase 28: 动态阵营名查找
+function getFactionName(code) {
+  const f = factions.value.find(x => x.code === code)
+  return f ? f.name : (code || '?')
+}
+function getFactionLogo(code) {
+  const f = factions.value.find(x => x.code === code)
+  return f ? f.logo : null
+}
+
 function navigateTo(p) { router.push(p) }
+
+// Phase 28: 加载阵营列表
+async function loadFactions() {
+  try {
+    const { data } = await hangarAPI.getFactions()
+    factions.value = data.factions || []
+  } catch (e) { console.error('[factions] 加载失败:', e) }
+}
+
+// Phase 28: 添加阵营弹窗
+function openAddFaction() {
+  showAddFaction.value = true
+  newFaction.value = { code: '', name: '' }
+  factionError.value = ''
+  factionImageFile.value = null
+  if (factionImageRef.value) factionImageRef.value.value = ''
+}
+
+function cancelAddFaction() {
+  showAddFaction.value = false
+  factionImageFile.value = null
+  factionError.value = ''
+}
+
+function handleFactionImage(e) {
+  const file = e.target.files[0]
+  if (file && file.type !== 'image/png') {
+    factionError.value = '仅支持 PNG 格式图片'
+    factionImageFile.value = null
+    return
+  }
+  factionError.value = ''
+  factionImageFile.value = file
+}
+
+async function submitFaction() {
+  const code = newFaction.value.code.trim()
+  const name = newFaction.value.name.trim()
+  if (!code) { factionError.value = '请输入阵营 Code'; return }
+  if (!name) { factionError.value = '请输入阵营名称'; return }
+  if (!/^[a-zA-Z0-9_-]+$/.test(code)) { factionError.value = 'Code 只能包含字母、数字、下划线、连字符'; return }
+
+  factionUploading.value = true
+  factionError.value = ''
+
+  try {
+    const fd = new FormData()
+    fd.append('code', code)
+    fd.append('name', name)
+    if (factionImageFile.value) fd.append('image', factionImageFile.value)
+
+    const { data } = await hangarAPI.uploadFactionLogo(fd)
+    if (!data || data.error) { factionError.value = data?.error || '上传失败'; factionUploading.value = false; return }
+
+    // 即时刷新阵营列表
+    await loadFactions()
+    showAddFaction.value = false
+    factionUploading.value = false
+    console.log(`[factions] 阵营添加成功: ${code} (${name})`)
+  } catch (e) {
+    factionError.value = '上传失败: ' + e.message
+    factionUploading.value = false
+  }
+}
 
 async function loadUnits() { try { const {data}=await hangarAPI.getUnits(); units.value=data.units||[] } catch(e){ console.error(e) } }
 
-function createNew() { form.value=createEmptyForm(); editingUnit.value={id:null}; errors.value=[]; highlightFields.value={}; selectedFaction.value=''; factionConfirmed.value=false }
+function createNew() { form.value=createEmptyForm(); editingUnit.value={id:null}; errors.value=[]; highlightFields.value={} }
 
-async function editUnit(unit) { try { const {data}=await hangarAPI.getUnit(unit.id); form.value={...createEmptyForm(),...data}; editingUnit.value=unit; errors.value=[]; selectedFaction.value=form.value.faction; factionConfirmed.value=true } catch(e){ console.error(e) } }
+async function editUnit(unit) {
+  try {
+    const {data}=await hangarAPI.getUnit(unit.id)
+    // Phase 30: 深拷贝避免引用污染，确保 skills/attributes 等嵌套对象独立
+    form.value = JSON.parse(JSON.stringify({...createEmptyForm(), ...data}))
+    editingUnit.value = JSON.parse(JSON.stringify(unit))
+    errors.value=[]
+  } catch(e){ console.error(e) }
+}
 
 function cancelEdit() { editingUnit.value=null; errors.value=[]; highlightFields.value={} }
-
-function confirmFaction() { if(!selectedFaction.value) return alert('请先选择阵营'); form.value.faction=selectedFaction.value; factionConfirmed.value=true }
-
-function changeFaction() { factionConfirmed.value=false; selectedFaction.value='' }
 
 async function saveUnit() {
   errors.value=[]; highlightFields.value={}
@@ -338,37 +574,33 @@ async function deleteUnit(id) { if(!confirm('确定要删除吗？')) return; tr
 async function uploadImage(e) {
   const file=e.target.files[0]; if(!file) return
   imageFileName.value = file.name
-  const fd=new FormData(); fd.append('image',file)
+  // Phase 30-Fix: 字段名 'file' 与后端 multer.single('file') 对齐
+  const fd=new FormData(); fd.append('file',file)
   try {
-    const token=localStorage.getItem('token')
-    const res=await fetch('/api/hangar/units/upload-image',{method:'POST',headers:{'Authorization':`Bearer ${token}`},body:fd})
-    const data=await res.json(); form.value.main_image_url=data.url
+    const { data } = await hangarAPI.uploadUnitImage(fd)
+    form.value.main_image_url = data.url
   } catch(e){ console.error(e) }
 }
 
-function importExcel() { showImportDialog.value=true; previewData.value=null; previewWarnings.value=[]; if(fileInputRef.value) fileInputRef.value.value='' }
+function importExcel() { showImportDialog.value=true; previewData.value=null; previewWarnings.value=[]; importFileName.value=''; if(fileInputRef.value) fileInputRef.value.value='' }
 
 async function handleFileSelect(e) {
   const file=e.target.files[0]; if(!file) return
+  importFileName.value = file.name
   importing.value=true
-  const token=localStorage.getItem('token'); const fd=new FormData(); fd.append('file',file)
+  const fd=new FormData(); fd.append('file',file)
   try {
-    const res=await fetch('/api/hangar/units/parse-excel',{method:'POST',headers:{'Authorization':`Bearer ${token}`},body:fd})
-    const data=await res.json()
-    if(!res.ok){ alert(data.error||'解析失败'); importing.value=false; return }
+    const { data } = await hangarAPI.parseExcel(fd)
     previewData.value=data.preview; previewWarnings.value=data.warnings||[]; importing.value=false
-  } catch(e){ importing.value=false; alert('解析失败: '+e.message) }
+  } catch(e){ importing.value=false; alert('解析失败: '+(e.response?.data?.error||e.message)) }
 }
 
 function closePreview() { previewData.value=null; previewWarnings.value=[]; showImportDialog.value=false }
 
 async function confirmImport() {
   if(!previewData.value) return; confirming.value=true
-  const token=localStorage.getItem('token')
   try {
-    const res=await fetch('/api/hangar/units/create-from-json',{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(previewData.value)})
-    const data=await res.json()
-    if(!res.ok){ alert(data.error||'保存失败'); confirming.value=false; return }
+    const { data } = await hangarAPI.createFromJson(previewData.value)
     showImportDialog.value=false
     const importedName=previewData.value?.name||'新棋子'
     previewData.value=null; previewWarnings.value=[]; await loadUnits()
@@ -376,10 +608,10 @@ async function confirmImport() {
     toast.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ffb000;color:#0a1628;padding:12px 24px;z-index:9999;font-size:14px;font-weight:700;font-family:monospace;'
     toast.textContent=`已导入: ${importedName}`; document.body.appendChild(toast)
     setTimeout(()=>toast.remove(),3000); confirming.value=false
-  } catch(e){ confirming.value=false; alert('导入失败: '+e.message) }
+  } catch(e){ confirming.value=false; alert('导入失败: '+(e.response?.data?.error||e.message)) }
 }
 
-onMounted(()=>{ loadUnits() })
+onMounted(()=>{ loadUnits(); loadFactions() })
 </script>
 
 <style scoped>
@@ -402,6 +634,7 @@ onMounted(()=>{ loadUnits() })
 .btn-primary { background:#ffb000; color:#0a1628; } .btn-primary:hover { background:#ffc840; }
 .btn-secondary { background:transparent; border:1px solid rgba(255,176,0,0.4); color:#ffb000; } .btn-secondary:hover { background:rgba(255,176,0,0.1); }
 .btn-ghost { background:transparent; border:1px solid rgba(159,142,120,0.3); color:#9f8e78; } .btn-ghost:hover { border-color:#ffb000; color:#ffb000; }
+.btn-accent { background:transparent; border:1px solid rgba(19,255,67,0.35); color:#13ff43; } .btn-accent:hover { background:rgba(19,255,67,0.08); border-color:#13ff43; }
 .btn-small { padding:6px 14px; font-size:11px; font-family:'Fira Code',monospace; font-weight:700; cursor:pointer; text-transform:uppercase; letter-spacing:.03em; transition:all .15s; }
 
 /* Unit Cards */
@@ -431,7 +664,7 @@ onMounted(()=>{ loadUnits() })
 .form-row input[type="text"], .form-row select { width:100%; padding:10px 14px; border:1px solid rgba(159,142,120,0.25); background:#083344; color:#c1e8ff; font-family:'Fira Code',monospace; font-size:13px; transition:all .2s; }
 .form-row input:focus, .form-row select:focus { outline:none; border-color:#ffb000; box-shadow:0 0 0 2px rgba(255,176,0,0.08); }
 .file-upload-wrapper { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.file-input-hidden { display: none; }
+.file-input-hidden { position: absolute; opacity: 0; width: 1px; height: 1px; overflow: hidden; }
 .btn-file-upload {
   padding: 8px 18px;
   background: rgba(255,176,0,0.12);
@@ -450,8 +683,11 @@ onMounted(()=>{ loadUnits() })
 .error-input { border-color:#ff7351 !important; background:rgba(255,115,81,0.08) !important; animation:pulse-error 1s ease-in-out; }
 @keyframes pulse-error { 0%,100%{box-shadow:0 0 0 0 rgba(255,115,81,0.3)} 50%{box-shadow:0 0 0 5px rgba(255,115,81,0)} }
 .faction-row { display:flex; gap:8px; align-items:center; }
-.faction-row select { flex:1; }
-.faction-row select:disabled { opacity:.5; }
+.faction-row .faction-select { max-width: 200px; flex: none; padding: 10px 14px; border: 1px solid rgba(159,142,120,0.25); background: #083344; color: #c1e8ff; font-family: 'Fira Code', monospace; font-size: 13px; }
+.faction-row .faction-select:focus { outline: none; border-color: #ffb000; box-shadow: 0 0 0 2px rgba(255,176,0,0.08); }
+.faction-logo-box { width: 48px; height: 48px; border: 1px solid rgba(51,65,85,0.6); background: #0a1628; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+.faction-logo-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.faction-logo-placeholder { font-size: 20px; font-weight: 700; color: rgba(255,176,0,0.5); font-family: 'Fira Code', monospace; text-transform: uppercase; }
 
 /* Stats */
 .stats-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:18px; }
@@ -483,6 +719,8 @@ onMounted(()=>{ loadUnits() })
 .modal h3 { font-size:17px; color:#ffb000; margin-bottom:14px; text-transform:uppercase; letter-spacing:.08em; }
 .modal p { color:rgba(193,232,255,0.5); margin-bottom:14px; font-size:13px; }
 .modal input[type="file"] { margin:12px 0; color:#c1e8ff; }
+.excel-upload-row { display:flex; align-items:center; gap:12px; margin:12px 0; position: relative; }
+.excel-file-status { color:rgba(193,232,255,0.5); font-size:13px; }
 .modal-actions { margin-top:22px; display:flex; gap:10px; justify-content:flex-end; }
 .import-status { color:#ffb000 !important; font-weight:700; font-family:'Fira Code',monospace; }
 .preview-modal { max-width:560px; max-height:80vh; overflow-y:auto; }
@@ -495,6 +733,7 @@ onMounted(()=>{ loadUnits() })
 .preview-section h4 { margin:0 0 6px; color:#ffb000; font-size:13px; text-transform:uppercase; }
 .preview-section p { margin:3px 0; font-size:12px; color:#c1e8ff; }
 .preview-section .empty-field { color:rgba(193,232,255,0.35); font-style:italic; }
+.error-text { color: #ff7351; font-size: 12px; margin: 8px 0; font-family: 'Fira Code', monospace; }
 
 /* Footer */
 .footer { position:fixed; bottom:0; left:256px; right:0;
@@ -512,4 +751,16 @@ onMounted(()=>{ loadUnits() })
 .dkm-cell label { font-size: 7px; color: rgba(193,232,255,0.35); }
 .dkm-cell input { width: 44px; padding: 2px 3px; background: rgba(0,0,0,0.3); border: 1px solid rgba(159,142,120,0.12); color: #c1e8ff; font-family: inherit; font-size: 9px; text-align: center; }
 .dkm-cell input:focus { border-color: rgba(255,176,0,0.25); outline: none; }
+
+/* Phase 28-D: 七视图上传 */
+.views-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 14px; }
+.view-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.view-label { font-size: 10px; font-weight: 700; color: #ffd597; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
+.view-drop-zone { width: 72px; height: 72px; border: 2px dashed rgba(159,142,120,0.3); background: #083344; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; overflow: hidden; }
+.view-drop-zone:hover { border-color: #ffb000; background: rgba(255,176,0,0.05); }
+.view-placeholder { font-size: 24px; font-weight: 700; color: rgba(193,232,255,0.25); font-family: 'Fira Code', monospace; }
+.view-preview-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.views-actions { display: flex; gap: 10px; margin-top: 8px; }
+.section-desc { font-size: 11px; color: rgba(193,232,255,0.4); margin-bottom: 10px; font-family: 'Fira Code', monospace; }
+.faction-code { color: #13ff43; font-family: 'Fira Code', monospace; }
 </style>

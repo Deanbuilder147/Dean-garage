@@ -1,6 +1,6 @@
 /**
  * Excel数据验证器
- * 验证解析后的Excel数据是否符合要求
+ * Phase 28: 动态阵营支持 — faction 字段仅做软校验（warn），不阻止导入
  */
 export class ExcelValidator {
   constructor(config) {
@@ -56,11 +56,11 @@ export class ExcelValidator {
       this.errors.push({ field: 'name', message: '机体番号不能超过100个字符' });
     }
 
-    // 验证阵营
-    if (basic.faction && !this.config.validation.factions.includes(basic.faction)) {
+    // 验证阵营 (Phase 28: 动态阵营，仅做软校验)
+    if (!basic.faction || basic.faction.trim() === '') {
       this.warnings.push({ 
         field: 'faction', 
-        message: `未知的阵营: ${basic.faction}，将使用默认值earth` 
+        message: '阵营未填写，将使用默认值 earth' 
       });
     }
 

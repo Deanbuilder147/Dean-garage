@@ -182,11 +182,30 @@ const BattleState = {
       throw new Error(`单位 ${unitData.name} 已经部署`);
     }
 
+    // Phase 28-D: 显式初始化 direction = 0（默认正面特写）
+    if (unitData.direction === undefined) {
+      unitData.direction = 0;
+    }
+
     state.units.push(unitData);
     state.updated = new Date().toISOString();
     state.log.push(`[部署] ${unitData.name} → (${q},${r})`);
 
     return { success: true, unit: unitData, totalUnits: state.units.length };
+  },
+
+  /**
+   * Phase 27: 设置部署池（整备室出击时传入完整单位数据）
+   * @param {string} battleId
+   * @param {Array} units - 待部署的单位数据数组
+   */
+  setDeployPool(battleId, units) {
+    const state = battles.get(battleId);
+    if (!state) throw new Error('战场不存在');
+    if (!Array.isArray(units)) throw new Error('units 必须是数组');
+    state.deployPool = units;
+    state.updated = new Date().toISOString();
+    return { success: true, count: units.length };
   },
 
   /**
@@ -222,16 +241,28 @@ const BattleState = {
     unit.q = targetQ;
     unit.r = targetR;
     unit.has_moved = true;
+
+    // Phase 28-D: 使用 atan2 角度量化法计算朝向 (1-6)
+    if (fromQ !== targetQ || fromR !== targetR) {
+      const dx = targetQ - fromQ;
+      const dy = targetR - fromR;
+      let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      if (angle < 0) angle += 360;
+      const sector = Math.floor(((angle + 30) % 360) / 60);
+      unit.direction = sector + 1;  // 1-6
+    }
+
     state.updated = new Date().toISOString();
 
     const dist = hexDistance(fromQ, fromR, targetQ, targetR);
-    state.log.push(`[移动] ${unit.name}: (${fromQ},${fromR}) → (${targetQ},${targetR}) 距离=${dist}`);
+    state.log.push(`[移动] ${unit.name}: (${fromQ},${fromR}) → (${targetQ},${targetR}) 距离=${dist} 朝向=${unit.direction}`);
 
     return {
       success: true,
       from: { q: fromQ, r: fromR },
       to: { q: targetQ, r: targetR },
       distance: dist,
+      direction: unit.direction,
       unit
     };
   },

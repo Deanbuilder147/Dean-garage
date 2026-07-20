@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.js';
 import { BattleState, hexDistance } from '../state/battleState.js';
 import UnitConverter from '../services/unitConverter.js';
 import { CombatResolver } from '../services/combatResolver.js';
+import { getGlossaryConfig, saveGlossaryConfig } from '../services/combatCore/configLoader.cjs';
 
 const router = Router();
 const combatResolver = new CombatResolver();
@@ -55,6 +56,33 @@ router.get('/:id/state', authenticate, (req, res) => {
 });
 
 // ============================================================
+// 词条库配置（必须放在 /:id 路由之前，避免 "glossary-config" 被当作 :id）
+// ============================================================
+
+/**
+ * GET /api/combat/glossary-config - 获取词条库配置（真实数据链路）
+ */
+router.get('/glossary-config', authenticate, (req, res) => {
+  const config = getGlossaryConfig();
+  if (!config) return res.status(500).json({ error: '词条库配置文件读取失败' });
+  res.json({ success: true, ...config });
+});
+
+/**
+ * POST /api/combat/glossary-config - 保存词条库配置（写入真实 JSON 文件）
+ */
+router.post('/glossary-config', authenticate, (req, res) => {
+  const config = req.body;
+  const saved = saveGlossaryConfig(config);
+  if (saved) {
+    console.log('[glossary-config] 词条库配置已写入磁盘, 词条数:', Object.keys(config.skills || {}).length);
+    res.json({ success: true, message: `配置已保存 (${Object.keys(config.skills || {}).length} 个词条)` });
+  } else {
+    res.status(500).json({ error: '词条库配置文件写入失败' });
+  }
+});
+
+// ============================================================
 // 部署阶段
 // ============================================================
 
@@ -91,6 +119,7 @@ router.post('/:id/deploy-unit', authenticate, async (req, res) => {
         max_hp: unit_data.max_hp || unit_data.hp || 100,
         has_acted: false,
         has_moved: false,
+        direction: unit_data.direction ?? 0,  // Phase 28-D: 初始正面特写
         buffs: []
       };
     }
@@ -134,6 +163,7 @@ router.post('/:id/deploy-unit', authenticate, async (req, res) => {
         shield: 0,
         level: 1,
         faction: 'earth',
+        direction: 0,   // Phase 28-D: 默认正面特写
         has_acted: false,
         has_moved: false,
         buffs: [],
@@ -176,6 +206,7 @@ router.post('/:id/deploy-units', authenticate, async (req, res) => {
             id: unit_id,
             unit_id: unit_id,
             q, r,
+            direction: unit_data.direction ?? 0,  // Phase 29-C: 补齐批量部署朝向状态兜底
             player_id: req.user?.id || 0,
             hp: unit_data.hp || unit_data.max_hp || 100,
             max_hp: unit_data.max_hp || unit_data.hp || 100,
@@ -233,6 +264,9 @@ router.post('/:id/move', authenticate, (req, res) => {
 
     if (!unit_id) return res.status(400).json({ error: '缺少 unit_id' });
     if (q === undefined || r === undefined) return res.status(400).json({ error: '缺少目标坐标 q 或 r' });
+
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
 
     const result = BattleState.moveUnit(req.params.id, unit_id, q, r);
     res.json(result);
@@ -307,6 +341,16 @@ router.post('/:id/attack', authenticate, (req, res) => {
       turnResult
     );
 
+    // Phase 28-D: 攻击后计算攻击者朝向（面向目标）
+    if (attacker.q !== undefined && defender.q !== undefined) {
+      const dx = defender.q - attacker.q;
+      const dy = defender.r - attacker.r;
+      let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      if (angle < 0) angle += 360;
+      const sector = Math.floor(((angle + 30) % 360) / 60);
+      attacker.direction = sector + 1;  // 1-6
+    }
+
     // Check if defender was killed
     const defenderDead = defender.hp <= 0;
 
@@ -314,6 +358,7 @@ router.post('/:id/attack', authenticate, (req, res) => {
       success: true,
       attack_type: attackType,
       distance: dist,
+      attacker_direction: attacker.direction,
       defenderDead,
       ...turnResult
     });
@@ -329,6 +374,9 @@ router.post('/:id/attack', authenticate, (req, res) => {
  */
 router.post('/:id/end-turn', authenticate, (req, res) => {
   try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+
     const result = BattleState.endTurn(req.params.id);
     res.json(result);
   } catch (err) {
@@ -356,6 +404,213 @@ router.post('/:id/start-combat', authenticate, (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ============================================================
+// 部署池
+// ============================================================
+
+/**
+ * GET /api/combat/:id/deploy-pool - 获取部署池
+ */
+router.get('/:id/deploy-pool', authenticate, (req, res) => {
+  const state = BattleState.getBattle(req.params.id);
+  if (!state) return res.status(404).json({ error: '战场不存在' });
+  res.json({ success: true, units: state.deployPool || [] });
+});
+
+/**
+ * POST /api/combat/:id/pending-units - 整备室出击时写入部署池
+ * Phase 27: 接收整备室传来的完整单位数据，存入 battle.deployPool
+ */
+router.post('/:id/pending-units', authenticate, (req, res) => {
+  try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+
+    const { units } = req.body;
+    if (!Array.isArray(units)) return res.status(400).json({ error: 'units 必须是数组' });
+
+    const result = BattleState.setDeployPool(req.params.id, units);
+    console.log(`[pending-units] 部署池已写入 ${result.count} 个单位到战场 ${req.params.id}`);
+    res.json({ success: true, count: result.count });
+  } catch (err) {
+    console.error('[pending-units] 错误:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 结束部署
+// ============================================================
+
+/**
+ * POST /api/combat/:id/end-deployment - 结束部署阶段，切入战斗
+ */
+router.post('/:id/end-deployment', authenticate, (req, res) => {
+  try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+    if (state.phase !== 'deploy') return res.status(400).json({ error: '当前不是部署阶段' });
+
+    state.phase = 'combat';
+    state.log = state.log || [];
+    state.log.push('[阶段] 部署结束，进入战斗阶段');
+    state.updated = new Date().toISOString();
+
+    res.json({ success: true, phase: 'combat' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 战术动作
+// ============================================================
+
+/**
+ * POST /api/combat/:id/action - 战术动作（wait/defend 等）
+ * Phase 23 误删后恢复
+ */
+router.post('/:id/action', authenticate, (req, res) => {
+  try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+
+    const { unit_id, action_type } = req.body;
+    if (!unit_id) return res.status(400).json({ error: '缺少 unit_id' });
+
+    const unit = state.units.find(u => u.id === unit_id || u.unit_id === unit_id);
+    if (!unit) return res.status(404).json({ error: '单位不存在' });
+
+    const action = action_type || 'wait';
+    unit.has_acted = true;
+    state.log.push(`[动作] ${unit.name || unit.id}: ${action}`);
+
+    res.json({ success: true, unit_id, action_type: action });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// 阵营能力（兜底）
+// ============================================================
+
+/**
+ * POST /api/combat/:id/fog-system - 迷雾系统
+ */
+router.post('/:id/fog-system', authenticate, (req, res) => {
+  res.json({ success: true });
+});
+
+/**
+ * POST /api/combat/:id/support - 支援
+ */
+router.post('/:id/support', authenticate, (req, res) => {
+  res.json({ success: true });
+});
+
+/**
+ * POST /api/combat/:id/conceal - 隐蔽
+ */
+router.post('/:id/conceal', authenticate, (req, res) => {
+  res.json({ success: true });
+});
+
+// ============================================================
+// 坐标跳转
+// ============================================================
+
+/**
+ * POST /api/combat/:id/jump-to - 坐标跳转
+ */
+router.post('/:id/jump-to', authenticate, (req, res) => {
+  res.json({ success: true });
+});
+
+// ============================================================
+// 胜利条件
+// ============================================================
+
+/**
+ * POST /api/combat/:id/victory-conditions - 设置胜利条件
+ */
+router.post('/:id/victory-conditions', authenticate, (req, res) => {
+  try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+    state.victoryConditions = req.body.conditions || [];
+    state.holdRound = req.body.hold_round || 8;
+    if (req.body.target_q !== undefined) state.targetQ = req.body.target_q;
+    if (req.body.target_r !== undefined) state.targetR = req.body.target_r;
+    res.json({ success: true, conditions: state.victoryConditions });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/combat/:id/victory-conditions - 获取胜利条件
+ */
+router.get('/:id/victory-conditions', authenticate, (req, res) => {
+  const state = BattleState.getBattle(req.params.id);
+  if (!state) return res.status(404).json({ error: '战场不存在' });
+  res.json({ conditions: state.victoryConditions || [], hold_round: state.holdRound });
+});
+
+// ============================================================
+// ACE 单位
+// ============================================================
+
+/**
+ * POST /api/combat/:id/ace-unit - 设置 ACE 单位
+ */
+router.post('/:id/ace-unit', authenticate, (req, res) => {
+  try {
+    const state = BattleState.getBattle(req.params.id);
+    if (!state) return res.status(404).json({ error: '战场不存在' });
+    if (!state.aceUnits) state.aceUnits = {};
+    state.aceUnits[req.body.faction] = req.body.unit_id;
+    res.json({ success: true, aceUnits: state.aceUnits });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/combat/:id/ace-unit - 获取 ACE 单位
+ */
+router.get('/:id/ace-unit', authenticate, (req, res) => {
+  const state = BattleState.getBattle(req.params.id);
+  if (!state) return res.status(404).json({ error: '战场不存在' });
+  res.json({ aceUnits: state.aceUnits || {} });
+});
+
+// ============================================================
+// 阵营冷却
+// ============================================================
+
+/**
+ * GET /api/combat/:id/faction-cooldowns - 获取阵营冷却
+ */
+router.get('/:id/faction-cooldowns', authenticate, (req, res) => {
+  const state = BattleState.getBattle(req.params.id);
+  if (!state) return res.status(404).json({ error: '战场不存在' });
+  res.json({ cooldowns: state.factionCooldowns || {} });
+});
+
+// ============================================================
+// 加入战场
+// ============================================================
+
+/**
+ * POST /api/combat/:id/join - 加入战场
+ */
+router.post('/:id/join', authenticate, (req, res) => {
+  const state = BattleState.getBattle(req.params.id);
+  if (!state) return res.status(404).json({ error: '战场不存在' });
+  res.json({ success: true, battle: state });
 });
 
 export default router;

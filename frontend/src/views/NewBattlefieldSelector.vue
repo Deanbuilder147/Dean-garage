@@ -1,6 +1,6 @@
 <template>
 
-    <main class="main-content">
+    <div class="page-container w-full h-full flex flex-col overflow-y-auto">
       <header class="page-header">
         <h1>[ 战术部署 ]</h1>
         <div class="header-meta">
@@ -15,7 +15,10 @@
         <div v-for="bf in battlefields" :key="bf.id" class="bf-card" @click="selectBattlefield(bf)">
           <div class="bf-card-header">
             <h3>{{ bf.name }}</h3>
-            <span class="bf-tag">{{ getTerrainLabel(bf) }}</span>
+            <div class="bf-card-header-right">
+              <span class="bf-tag">{{ getTerrainLabel(bf) }}</span>
+              <button class="btn-delete-map" @click.stop="deleteMap(bf)" title="删除此地图">×</button>
+            </div>
           </div>
           <p class="bf-desc">{{ bf.description || '战略要地，适合各类机甲编队展开作战。' }}</p>
           <div class="bf-footer">
@@ -32,15 +35,16 @@
       <div v-else class="empty-state">
         <svg class="icon icon-xl" viewBox="0 0 24 24" style="color:#ffb000;opacity:0.3"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
         <p>暂无可用的战场地图</p>
-      </div></main>
+      </div></div>
   
 </template>
 
 <script setup>
+// Phase 29-I: 鹦鹉螺号置换 — 房间创建主权移交 3006 onlineBattleAPI (SQLite 执政)
 import { ref, computed, onMounted } from "vue"
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { mapAPI, commAPI } from '@/api/client'
+import { mapAPI, onlineBattleAPI } from '@/api/client'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -56,9 +60,10 @@ onMounted(async () => {
 
 async function selectBattlefield(bf) {
   try {
-    const { data } = await commAPI.createRoom({ battlefield_id: bf.id })
+    const { data } = await onlineBattleAPI.createRoom({ name: bf.name, mapId: String(bf.id) })
     router.push(`/preparation/${data.room?.id || data.roomId || data.id}`)
   } catch (e) {
+    console.error('[BattlefieldSelector] 创建房间失败:', e)
     router.push('/preparation/1')
   }
 }
@@ -69,6 +74,18 @@ function getTerrainLabel(bf) {
   if (t.length < 20) return t
   // terrain is raw JSON data, show a short label instead
   return bf.difficulty || '标准地图'
+}
+// Phase 30-Fix: 旧地图删除
+async function deleteMap(bf) {
+  if (!confirm(`确认删除地图 "${bf.name}"？此操作不可撤销。`)) return
+  try {
+    await mapAPI.deleteBattlefield(bf.id)
+    battlefields.value = battlefields.value.filter(m => m.id !== bf.id)
+    console.log(`[MapList] 已删除地图: ${bf.name}`)
+  } catch (e) {
+    console.error('[MapList] 删除地图失败:', e)
+    alert('删除失败: ' + (e.response?.data?.error || e.message))
+  }
 }
 function navigateTo(path) { router.push(path) }
 </script>
@@ -92,7 +109,15 @@ function navigateTo(path) { router.push(path) }
 .bf-card:hover { background: #002e3f; border-color: rgba(255,176,0,0.4); }
 .bf-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .bf-card-header h3 { font-size: 18px; font-weight: 700; }
+.bf-card-header-right { display: flex; align-items: center; gap: 8px; }
 .bf-tag { font-size: 10px; color: #ffb000; background: rgba(255,176,0,0.1); padding: 2px 10px; border: 1px solid rgba(255,176,0,0.2); }
+.btn-delete-map {
+  background: none; border: 1px solid rgba(255,80,80,0.3); color: rgba(255,80,80,0.6);
+  width: 24px; height: 24px; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.btn-delete-map:hover { background: rgba(255,80,80,0.15); border-color: #ff5050; color: #ff5050; }
 .bf-desc { font-size: 13px; color: rgba(193,232,255,0.55); line-height: 1.6; margin-bottom: 18px; }
 .bf-footer { display: flex; justify-content: space-between; align-items: center; }
 .bf-stats { font-size: 10px; color: rgba(193,232,255,0.35); font-family: 'Fira Code', monospace; display: flex; gap: 8px; }

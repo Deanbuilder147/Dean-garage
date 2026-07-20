@@ -1,0 +1,9 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-06-23T09:21:33.063Z
+provider: 
+---
+
+服务器SSH信息：地址 106.54.197.69，用户名 root，密钥文件 /Users/dingxuyang/Desktop/watson.pem。连接命令：ssh -i /Users/dingxuyang/Desktop/watson.pem root@106.54.197.69

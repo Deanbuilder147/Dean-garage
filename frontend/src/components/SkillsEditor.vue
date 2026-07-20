@@ -6,19 +6,20 @@
     
     <div v-for="(skill, index) in modelValue" :key="index" class="skill-item">
       <div class="skill-row">
-        <input type="text" v-model="skill.name" class="skill-name-input" placeholder="技能名">
-        <select v-model="skill.type" class="skill-type-select" @change="onTypeChange(skill)">
+        <label :for="`skill-${index}-name`" class="sr-only">技能名</label>
+        <input :id="`skill-${index}-name`" type="text" v-model="skill.name" class="skill-name-input" placeholder="技能名" name="skill-name">
+        <select :id="`skill-${index}-type`" v-model="skill.type" class="skill-type-select" @change="onTypeChange(skill)">
           <option value="">类型</option>
           <option value="近战">近战</option>
           <option value="远程">远程</option>
           <option value="自动化">自动化</option>
         </select>
-        <select v-model="skill.attribute" class="skill-attr-select">
+        <select :id="`skill-${index}-attr`" v-model="skill.attribute" class="skill-attr-select">
           <option value="">属性</option>
           <option value="实体">实体</option>
           <option value="光束">光束</option>
         </select>
-        <select v-model="skill.effect" class="skill-effect-select">
+        <select :id="`skill-${index}-effect`" v-model="skill.effect" class="skill-effect-select">
           <option value="">效果</option>
           <template v-if="skill.type === '近战'">
             <option v-for="e in meleeEffects" :key="e" :value="e">{{ e }}</option>
@@ -33,8 +34,10 @@
         <button type="button" class="delete-btn" @click="removeSkill(index)">×</button>
       </div>
       <div class="skill-extra-row">
-        <input type="text" v-model="skill.range" class="skill-range-input" placeholder="距离">
-        <input type="text" v-model="skill.special" class="skill-special-input" placeholder="特效说明">
+        <label :for="`skill-${index}-range`" class="sr-only">距离</label>
+        <input :id="`skill-${index}-range`" type="text" v-model="skill.range" class="skill-range-input" placeholder="距离" name="skill-range">
+        <label :for="`skill-${index}-special`" class="sr-only">特效说明</label>
+        <input :id="`skill-${index}-special`" type="text" v-model="skill.special" class="skill-special-input" placeholder="特效说明" name="skill-special">
       </div>
       <div v-if="skill.effect" class="skill-desc">
         <strong>{{ skill.effect }}：</strong>{{ getEffectDescription(skill) }}
@@ -100,6 +103,7 @@ const onTypeChange = (skill) => {
 </script>
 
 <style scoped>
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .skills-editor { margin-top: 12px; }
 .skills-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .label { font-size: 12px; color: rgba(193,232,255,0.45); font-family: 'Fira Code', monospace; }

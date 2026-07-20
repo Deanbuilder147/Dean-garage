@@ -24,7 +24,7 @@ const router = Router();
 const createUnitSchema = z.object({
   name: z.string().min(1, "Name is required").max(50, "Name cannot exceed 50 characters"),
   codename: z.string().max(50).optional(),
-  faction: z.enum(['earth', 'byron', 'maxion']).default('earth'),
+  faction: z.string().max(50).default('earth'), // Phase 28: 动态阵营，接受任意 faction code
   main_type: z.string().max(20).optional(),
   main_ge_dou: z.number().min(0, "Cannot be negative").optional(),
   main_she_ji: z.number().min(0, "Cannot be negative").optional(),
@@ -240,6 +240,51 @@ router.post('/upload-image', upload.single('image'), (req, res) => {
   } catch (error) {
     console.error('上传图片失败:', error);
     res.status(500).json({ error: '上传失败' });
+  }
+});
+
+// ==================== Phase 28-D: 七视图上传 ====================
+
+// 七视图专用存储：写入 uploads/sprites/ 目录（Docker 卷持久化路径）
+const viewStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '..', '..', 'uploads', 'sprites');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const unitCode = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
+    const direction = String(req.body.direction || '0').replace(/[^0-6]/g, '0');
+    // 命名规范: {unitCode}_{0-6}_idle.png
+    cb(null, `${unitCode}_${direction}_idle.png`);
+  },
+});
+const viewUpload = multer({
+  storage: viewStorage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'image/png') cb(null, true);
+    else cb(new Error('仅支持 PNG 格式'));
+  },
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+// POST /api/hangar/units/upload-view — 上传单个朝向精灵图
+router.post('/upload-view', auth, (req, res, next) => {
+  viewUpload.single('image')(req, res, (err) => {
+    if (err) {
+      if (err.message === '仅支持 PNG 格式') return res.status(400).json({ error: '仅支持 PNG 格式' });
+      return res.status(400).json({ error: err.message });
+    }
+    next();
+  });
+}, (req, res) => {
+  try {
+    const unitCode = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
+    const direction = String(req.body.direction || '0').replace(/[^0-6]/g, '0');
+    const spritePath = `/api/hangar/units/sprites/${unitCode}_${direction}_idle.png`;
+    res.json({ success: true, path: spritePath, unitCode, direction: parseInt(direction) });
+  } catch (e) {
+    res.status(500).json({ error: '七视图上传失败: ' + e.message });
   }
 });
 

@@ -9,6 +9,7 @@ const SERVICE_HOSTS = {
   map: process.env.MAP_SERVICE_HOST || 'localhost',
   combat: process.env.COMBAT_SERVICE_HOST || 'localhost',
   comm: process.env.COMM_SERVICE_HOST || 'localhost',
+  online: process.env.ONLINE_SERVICE_HOST || 'mecha-online-battle',
 };
 
 export default defineConfig({
@@ -42,6 +43,11 @@ export default defineConfig({
         target: `http://${SERVICE_HOSTS.combat}:3004`,
         changeOrigin: true
       },
+      // Campaign 战役服务 (Phase 19-C: 与 combat 共用同一后端)
+      '/api/campaign': {
+        target: `http://${SERVICE_HOSTS.combat}:3004`,
+        changeOrigin: true
+      },
       // Comm 服务 (通信/房间)
       '/api/comm': {
         target: `http://${SERVICE_HOSTS.comm}:3005`,
@@ -51,7 +57,12 @@ export default defineConfig({
       '/socket.io': {
         target: `http://${SERVICE_HOSTS.comm}:3005`,
         ws: true
-      }
+      },
+      // Phase 29-C: Online Battle Service (多人联机对战, Port 3006)
+      '/api/matchmaking': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/rooms': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/leaderboard': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/battles': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
     }
   },
   preview: {

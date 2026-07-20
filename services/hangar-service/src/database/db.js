@@ -6,8 +6,8 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// 确保data目录存在
-const dataDir = join(__dirname, '..', 'data');
+// 确保data目录存在（使用 Docker 数据卷持久化路径，防止容器重建丢失数据）
+const dataDir = process.env.DATA_DIR || join(__dirname, '..', '..', 'data');
 mkdirSync(dataDir, { recursive: true });
 
 const dbPath = join(dataDir, 'hangar.db');

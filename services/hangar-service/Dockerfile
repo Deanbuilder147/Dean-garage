@@ -2,7 +2,8 @@
 
 FROM node:18-alpine
 
-RUN apk add --no-cache curl
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories && \
+    apk add --no-cache curl
 
 WORKDIR /app
 

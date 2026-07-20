@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import rateLimit from 'express-rate-limit';
 import unitRoutes from './routes/units.js';
+import factionRoutes from './routes/factions.js';
 import { initDatabase } from './database/db.js';
 
 // 加载环境变量（必须在读取 process.env 之前调用）
@@ -38,8 +39,15 @@ app.use('/api/', limiter); // 对所有 API 应用限流
 // 静态文件 - 上传的图片
 app.use('/api/hangar/units/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// Phase 28: 阵营 Logo 静态挂载
+app.use('/api/hangar/factions/logo', express.static(path.join(__dirname, '../uploads/factions')));
+
+// Phase 28-D: 七视图精灵图静态挂载
+app.use('/api/hangar/units/sprites', express.static(path.join(__dirname, '../uploads/sprites')));
+
 // API路由 - 前缀 /api/hangar
 app.use('/api/hangar/units', unitRoutes);
+app.use('/api/hangar/factions', factionRoutes);
 
 // 健康检查
 app.get('/api/health', (req, res) => {

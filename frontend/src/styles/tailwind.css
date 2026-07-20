@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Fix: Tailwind CSS v4 generates incomplete @property rules for rotate;
+   this complete declaration silences the browser CSS warning. */
+@property --tw-ro {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
 @theme {
   --color-surface-container: #002331;
   --color-surface-bright: #0a3e52;

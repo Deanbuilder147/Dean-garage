@@ -1,96 +1,60 @@
-# 项目长期记忆
+# 项目长期记忆（精简版）
 
-## 词条库数据结构 (v5.0, Phase 10-11)
+## 服务器与部署（运维核心）
+- 地址 `106.54.197.69`，用户 `root`，密钥 `/Users/dingxuyang/Desktop/watson.pem`
+- 项目路径 `/root/mecha-universe-engine/`（docker compose 统一管理）
+- 前端 `mecha-frontend`：port **8081→80**（nginx + Vue3 SPA，反代 `/api/*` → gateway:3006）
+- 网关 `mecha-gateway`：port **3006**（Express 大一统：auth/units/map/glossary/rooms/combat）
+- 数据库 `mecha-battle-db`：postgres:14，port 5432；网关同时用 SQLite `/data/mecha-universe.db`
+- 网络 `mecha-universe-engine_mecha-net`（bridge）永久焊死，严禁 docker run 临时操作
 
-词条库中枢配置位于 `/root/original-project/services/combat-service/src/config/glossary-skill-config.json`，版本 v5.0。
-Phase 10 引入"主谓宾定状补"万能语法插槽，Phase 11 完成所有预定任务（WebSocket掷骰/技能预览/分步向导/装备DKM/AI生成器）。
-最新 Git: 52a7939。
+**部署命令（标准流程）**
+```bash
+cd ~/mecha-universe-engine
+# 前端源码改动 → 需先构建 dist，再重建镜像：
+cd frontend && npm run build && cd ..
+docker compose build frontend && docker compose up -d frontend
+# 网关 TS 改动 → 必须 --no-cache 重建：
+docker compose build --no-cache mecha-gateway && docker compose up -d mecha-gateway
+```
+- Gateway Dockerfile build context = `.`（项目根）
+- 前端 Dockerfile 仅 `COPY dist`，故必须先本地/服务器 `npm run build` 生成 dist
+- 注意：gateway / frontend 健康检查用 `curl`，若容器无 curl 会显示 unhealthy（实际服务正常，cosmetic）
 
-### 通用字段 (每技能必有)
-- `target_filter`: "enemy"|"ally"|"self"|"all" — 施放对象
-- `cast_range`: number — 施放距离(格)，供 BFS 寻路
-- `aoe_radius`: number — 0=单体, >0=六边形溅射半径
-- `base_damage`: number — 基础伤害值
-- `status_effects`: string[] — 附加效果 (burn/stun/disable/slow/poison/freeze)
+## 战棋开发终极宪法 v2.0（三条红线）
+1. Canvas 是单向数据管道终点，严禁读取 Vue ref/reactive 或全局 Store
+2. `hexUtils.js` 是唯一数学真理，坐标转换纯净化（HEX_WIDTH=64, HEX_HEIGHT=72 统一从此导入，严禁硬编码）
+3. 禁止无上下文幽灵函数，依赖必须初始化时显式传入
 
-### CRUD 机制
-- 添加: saveConfig 深度合并新 key
-- 删除: `_delete_skills: ["key1"]` 指令，configLoader.deleteSkills() 原子处理
-- 更新: saveConfig 深度合并
+## 等距视角基准（2026-07-20 校准）
+- iso=ON, shearX=**0.38**, shearY=0, scaleX=1.00, scaleY=0.39, rot=-24
+- 单元=64×72，间距=H103% V79% O51%
+- CTM 正向：`ctx.transform(scaleX, shearY, shearX, scaleY, 0, 0)`
+- 逆向拾取（2×2 仿射逆矩阵）：det = scaleX*scaleY - shearX*shearY
+  - flatX = (worldX*scaleY - shearX*worldY) / det
+  - flatY = (scaleX*worldY - shearY*worldX) / det
+  - 再按 Even-R 公式推 q,r
+- 3D 锁定：编辑器(NewBattlefieldView)保留滑块+保存；战场端(NewBattleView)无滑块，静默拉取 _view
 
-## 战棋开发终极宪法 v2.0
+## 前端 DOM 骨架宪法（Phase 25）
+- App.vue 全局唯一 `<main>`，Sidebar `flex-shrink-0 w-64`
+- 子视图根用 `<div class="page-container w-full h-full flex flex-col overflow-y-auto">`，禁嵌套 `<main>`
+- 战场端：`dm-battle-layout flex flex-row w-full h-full absolute inset-0` + `game-canvas-sandbox relative` + `HexGridCanvas absolute inset-0`
+- 受归化视图：GlossaryView/NewPreparationRoom/NewHomeView/NewBattlefieldSelector/NewUnitEditorView/NewBattlefieldView
 
-### 三条红线
-1. Canvas 是单向数据管道的终点，严禁读取 Vue ref/reactive 或全局 Store
-2. hexUtils.js 是唯一数学真理，坐标转换纯净化
-3. 禁止无上下文幽灵函数，依赖必须显式传入
+## 词条库（glossary-skill-config.json v5.1）
+- 中枢位置：容器内 `/app/data/glossary-skill-config.json`
+- Skills(14) / Terrains(10) / DamageKinds(5) / ActionTypes(5) / Systems(3: ambush,fog_of_war,crit)
+- range_type: radial(默认) / directional_beam(地图炮,带 beam_width) / cone(扇形)
+- CRUD：saveConfig 深度合并；删除用 `_delete_skills:["key"]`；合并按 label 大小写不敏感去重
 
-### 等距视角基准 (Phase 9.6 标准等距平行投影)
-iso=ON, shearX=0.25, shearY=0.44 (仅配置保留，不参与 Y 轴计算), scaleX=1.00, scaleY=0.39, rot=-24
-单元=64×72, 间距=H103% V79% O51%
+## Agent 操作规则
+- 改代码前先读 `code-index.md` / `战棋策划文档.md`（服务器 `/root/mecha-universe-engine/docs/`）
+- 改后同步更新 code-index.md 与 MEMORY.md，写当日 .codebuddy/memory/YYYY-MM-DD.md
+- TS 严格模式、CSS 变量优先、命名约定（kebab-case 文件 / PascalCase 组件 / camelCase 函数）
 
-### CTM 标准公式 (Phase 9.7, 2026-06-21)
-正向 CTM: `ctx.transform(scaleX, 0, shearX, scaleY, 0, 0)`  — 标准等距平行投影
-  等效: screenX = scale*(scaleX*flatX + shearX*flatY) + offsetX
-        screenY = scale*(scaleY*flatY) + offsetY  ← 锁死: 仅依赖 flatY
-
-逆向拾取 (canvasPosToHex — 原子化刚性逆推):
-  ① r = round(flatY / (1.5 * HEX_RADIUS * spacingV))  ← Even-R 刚性步长
-  ② flatX = (worldX - shearX * flatY) / scaleX        ← shearX 回代
-  ③ q = round((flatX/spacingH - evenOffset(r)) / (sqrt(3)*HEX_RADIUS))
-
-性质:
-  - shearX 滑块全响应 (X 轴等距纵深感)
-  - R=0 行 screenY ≡ offsetY (绝对水平地平线)
-  - 列斜率恒定 = shearX*scaleY/(scaleX*sqrt(3)), 首尾列绝对平行
-  - 鼠标拾取: 9/9 正逆往返, 刚性步长对账通过
-  - 无 rotationAngle, 无 shearY 参与 screenY
-  - canvasPosToWorld 仅用于缩放锚点 (zoomIn/zoomOut/wheel/zoomReset)
-  - zoomReset 锚点使用 wx/wy (CTM坐标), 非 x/y (flat坐标)
-
-### 3D 视角锁定
-- 地图编辑器 (NewBattlefieldView): 保留滑块 + 保存按钮
-- 战场端 (NewBattleView): 无滑块 UI，仅静默拉取 _view 配置
-
-## 服务器信息
-- 地址: 106.54.197.69
-- 用户: root
-- 密钥: /Users/dingxuyang/Desktop/watson.pem
-- 前端: port 8081 (mecha-frontend)
-- Combat API: port 3004 (mecha-combat)
-
-## 容器架构
-- mecha-frontend: nginx + Vue3 SPA (dist/)
-- mecha-combat: Node.js (combat-service)
-- 其他: mecha-battle-db, mecha-hangar, mecha-auth, mecha-comm, mecha-map
-
-## 可破坏生态单元 (Phase 9.5)
-
-### glossary-skill-config.json 地形
-可破坏地形 (4种):
-| 地形 | HP | 破坏后 | 防御 | move_cost |
-|------|-----|--------|------|-----------|
-| forest | 3 | plain | 15 | 2 |
-| fortress | 5 | plain | 30 | 1 |
-| crystal | 2 | plain | 5 | 2 |
-| city_building | 4 | rubble | 25 | 1 |
-
-不可破坏: moon, plain, mountain, water, ruins, rubble
-
-### damagePipe.cjs 地形伤害管道
-- `calculateTerrainDamage(attacker, terrainCell, terrainDefs)` — 计算伤害
-  - 基础伤害 = attack * 0.8, explosive/beam 武器 * 1.0
-  - 返回 {damage, hp_before, hp_after, destroyed, new_terrain_id, new_move_cost}
-- `applyTerrainDamage(attacker, terrainCell, terrainDefs)` — 原地退化
-
-### terrainMovement.cjs 可破坏支持
-- `isDestructible(terrainId)` / `getTerrainMaxHp(terrainId)` / `getDestroyedTransformTo(terrainId)`
-- `applyTerrainDestruction(terrainMap, q, r, terrainDefs)` — 执行退化 + 更新 move_cost
-
-## 部署流程
-1. 本地编写 patch 脚本 → fix_scripts/
-2. `deploy_project_preparation` 上传 → /root/fix_scripts_{timestamp}/
-3. cp 到 /root/original-project/ → python3 执行
-4. `npm run build` (frontend)
-5. `docker compose build` → `docker stop/rm` → `docker compose up -d`
-6. combat-service 需 `docker compose build` 而非 restart (配置在容器内)
+## 已知高频坑（防复发）
+- **createBattle 404 BATTLEFIELD_NOT_FOUND**：`NewPreparationRoom.vue` 的 `startBattle` 曾硬编码 `battlefield_id: 1`，而数据库 maps 表用 UUID（如 `a4eba9f1-...`）。修复：改用房间真实 `mapId`（`room.value?.room?.mapId || room.value?.mapId`）。诊断要点：无 token 的 curl 被 authenticate 拦在 401，带 token 才走到 DB 查询暴露 404，勿被 401 误导。
+- Canvas 白屏：多因 CSS 孤儿选择器 / 路由守卫竞争 / drawBattleScene 静默异常 → safeDrawBattleScene 错误边界
+- 地图编辑器缺 `/api/map/list` → 404（已修，见 maps.ts）
+- 网关 `router.use('/api/x', authenticate)` 会剥离前缀，`req.path` 变 `/` → middleware 用 `req.originalUrl` 判断公开路径

@@ -1,5 +1,5 @@
 <template>
-  <main class="main-content">
+  <div class="page-container w-full h-full flex flex-col min-h-0">
     <header class="page-header">
       <h1>[ 词条库中枢 · 万能语法战斗中枢 v5.0 ]</h1>
       <div class="header-meta">
@@ -77,27 +77,27 @@
         <!-- Step 1: 主语 -->
         <div v-if="wizardStep === 1" class="wizard-body">
           <p class="wizard-desc">主语决定技能的触发条件与限制</p>
-          <div class="wiz-field"><label>动作类型 (action_type) *</label>
-            <select v-model="wizardForm.action_type" class="param-select">
+          <div class="wiz-field"><label for="wiz-action-type">动作类型 (action_type) *</label>
+            <select id="wiz-action-type" name="action_type" v-model="wizardForm.action_type" class="param-select">
               <option value="attack">攻击 attack</option>
               <option value="heal">治疗 heal</option>
               <option value="buff">增益 buff</option>
               <option value="debuff">减益 debuff</option>
               <option value="passive">被动 passive</option>
             </select></div>
-          <div class="wiz-field"><label>攻击属性 (attack_stat)</label>
-            <select v-model="wizardForm.attack_stat" class="param-select">
+          <div class="wiz-field"><label for="wiz-attack-stat">攻击属性 (attack_stat)</label>
+            <select id="wiz-attack-stat" name="attack_stat" v-model="wizardForm.attack_stat" class="param-select">
               <option value="melee">近战 melee</option>
               <option value="ranged">远程 ranged</option>
               <option value="max">最高值 max</option>
             </select></div>
-          <div class="wiz-check"><input type="checkbox" v-model="wizardForm.requires_unmoved" /> 需要本回合未移动</div>
-          <div class="wiz-check"><input type="checkbox" v-model="wizardForm.requires_stealth" /> 需要潜行状态</div>
-          <div class="wiz-field"><label>HP 低于值 (requires_hp_below)</label>
-            <input type="number" v-model.number="wizardForm.requires_hp_below" min="0" max="100" class="wiz-input" />
+          <div class="wiz-check"><input id="wiz-requires-unmoved" name="requires_unmoved" type="checkbox" v-model="wizardForm.requires_unmoved" /> 需要本回合未移动</div>
+          <div class="wiz-check"><input id="wiz-requires-stealth" name="requires_stealth" type="checkbox" v-model="wizardForm.requires_stealth" /> 需要潜行状态</div>
+          <div class="wiz-field"><label for="wiz-requires-hp-below">HP 低于值 (requires_hp_below)</label>
+            <input id="wiz-requires-hp-below" name="requires_hp_below" type="number" v-model.number="wizardForm.requires_hp_below" min="0" max="100" class="wiz-input" />
             <small class="wiz-hint">0=无限制，单位当前HP低于此值才可触发</small></div>
-          <div class="wiz-field"><label>目标地形条件 (target_on_terrain)</label>
-            <select v-model="wizardForm.target_on_terrain" class="param-select">
+          <div class="wiz-field"><label for="wiz-target-on-terrain">目标地形条件 (target_on_terrain)</label>
+            <select id="wiz-target-on-terrain" name="target_on_terrain" v-model="wizardForm.target_on_terrain" class="param-select">
               <option value="">无限制</option>
               <option value="plain">平原</option>
               <option value="mountain">山地</option>
@@ -116,73 +116,84 @@
         <!-- Step 2: 谓语 -->
         <div v-if="wizardStep === 2" class="wizard-body">
           <p class="wizard-desc">谓语决定技能的作用对象与范围</p>
-          <div class="wiz-field"><label>施放对象 (target_filter) *</label>
-            <select v-model="wizardForm.target_filter" class="param-select">
+          <div class="wiz-field"><label for="wiz-target-filter">施放对象 (target_filter) *</label>
+            <select id="wiz-target-filter" name="target_filter" v-model="wizardForm.target_filter" class="param-select">
               <option value="enemy">敌方 enemy</option>
               <option value="ally">友方 ally</option>
               <option value="self">自身 self</option>
               <option value="all">全员 all</option>
             </select></div>
-          <div class="wiz-field"><label>最大施放距离 (cast_range)</label>
-            <input type="number" v-model.number="wizardForm.cast_range" min="0" max="20" class="wiz-input" /></div>
-          <div class="wiz-field"><label>最小施放距离 (min_cast_range)</label>
-            <input type="number" v-model.number="wizardForm.min_cast_range" min="0" max="20" class="wiz-input" /></div>
-          <div class="wiz-field"><label>AOE 溅射半径 (aoe_radius)</label>
-            <input type="number" v-model.number="wizardForm.aoe_radius" min="0" max="10" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-cast-range">最大施放距离 (cast_range)</label>
+            <input id="wiz-cast-range" name="cast_range" type="number" v-model.number="wizardForm.cast_range" min="0" max="20" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-min-cast-range">最小施放距离 (min_cast_range)</label>
+            <input id="wiz-min-cast-range" name="min_cast_range" type="number" v-model.number="wizardForm.min_cast_range" min="0" max="20" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-aoe-radius">AOE 溅射半径 (aoe_radius)</label>
+            <input id="wiz-aoe-radius" name="aoe_radius" type="number" v-model.number="wizardForm.aoe_radius" min="0" max="10" class="wiz-input" /></div>
+          <!-- Phase 30: 范围类型 — 支持地图炮/扇形 -->
+          <div class="wiz-field"><label for="wiz-range-type">范围类型 (range_type)</label>
+            <select id="wiz-range-type" name="range_type" v-model="wizardForm.range_type" class="param-select">
+              <option value="radial">同心圆 radial</option>
+              <option value="directional_beam">地图炮 directional_beam</option>
+              <option value="cone">扇形 cone</option>
+            </select></div>
+          <div v-if="wizardForm.range_type === 'directional_beam'" class="wiz-field">
+            <label for="wiz-beam-width">地图炮宽度 (beam_width) — 前方格数</label>
+            <input id="wiz-beam-width" name="beam_width" type="number" v-model.number="wizardForm.beam_width" min="1" max="10" class="wiz-input" />
+          </div>
         </div>
 
         <!-- Step 3: 定语 -->
         <div v-if="wizardStep === 3" class="wizard-body">
           <p class="wizard-desc">定语决定伤害类型与地形互动</p>
-          <div class="wiz-field"><label>伤害类型 (damage_kind)</label>
-            <select v-model="wizardForm.damage_kind" class="param-select">
+          <div class="wiz-field"><label for="wiz-damage-kind">伤害类型 (damage_kind)</label>
+            <select id="wiz-damage-kind" name="damage_kind" v-model="wizardForm.damage_kind" class="param-select">
               <option value="kinetic">动能 kinetic</option>
               <option value="beam">光束 beam</option>
               <option value="explosive">爆炸 explosive</option>
               <option value="corrosive">腐蚀 corrosive</option>
               <option value="thermal">热熔 thermal</option>
             </select><small class="wiz-hint">水域对光束×0.5，晶矿对光束×1.5</small></div>
-          <div class="wiz-field"><label>分类 (category)</label>
-            <select v-model="wizardForm.category" class="param-select">
+          <div class="wiz-field"><label for="wiz-category">分类 (category)</label>
+            <select id="wiz-category" name="category" v-model="wizardForm.category" class="param-select">
               <option value="melee">近战 melee</option>
               <option value="ranged">远程 ranged</option>
               <option value="special">特殊 special</option>
               <option value="passive">被动 passive</option>
             </select></div>
-          <div class="wiz-field"><label>描述</label>
-            <input type="text" v-model="wizardForm.description" placeholder="技能描述..." class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-description">描述</label>
+            <input id="wiz-description" name="description" type="text" v-model="wizardForm.description" placeholder="技能描述..." class="wiz-input" /></div>
         </div>
 
         <!-- Step 4: 状语 -->
         <div v-if="wizardStep === 4" class="wizard-body">
           <p class="wizard-desc">状语决定环境的加成与随机干预</p>
-          <div class="wiz-field"><label>高地加成 (height_bonus_per_diff)</label>
-            <input type="number" v-model.number="wizardForm.height_bonus_per_diff" min="0" max="10" class="wiz-input" />
+          <div class="wiz-field"><label for="wiz-height-bonus">高地加成 (height_bonus_per_diff)</label>
+            <input id="wiz-height-bonus" name="height_bonus_per_diff" type="number" v-model.number="wizardForm.height_bonus_per_diff" min="0" max="10" class="wiz-input" />
             <small class="wiz-hint">每高1格增加此数值伤害</small></div>
-          <div class="wiz-field"><label>骰子类型 (dice_type)</label>
-            <select v-model="wizardForm.dice_type" class="param-select">
+          <div class="wiz-field"><label for="wiz-dice-type">骰子类型 (dice_type)</label>
+            <select id="wiz-dice-type" name="dice_type" v-model="wizardForm.dice_type" class="param-select">
               <option value="1d4">1d4</option><option value="1d6">1d6 (标准)</option>
               <option value="1d8">1d8</option><option value="2d6">2d6</option>
               <option value="1d10">1d10</option><option value="1d20">1d20</option>
             </select></div>
-          <div class="wiz-field"><label>成功线 (success_line)</label>
-            <input type="number" v-model.number="wizardForm.success_line" min="1" max="20" class="wiz-input" /></div>
-          <div class="wiz-field"><label>成功追加伤害 (success_bonus_damage)</label>
-            <input type="number" v-model.number="wizardForm.success_bonus_damage" min="0" max="50" class="wiz-input" /></div>
-          <div class="wiz-check"><input type="checkbox" v-model="wizardForm.is_manual_roll" /> 启用手动摇骰</div>
-          <div class="wiz-field"><label>命中修正 (accuracy_mod)</label>
-            <input type="number" v-model.number="wizardForm.accuracy_mod" min="-10" max="10" class="wiz-input" /></div>
-          <div class="wiz-field"><label>回避修正 (evasion_mod)</label>
-            <input type="number" v-model.number="wizardForm.evasion_mod" min="-10" max="10" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-success-line">成功线 (success_line)</label>
+            <input id="wiz-success-line" name="success_line" type="number" v-model.number="wizardForm.success_line" min="1" max="20" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-success-bonus">成功追加伤害 (success_bonus_damage)</label>
+            <input id="wiz-success-bonus" name="success_bonus_damage" type="number" v-model.number="wizardForm.success_bonus_damage" min="0" max="50" class="wiz-input" /></div>
+          <div class="wiz-check"><input id="wiz-is-manual-roll" name="is_manual_roll" type="checkbox" v-model="wizardForm.is_manual_roll" /> 启用手动摇骰</div>
+          <div class="wiz-field"><label for="wiz-accuracy-mod">命中修正 (accuracy_mod)</label>
+            <input id="wiz-accuracy-mod" name="accuracy_mod" type="number" v-model.number="wizardForm.accuracy_mod" min="-10" max="10" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-evasion-mod">回避修正 (evasion_mod)</label>
+            <input id="wiz-evasion-mod" name="evasion_mod" type="number" v-model.number="wizardForm.evasion_mod" min="-10" max="10" class="wiz-input" /></div>
         </div>
 
         <!-- Step 5: 补语 -->
         <div v-if="wizardStep === 5" class="wizard-body">
           <p class="wizard-desc">补语是技能的基础数值与效果</p>
-          <div class="wiz-field"><label>基础伤害 (base_damage)</label>
-            <input type="number" v-model.number="wizardForm.base_damage" min="0" max="100" class="wiz-input" /></div>
-          <div class="wiz-field"><label>状态效果 (status_effects) - 逗号分隔</label>
-            <input type="text" v-model="wizardForm.status_effects_str" placeholder="burn,stun,disable,slow,poison,freeze" class="wiz-input" />
+          <div class="wiz-field"><label for="wiz-base-damage">基础伤害 (base_damage)</label>
+            <input id="wiz-base-damage" name="base_damage" type="number" v-model.number="wizardForm.base_damage" min="0" max="100" class="wiz-input" /></div>
+          <div class="wiz-field"><label for="wiz-status-effects">状态效果 (status_effects) - 逗号分隔</label>
+            <input id="wiz-status-effects" name="status_effects_str" type="text" v-model="wizardForm.status_effects_str" placeholder="burn,stun,disable,slow,poison,freeze" class="wiz-input" />
             <small class="wiz-hint">可选: burn, stun, disable, slow, poison, freeze</small></div>
         </div>
 
@@ -193,7 +204,7 @@
             <div class="wiz-preview-line"><b>名称:</b> {{ wizardForm.label }}</div>
             <div class="wiz-preview-line"><b>动作:</b> {{ wizardForm.action_type }} | {{ wizardForm.attack_stat }} | {{ wizardForm.category }}</div>
             <div class="wiz-preview-line"><b>伤害类型:</b> {{ wizardForm.damage_kind }}</div>
-            <div class="wiz-preview-line"><b>范围:</b> {{ wizardForm.min_cast_range }}~{{ wizardForm.cast_range }} | AOE {{ wizardForm.aoe_radius }}</div>
+            <div class="wiz-preview-line"><b>范围:</b> {{ wizardForm.min_cast_range }}~{{ wizardForm.cast_range }} | {{ wizardForm.range_type === 'directional_beam' ? '地图炮W' + wizardForm.beam_width : wizardForm.range_type === 'cone' ? '扇形' : 'AOE ' + wizardForm.aoe_radius }}</div>
             <div class="wiz-preview-line"><b>对象:</b> {{ wizardForm.target_filter }}</div>
             <div class="wiz-preview-line"><b>高地:</b> ×{{ wizardForm.height_bonus_per_diff }} | 骰子: {{ wizardForm.dice_type }} ≥{{ wizardForm.success_line }}</div>
             <div class="wiz-preview-line"><b>基础伤害:</b> {{ wizardForm.base_damage }} | 手动掷骰: {{ wizardForm.is_manual_roll ? '是' : '否' }}</div>
@@ -217,7 +228,7 @@
           <h2>[ 技能词条 ]</h2>
           <span class="panel-badge">{{ skillCount }} 个词条</span>
         </div>
-        <div class="panel-body">
+        <div class="panel-body flex-1 min-h-0 overflow-y-auto">
           <!-- 空状态提示 -->
           <div v-if="skillCount === 0" class="empty-state">
             <p>暂无词条，点击「添加新词条」创建</p>
@@ -233,9 +244,11 @@
             <!-- 卡片头部 -->
             <div class="skill-card-header">
               <div class="skill-id-group">
-                <label class="skill-id-label">KEY</label>
+                <label class="skill-id-label" :for="`skill-${key}-key`">KEY</label>
                 <input
                   v-if="editMode"
+                  :id="`skill-${key}-key`"
+                  :name="`skill_${key}_key`"
                   v-model="skillKeyEdits[key]"
                   type="text"
                   class="skill-id-input"
@@ -245,9 +258,11 @@
                 <span v-else class="skill-id-value">{{ key }}</span>
               </div>
               <div class="skill-label-group">
-                <label class="skill-id-label">名称</label>
+                <label class="skill-id-label" :for="`skill-${key}-label`">名称</label>
                 <input
                   v-if="editMode"
+                  :id="`skill-${key}-label`"
+                  :name="`skill_${key}_label`"
                   v-model="skill.label"
                   type="text"
                   class="skill-label-input"
@@ -256,8 +271,8 @@
                 <span v-else class="skill-label-value">{{ skill.label || key }}</span>
               </div>
               <div class="skill-category-group">
-                <label class="skill-id-label">分类</label>
-                <select v-if="editMode" v-model="skill.category" class="param-select">
+                <label class="skill-id-label" :for="`skill-${key}-category`">分类</label>
+                <select v-if="editMode" :id="`skill-${key}-category`" :name="`skill_${key}_category`" v-model="skill.category" class="param-select">
                   <option value="melee">近战</option>
                   <option value="ranged">远程</option>
                   <option value="special">特殊</option>
@@ -276,9 +291,11 @@
 
             <!-- 描述 -->
             <div class="skill-desc-row">
-              <label class="skill-id-label">描述</label>
+              <label class="skill-id-label" :for="`skill-${key}-description`">描述</label>
               <textarea
                 v-if="editMode"
+                :id="`skill-${key}-description`"
+                :name="`skill_${key}_description`"
                 v-model="skill.description"
                 class="skill-desc-input"
                 rows="2"
@@ -291,9 +308,9 @@
             <div class="universal-fields">
               <div class="uf-row">
                 <!-- target_filter -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-target-filter`">
                   <span class="param-key">施放对象</span>
-                  <select v-if="editMode" v-model="skill.target_filter" class="param-select">
+                  <select v-if="editMode" :id="`skill-${key}-target-filter`" :name="`skill_${key}_target_filter`" v-model="skill.target_filter" class="param-select">
                     <option value="enemy">敌方 enemy</option>
                     <option value="ally">友方 ally</option>
                     <option value="self">自身 self</option>
@@ -303,10 +320,12 @@
                 </label>
 
                 <!-- cast_range -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-cast-range`">
                   <span class="param-key">施放距离</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-cast-range`"
+                    :name="`skill_${key}_cast_range`"
                     v-model.number="skill.cast_range"
                     type="number" min="0" max="20" step="1"
                     class="param-input"
@@ -315,24 +334,46 @@
                 </label>
 
                 <!-- aoe_radius -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-aoe-radius`">
                   <span class="param-key">AOE 半径</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-aoe-radius`"
+                    :name="`skill_${key}_aoe_radius`"
                     v-model.number="skill.aoe_radius"
                     type="number" min="0" max="10" step="1"
                     class="param-input"
                   />
                   <span v-else class="param-value">{{ skill.aoe_radius ?? 0 }} {{ (skill.aoe_radius ?? 0) === 0 ? '(单体)' : '格' }}</span>
                 </label>
+
+                <!-- Phase 30: range_type (radial / directional_beam / cone) -->
+                <label class="param-row" :for="`skill-${key}-range-type`">
+                  <span class="param-key">范围类型</span>
+                  <select v-if="editMode" :id="`skill-${key}-range-type`" :name="`skill_${key}_range_type`" v-model="skill.range_type" class="param-select">
+                    <option value="radial">同心圆 radial</option>
+                    <option value="directional_beam">地图炮 directional_beam</option>
+                    <option value="cone">扇形 cone</option>
+                  </select>
+                  <span v-else class="param-value">{{ skill.range_type === 'directional_beam' ? '地图炮' : skill.range_type === 'cone' ? '扇形' : '同心圆' }}</span>
+                </label>
+
+                <!-- beam_width (仅 directional_beam 时显示) -->
+                <label v-if="skill.range_type === 'directional_beam'" class="param-row" :for="`skill-${key}-beam-width`">
+                  <span class="param-key">炮宽(格)</span>
+                  <input v-if="editMode" :id="`skill-${key}-beam-width`" :name="`skill_${key}_beam_width`" v-model.number="skill.beam_width" type="number" min="1" max="10" step="1" class="param-input" />
+                  <span v-else class="param-value">{{ skill.beam_width || 1 }} 格</span>
+                </label>
               </div>
 
               <div class="uf-row">
                 <!-- base_damage -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-base-damage`">
                   <span class="param-key">基础伤害</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-base-damage`"
+                    :name="`skill_${key}_base_damage`"
                     v-model.number="skill.base_damage"
                     type="number" step="1"
                     class="param-input"
@@ -355,6 +396,8 @@
                     >
                       <input
                         type="checkbox"
+                        :id="`skill-${key}-eff-${eff.value}`"
+                        :name="`skill_${key}_eff_${eff.value}`"
                         :checked="(skill.status_effects || []).includes(eff.value)"
                         @change="toggleEffect(skill, eff.value)"
                         class="status-checkbox"
@@ -371,10 +414,12 @@
               <div class="dice-section-label">[ 动作掷骰属性 ]</div>
               <div class="uf-row">
                 <!-- dice_type -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-dice-type`">
                   <span class="param-key">骰子类型</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-dice-type`"
+                    :name="`skill_${key}_dice_type`"
                     v-model="skill.dice_type"
                     type="text"
                     class="param-input param-text"
@@ -384,10 +429,12 @@
                 </label>
 
                 <!-- success_line -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-success-line`">
                   <span class="param-key">成功线</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-success-line`"
+                    :name="`skill_${key}_success_line`"
                     v-model.number="skill.success_line"
                     type="number" min="1" max="20" step="1"
                     class="param-input"
@@ -396,10 +443,12 @@
                 </label>
 
                 <!-- success_bonus_damage -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-success-bonus`">
                   <span class="param-key">成功追加</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-success-bonus`"
+                    :name="`skill_${key}_success_bonus_damage`"
                     v-model.number="skill.success_bonus_damage"
                     type="number" step="1"
                     class="param-input"
@@ -408,10 +457,10 @@
                 </label>
 
                 <!-- is_manual_roll -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-is-manual-roll`">
                   <span class="param-key">手动摇骰</span>
                   <template v-if="editMode">
-                    <input type="checkbox" v-model="skill.is_manual_roll" />
+                    <input :id="`skill-${key}-is-manual-roll`" :name="`skill_${key}_is_manual_roll`" type="checkbox" v-model="skill.is_manual_roll" />
                     <span class="param-value">{{ skill.is_manual_roll ? 'ON' : 'OFF' }}</span>
                   </template>
                   <span v-else class="param-value">{{ skill.is_manual_roll ? '⚡ 手动' : '自动' }}</span>
@@ -424,9 +473,9 @@
               <div class="dice-section-label phase10-label">[ Phase 10 · 属性分流与干预插槽 ]</div>
               <div class="uf-row">
                 <!-- damage_kind -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-damage-kind`">
                   <span class="param-key">伤害类型</span>
-                  <select v-if="editMode" v-model="skill.damage_kind" class="param-select">
+                  <select v-if="editMode" :id="`skill-${key}-damage-kind`" :name="`skill_${key}_damage_kind`" v-model="skill.damage_kind" class="param-select">
                     <option value="kinetic">动能 kinetic</option>
                     <option value="beam">光束 beam</option>
                     <option value="explosive">爆炸 explosive</option>
@@ -437,10 +486,12 @@
                 </label>
 
                 <!-- min_cast_range -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-min-cast-range`">
                   <span class="param-key">最小距离</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-min-cast-range`"
+                    :name="`skill_${key}_min_cast_range`"
                     v-model.number="skill.min_cast_range"
                     type="number" min="0" max="20" step="1"
                     class="param-input"
@@ -449,10 +500,12 @@
                 </label>
 
                 <!-- accuracy_mod -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-accuracy-mod`">
                   <span class="param-key">命中修正</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-accuracy-mod`"
+                    :name="`skill_${key}_accuracy_mod`"
                     v-model.number="skill.accuracy_mod"
                     type="number" min="-10" max="10" step="1"
                     class="param-input"
@@ -461,10 +514,12 @@
                 </label>
 
                 <!-- evasion_mod -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-evasion-mod`">
                   <span class="param-key">闪避修正</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-evasion-mod`"
+                    :name="`skill_${key}_evasion_mod`"
                     v-model.number="skill.evasion_mod"
                     type="number" min="-10" max="10" step="1"
                     class="param-input"
@@ -475,10 +530,12 @@
 
               <div class="uf-row">
                 <!-- height_bonus_per_diff -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-height-bonus`">
                   <span class="param-key">高地格加成</span>
                   <input
                     v-if="editMode"
+                    :id="`skill-${key}-height-bonus`"
+                    :name="`skill_${key}_height_bonus_per_diff`"
                     v-model.number="skill.height_bonus_per_diff"
                     type="number" min="0" max="10" step="1"
                     class="param-input"
@@ -487,9 +544,9 @@
                 </label>
 
                 <!-- action_type -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-action-type`">
                   <span class="param-key">动作类型</span>
-                  <select v-if="editMode" v-model="skill.action_type" class="param-select">
+                  <select v-if="editMode" :id="`skill-${key}-action-type`" :name="`skill_${key}_action_type`" v-model="skill.action_type" class="param-select">
                     <option value="attack">攻击 attack</option>
                     <option value="heal">治疗 heal</option>
                     <option value="buff">增益 buff</option>
@@ -500,9 +557,9 @@
                 </label>
 
                 <!-- attack_stat -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-attack-stat`">
                   <span class="param-key">攻击属性</span>
-                  <select v-if="editMode" v-model="skill.attack_stat" class="param-select">
+                  <select v-if="editMode" :id="`skill-${key}-attack-stat`" :name="`skill_${key}_attack_stat`" v-model="skill.attack_stat" class="param-select">
                     <option value="melee">格斗 melee</option>
                     <option value="ranged">射击 ranged</option>
                     <option value="max">取最高 max</option>
@@ -511,10 +568,10 @@
                 </label>
 
                 <!-- requires_unmoved -->
-                <label class="param-row">
+                <label class="param-row" :for="`skill-${key}-requires-unmoved`">
                   <span class="param-key">要求$不动</span>
                   <template v-if="editMode">
-                    <input type="checkbox" v-model="skill.requires_unmoved" />
+                    <input :id="`skill-${key}-requires-unmoved`" :name="`skill_${key}_requires_unmoved`" type="checkbox" v-model="skill.requires_unmoved" />
                     <span class="param-value">{{ skill.requires_unmoved ? '需要' : '不需要' }}</span>
                   </template>
                   <span v-else class="param-value">{{ skill.requires_unmoved ? '⚓ 需不动' : '-' }}</span>
@@ -566,7 +623,7 @@
           <div>原则: {{ editableConfig._meta.principle }}</div>
         </div>
       </section>
-  </main>
+  </div>
 
     <!-- Phase 12: AI 技能导入弹窗 -->
     <div v-if="showAiImport" class="wizard-overlay" @click.self="showAiImport=false">
@@ -578,6 +635,8 @@
         <div class="wizard-body">
           <p class="wizard-desc">粘贴 AI 生成器输出的技能 JSON（支持单个对象或数组）</p>
           <textarea
+            id="ai-import-json"
+            name="ai_import_json"
             v-model="aiImportJson"
             class="ai-import-textarea"
             placeholder='粘贴技能 JSON，例如：[{"id":"plasma_storm","name":"等离子风暴","action_type":"attack","damage_kind":"thermal","base_damage":18,...}]'
@@ -706,13 +765,15 @@ async function loadConfig() {
   loading.value = true
   loadError.value = ''
   try {
-    const config = (await glossaryAPI.getConfig()).data
-    editableConfig._meta = { ...config._meta }
-    editableConfig.skills = { ...config.skills }
-    editableConfig.systems = { ...config.systems }
+    const res = await glossaryAPI.getConfig()
+    const data = res.data
+    const glossary = data.glossary || data // 柔性兼容 3006 网关 glossary 包裹层
+    editableConfig._meta = { ...glossary._meta }
+    editableConfig.skills = { ...glossary.skills }
+    editableConfig.systems = { ...glossary.systems }
 
     // 初始化 key 编辑缓存
-    for (const key of Object.keys(config.skills || {})) {
+    for (const key of Object.keys(glossary.skills || {})) {
       skillKeyEdits[key] = key
     }
     // 清空删除列表
@@ -821,6 +882,8 @@ function toggleWizard() {
     cast_range: 1,
     min_cast_range: 0,
     aoe_radius: 0,
+    range_type: 'radial',
+    beam_width: 1,
     damage_kind: 'kinetic',
     height_bonus_per_diff: 0,
     dice_type: '1d6',
@@ -852,6 +915,8 @@ function commitWizardSkill() {
     target_filter: wizardForm.target_filter,
     cast_range: wizardForm.cast_range,
     aoe_radius: wizardForm.aoe_radius,
+    range_type: wizardForm.range_type || 'radial',
+    beam_width: wizardForm.range_type === 'directional_beam' ? (wizardForm.beam_width || 1) : 0,
     base_damage: wizardForm.base_damage,
     status_effects: statusEffects,
     deterministic: wizardForm.deterministic,
@@ -966,10 +1031,12 @@ onMounted(() => {
 
 <style scoped>
 * { box-sizing: border-box; }
-.main-content {
-  display: flex; flex-direction: column; height: 100vh;
+.page-container {
   background: #001620; font-family: 'Fira Code', 'Courier New', monospace;
-  color: #c1e8ff; overflow-y: auto;
+  color: #c1e8ff;
+}
+.page-content {
+  flex: 1; overflow-y: auto;
 }
 
 .page-header { padding: 24px 32px 16px; border-bottom: 1px solid rgba(159,142,120,0.15); }

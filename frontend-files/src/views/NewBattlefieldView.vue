@@ -253,8 +253,8 @@ const newMapError = ref('')
 const hexGrid = ref(null)
 
 // ---- 3D 视角动态参数 (绑定到 HexGridCanvas 的 isoShearX/isoShearY props) ----
-const isoShearX = ref(ISO_DEFAULTS.shearX)  // 默认 0.25
-const isoShearY = ref(ISO_DEFAULTS.shearY)  // 默认 0.44
+const isoShearX = ref(ISO_DEFAULTS.shearX)  // 默认 0.38
+const isoShearY = ref(ISO_DEFAULTS.shearY)  // 默认 0
 
 // ---- 动态间距 (ref 以支持实时 prop 绑定) ----
 const spacingH = ref(DEFAULT_SPACING_H)      // 1.00

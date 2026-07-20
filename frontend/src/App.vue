@@ -1,12 +1,13 @@
 <template>
-  <div class="app-container">
-    <TheSidebar v-if="showSidebar" />
-    <main :class="['main-content', { 'with-sidebar': showSidebar }]">
-      <header v-if="showSidebar" class="mobile-header">
-        <span class="mobile-brand">机甲战术</span>
-      </header>
-      <router-view />
-    </main>
+  <div id="app" class="h-screen w-screen overflow-hidden">
+    <div class="app-container flex h-full w-full">
+      <aside v-if="showSidebar" class="app-sidebar w-64 flex-shrink-0 h-full">
+        <TheSidebar />
+      </aside>
+      <main class="main-content flex-1 h-full relative overflow-hidden">
+        <router-view />
+      </main>
+    </div>
   </div>
 </template>
 
@@ -30,36 +31,24 @@ provide('sidebarActionLog', sidebarActionLog)
 <style>
 @import './styles/variables.css';
 
-.app-container {
-  min-height: 100vh;
+#app {
   background: #001620;
   color: #c1e8ff;
   font-family: 'Noto Sans SC', 'Space Grotesk', system-ui, -apple-system, sans-serif;
-  overflow-x: hidden;
-  display: flex;
+}
+
+.app-container {
+  /* flex h-full w-full — 由 Tailwind 提供 */
 }
 
 .main-content {
-  flex: 1;
-  min-height: 100vh;
-  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.main-content.with-sidebar {
-  margin-left: 240px;
-}
-
-.mobile-header {
-  display: none;
+  /* flex-1 h-full relative overflow-hidden — 由 Tailwind 提供 */
+  transition: none;
 }
 
 @media (max-width: 1024px) {
-  .main-content.with-sidebar {
-    margin-left: 0;
-    padding-top: 60px;
-  }
-  .mobile-header {
-    display: flex;
+  .app-sidebar {
+    display: none;
   }
 }
 </style>

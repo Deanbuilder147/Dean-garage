@@ -7,7 +7,7 @@
   </header>
 
   <!-- Main Content -->
-  <main class="main-content">
+  <div class="page-container w-full h-full flex flex-col overflow-y-auto">
 
     <header class="tactical-header">
       <h1>战术模拟系统 Alpha 3.0</h1>
@@ -64,6 +64,21 @@
         <div class="scanline"></div>
       </div>
 
+      <!-- Phase 19: 词条造词工厂卡片 -->
+      <div class="card" @click="router.push('/glossary')">
+        <div class="card-text">
+          <div class="card-icon">
+            <svg class="icon icon-xl" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor" opacity="0.15"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          </div>
+          <div class="card-title-group">
+            <h3>📖 词条造词工厂</h3>
+            <p>查阅全部机甲技能、地形特性与战斗机制的完整百科词条库。</p>
+          </div>
+        </div>
+        <button class="card-btn">查阅</button>
+        <div class="scanline"></div>
+      </div>
+
     </div>
 
     <div class="status-bar">
@@ -79,7 +94,7 @@
       <span class="dim">战区: 7-B Alpha</span>
     </div>
 
-  </main></template>
+  </div></template>
 
 <script setup>
 import { ref, computed } from 'vue'
@@ -103,19 +118,6 @@ function handleLogout() {
 
 .icon-xl { font-size: 3rem; }
 .icon-sm { font-size: 1rem; }
-
-/* ===== NAV (shared) ===== */
-
-/* ===== ACTION LOG PANEL (shared) ===== */
-
-.log-entry.log-move 
-.log-entry.log-attack 
-.log-entry.log-action 
-.log-entry.log-deploy 
-.log-entry.log-turn 
-.log-entry.log-error 
-
-.log-entry.log-select 
 
 .mobile-header {
   display: none;
@@ -375,7 +377,7 @@ function handleLogout() {
 @media (max-width: 1024px) {
   .app-sidebar { display: none; }
   .mobile-header { display: flex; }
-  .main-content { margin-left: 0; padding: 80px 20px 60px; }
+  .page-container { padding: 80px 20px 60px; }
   .footer { left: 0 !important; }
   .cards-grid { grid-template-columns: 1fr; }
 }
