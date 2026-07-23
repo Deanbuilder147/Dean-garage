@@ -102,13 +102,18 @@ class DamagePipe {
             : (attacker.ranged || attacker.attack || 10);
         result.stages.base_attack = baseAttack;
 
-        // ---- 阶段 2: 双方机动值差 ----
-        const attMobility = attacker.mobility || 0;
-        const defMobility = defender.mobility || 0;
+        // ---- 阶段 2: 双方机动值差（阶段二：支持上下文有效机动注入） ----
+        const attMobility = (config.attacker_effective_mobility != null)
+            ? config.attacker_effective_mobility
+            : (attacker.mobility || 0);
+        const defMobility = (config.defender_effective_mobility != null)
+            ? config.defender_effective_mobility
+            : (defender.mobility || 0);
         // 狙击技能：目标机动值 -2（Excel: 舍弃移动，机动值差计算中目标机动值-2）
         const sniperReduction = config.sniper_mobility_reduction || 0;
         const effectiveDefMobility = Math.max(0, defMobility - sniperReduction);
-        const mobilityDiff = attMobility - effectiveDefMobility;
+        // 机动值差额 = 攻方有效机动 - 守方有效机动；上限封顶 +5，下限不设限制（允许负数无限放大）
+        const mobilityDiff = Math.min(5, attMobility - effectiveDefMobility);
         result.stages.mobility_diff = mobilityDiff;
         if (sniperReduction > 0) {
             result.stages.sniper_mobility_reduction = sniperReduction;
@@ -135,7 +140,7 @@ class DamagePipe {
         result.stages.terrain_kind_modifiers = terrainKindMods;
 
         // ---- 阶段 8: 防御减免（泛化） ----
-        const defense = this._calcDefense(defender, attacker, terrainDefs, damageKind);
+        const defense = this._calcDefense(defender, attacker, terrainDefs, damageKind, config);
         result.stages.defense = defense;
 
         // ---- 阶段 9: 武器克制惩罚（泛化） ----
@@ -263,8 +268,12 @@ class DamagePipe {
      * @param {string} damageKind - 攻击者实际伤害种类（权威来源，非 weaponType）
      * @returns {{ base: number, shield: number, buffs: number, terrain: number, equipment_reduction: number, total: number }}
      */
-    static _calcDefense(defender, attacker, terrainDefs, damageKind) {
-        const baseDefense = defender.defense || 5;
+    static _calcDefense(defender, attacker, terrainDefs, damageKind, config) {
+        // 防御力彻底废弃 → 0；减伤完全由护甲(机体结构*0.25) + 伤害分担接管
+        const armorValue = (config && config.defender_armor != null)
+            ? config.defender_armor
+            : (defender.armor || 0);
+        const baseDefense = (defender.defense ?? 0) + armorValue;
         const shieldValue = defender.shield || 0;
         const defenseBuffs = this._sumBuffs(defender.buffs || [], 'defense');
 
@@ -283,6 +292,7 @@ class DamagePipe {
 
         return {
             base: baseDefense,
+            armor: armorValue,
             shield: shieldValue,
             buffs: defenseBuffs,
             terrain: terrainBonus,

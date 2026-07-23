@@ -35,7 +35,8 @@
         ref="hexGrid"
         :grid-data="gridData"
         :highlight-cells="editorHighlights"
-        :iso-config="isoConfig"
+        :mode="'planar'"
+        :show-center-marker="true"
         :show-hover="true"
         :use-terrain-cache="false"
         @cell-clicked="handleEditorBrush"
@@ -99,24 +100,6 @@
         </div>
         <button class="spacing-reset" @click="resetSpacing">重置间距</button>
 
-        <!-- 3D 视角动态调节滑块 -->
-        <div class="spacing-group iso-group">
-          <label class="spacing-label" for="iso-shear-x-num">3D 倾斜X</label>
-          <input id="iso-shear-x-range" type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-slider" />
-          <input id="iso-shear-x-num" type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearX" class="iso-input" />
-        </div>
-        <div class="spacing-group iso-group">
-          <label class="spacing-label" for="iso-shear-y-num">3D 倾斜Y</label>
-          <input id="iso-shear-y-range" type="range" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-slider" />
-          <input id="iso-shear-y-num" type="number" min="0.00" max="0.80" step="0.01" v-model.number="isoShearY" class="iso-input" />
-        </div>
-        <div class="spacing-group iso-save-group">
-          <button class="btn-save-iso" @click="saveViewConfig" :disabled="savingViewConfig">
-            {{ savingViewConfig ? '保存中...' : '💾 保存 3D 视角' }}
-          </button>
-          <span v-if="viewSaveMsg" class="view-save-msg">{{ viewSaveMsg }}</span>
-        </div>
-
         <div class="zoom-group">
           <button class="spacing-btn" @click="hexGrid?.zoomIn()">🔍+</button>
           <button class="spacing-btn" @click="hexGrid?.zoomOut()">🔍-</button>
@@ -134,21 +117,8 @@
           <button class="tm-close" @click="showNewMapModal=false">✕</button>
         </div>
         <div class="terrain-mgr-body" style="display:flex;flex-direction:column;gap:16px;padding:20px;">
-          <div style="display:flex;gap:20px;align-items:center;">
-            <div style="flex:1;">
-              <label for="new-map-width" style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">宽度 (列) · 10–200</label>
-              <input id="new-map-width" v-model.number="newMapWidth" type="number" min="10" max="200"
-                style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
-            </div>
-            <span style="color:rgba(255,176,0,0.4);font-size:18px;margin-top:20px;">×</span>
-            <div style="flex:1;">
-              <label for="new-map-height" style="display:block;color:#c1e8ff;font-size:11px;margin-bottom:6px;">高度 (行) · 10–200</label>
-              <input id="new-map-height" v-model.number="newMapHeight" type="number" min="10" max="200"
-                style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,176,0,0.3);color:#f1f3fc;padding:8px 10px;border-radius:4px;font-size:15px;font-family:'Fira Code',monospace;" />
-            </div>
-          </div>
-          <div style="color:rgba(241,243,252,0.4);font-size:10px;text-align:center;">
-            总计 {{ newMapWidth * newMapHeight }} 格 · 最小 100 格 · 最大 40,000 格
+          <div style="color:rgba(241,243,252,0.7);font-size:13px;text-align:center;padding:14px 0;">
+            固定战场尺寸：<b style="color:#ffd479;">100 × 100</b> = 10,000 格
           </div>
           <div v-if="newMapError" style="color:#ff4d4d;font-size:11px;text-align:center;">{{ newMapError }}</div>
         </div>
@@ -186,6 +156,14 @@
                 </select>
               </label>
             </div>
+            <div class="tm-row tm-material-row">
+              <label class="tm-upload-btn">
+                {{ editableTerrains[key].material_url ? '替换素材' : '上传素材' }}
+                <input type="file" accept="image/*" class="tm-file-input" @change="onMaterialChange($event, key)" />
+              </label>
+              <img v-if="editableTerrains[key].material_url" :src="editableTerrains[key].material_url" class="tm-thumb" alt="素材预览" />
+              <button v-if="editableTerrains[key].material_url" class="tm-clear" @click="clearTerrainMaterial(key)">清除</button>
+            </div>
             <button class="tm-delete" @click="deleteTerrainType(key)">删除</button>
           </div>
           <div class="tm-add-row">
@@ -205,7 +183,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { mapAPI, glossaryAPI } from '@/api/client'
+import { mapAPI, glossaryAPI, terrainAPI } from '@/api/client'
 import {
   DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR,
   UNIVERSAL_TERRAIN_MAP,
@@ -244,16 +222,12 @@ const selectedMapFile = ref('')
 const mapLoadStatus = ref('')
 // Phase 13.5: 新建地图弹窗状态
 const showNewMapModal = ref(false)
-const newMapWidth = ref(15)
-const newMapHeight = ref(10)
+const newMapWidth = ref(100)
+const newMapHeight = ref(100)
 const newMapError = ref('')
 
 // ---- HexGridCanvas 组件引用 ----
 const hexGrid = ref(null)
-
-// ---- 3D 视角动态参数 (绑定到 HexGridCanvas 的 isoShearX/isoShearY props) ----
-const isoShearX = ref(ISO_DEFAULTS.shearX)  // 默认 0.38
-const isoShearY = ref(ISO_DEFAULTS.shearY)  // 默认 0
 
 // ---- 动态间距 (ref 以支持实时 prop 绑定) ----
 const spacingH = ref(DEFAULT_SPACING_H)      // 1.00
@@ -261,11 +235,17 @@ const spacingV = ref(DEFAULT_SPACING_V)      // 1.00
 const offsetFactor = ref(DEFAULT_OFFSET_FACTOR) // 0.00
 
 // ---- 网格尺寸 ----
-const gridW = computed(() => battlefield.value?.width || 15)
-const gridH = computed(() => battlefield.value?.height || 10)
+// 需求：完整画布固定 50×50（中心点 = floor((50-1)/2)=24 起的 2×2 块 = y25:z26）
+const gridW = computed(() => 50)
+const gridH = computed(() => 50)
 const totalCellCount = computed(() => gridW.value * gridH.value)
 const nonEmptyCellCount = computed(() =>
-  Object.values(terrainMap).filter(v => v && extractTerrainId(v) !== 'moon').length
+  Object.values(terrainMap).filter(v => {
+    if (!v) return false
+    const tid = typeof v === 'string' ? v : extractTerrainId(v)
+    // 留白(void)=画板背景，不计为"已绘制"；月面(moon)是真实地形，计入
+    return tid !== 'void'
+  }).length
 )
 
 // ================================================================
@@ -290,19 +270,6 @@ const gridData = computed(() => ({
     spacingV: spacingV.value,
     offsetFactor: offsetFactor.value,
   }
-}))
-
-// ================================================================
-//  isoConfig — ISO 视角参数 (响应式传递给引擎)
-// ================================================================
-const isoConfig = computed(() => ({
-  shearX: isoShearX.value,
-  shearY: isoShearY.value,
-  scaleX: ISO_DEFAULTS.scaleX,
-  scaleY: ISO_DEFAULTS.scaleY,
-  rotation: ISO_DEFAULTS.rotation,
-  topFlat: ISO_DEFAULTS.topFlat,
-  bottomFlat: ISO_DEFAULTS.bottomFlat,
 }))
 
 // ================================================================
@@ -366,6 +333,28 @@ function deleteTerrainType(key) {
   delete editableTerrains[key]
   terrainSaveMsg.value = `已删除: ${key}`
   setTimeout(() => { terrainSaveMsg.value = '' }, 2000)
+}
+
+// 需求④ 上传/清除地形素材，写回 glossary 配置（material_url）
+function clearTerrainMaterial(key) {
+  editableTerrains[key].material_url = null
+  saveTerrainConfig()
+}
+
+async function onMaterialChange(e, key) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  try {
+    const res = await terrainAPI.uploadMaterial(key, file)
+    editableTerrains[key].material_url = res.url
+    await saveTerrainConfig()
+    terrainSaveMsg.value = `✓ ${key} 素材已上传`
+  } catch (err) {
+    terrainSaveMsg.value = '✗ 上传失败: ' + (err.response?.data?.error || err.message)
+    console.error('素材上传失败:', err)
+  } finally {
+    e.target.value = ''  // 允许重复选择同一文件
+  }
 }
 
 async function saveTerrainConfig() {
@@ -555,12 +544,62 @@ async function loadMapData(mapData) {
   battlefield.value = mapData
   // 清空现有地形
   Object.keys(terrainMap).forEach(k => delete terrainMap[k])
-  // 加载地形数据
-  const rawTerrain = mapData.terrain || mapData.terrainData
+  // 加载地形数据（兼容两种格式）
+  const rawTerrain = mapData.terrain || mapData.terrainData || mapData.cells
   if (rawTerrain) {
     const t = typeof rawTerrain === 'string' ? JSON.parse(rawTerrain) : rawTerrain
-    if (t && typeof t === 'object') {
-      Object.entries(t).forEach(([key, val]) => { terrainMap[key] = val })
+    if (Array.isArray(t)) {
+      // 旧地图：对象数组 [{q, r, terrain}]，统一转成 "q,r": terrainId 写入 terrainMap
+      t.forEach(c => {
+        if (c && c.q !== undefined && c.r !== undefined) {
+          const id = (typeof c.terrain === 'string') ? c.terrain
+            : (c.terrain && c.terrain.id) || c.terrain_id || c.type || null
+          if (id) terrainMap[`${c.q},${c.r}`] = id
+        }
+      })
+    } else if (t && typeof t === 'object') {
+      // 新地图：dict "q,r": terrainId | {id,...}
+      Object.entries(t).forEach(([key, val]) => {
+        const id = (val && typeof val === 'object' && (val.id || val.terrain || val.terrain_id || val.type)) || val
+        if (id) terrainMap[key] = id
+      })
+    }
+  }
+  // === 旧地图重定位：将内容中心平移到画布中心(y25:z26 区) ===
+  // 旧地图(legacy_type==='standard')内容多偏于一角，平移使其落于 50×50 画布中心 2×2 块。
+  // 幂等：已居中的地图再次加载时偏移量 dq=dr=0，不会二次平移。
+  const _attrs = mapData.attributes || mapData.attrs
+  const _isLegacy = _attrs && (_attrs.legacy_type === 'standard' || _attrs.legacy_id !== undefined)
+  if (_isLegacy) {
+    const _keys = Object.keys(terrainMap)
+    if (_keys.length) {
+      let _minQ = Infinity, _maxQ = -Infinity, _minR = Infinity, _maxR = -Infinity
+      for (const k of _keys) {
+        const [q, r] = k.split(',').map(Number)
+        if (q < _minQ) _minQ = q
+        if (q > _maxQ) _maxQ = q
+        if (r < _minR) _minR = r
+        if (r > _maxR) _maxR = r
+      }
+      const _cq = (_minQ + _maxQ) / 2
+      const _cr = (_minR + _maxR) / 2
+      const _dq = Math.round(24.5 - _cq)
+      const _dr = Math.round(24.5 - _cr)
+      if (_dq !== 0 || _dr !== 0) {
+        const _shifted = {}
+        for (const k of _keys) {
+          const [q, r] = k.split(',').map(Number)
+          _shifted[`${q + _dq},${r + _dr}`] = terrainMap[k]
+        }
+        _keys.forEach(k => delete terrainMap[k])
+        Object.assign(terrainMap, _shifted)
+        // 同步平移出生点
+        const _sp = battlefield.value && battlefield.value.spawnPoints
+        if (Array.isArray(_sp)) {
+          _sp.forEach(p => { if (p && p.q !== undefined) { p.q += _dq; p.r += _dr } })
+        }
+        addLog('system', `旧地图重定位: 中心(${_cq.toFixed(1)},${_cr.toFixed(1)}) → y25:z26 区(偏移 ${_dq},${_dr})`)
+      }
     }
   }
   // 恢复 hex 配置
@@ -579,7 +618,7 @@ async function loadMapData(mapData) {
       hexGrid.value.redraw()         // 强制触发大一统 Canvas 全量物理重绘
     }
   }
-  addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && terrainMap[k] !== 'moon').length} 个地形格子)`)
+  addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && extractTerrainId(terrainMap[k]) !== 'void').length} 个地形格子)`)
 }
 
 onMounted(async () => {
@@ -627,57 +666,12 @@ onMounted(async () => {
   }
 })
 
-// ---- 保存 3D 视角配置到后端 ----
-const savingViewConfig = ref(false)
-const viewSaveMsg = ref('')
-let viewSaveMsgTimer = null
-
-async function saveViewConfig() {
-  savingViewConfig.value = true
-  viewSaveMsg.value = ''
-  try {
-    const isoConfig = {
-      shearX: isoShearX.value,
-      shearY: isoShearY.value,
-      scaleX: 1.00,
-      scaleY: 0.39,
-      rotation: -24
-    }
-    await glossaryAPI.saveConfig({
-      _meta: {
-        version: '3.0-view',
-        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        generated_from: 'NewBattlefieldView.vue 3D 视角调校'
-      },
-      _view: isoConfig
-    })
-    viewSaveMsg.value = '✓ 3D 视角已保存'
-  } catch (e) {
-    viewSaveMsg.value = '✗ 保存失败: ' + (e.response?.data?.error || e.message)
-    console.error('保存视角配置失败:', e)
-  } finally {
-    savingViewConfig.value = false
-    if (viewSaveMsgTimer) clearTimeout(viewSaveMsgTimer)
-    viewSaveMsgTimer = setTimeout(() => { viewSaveMsg.value = '' }, 4000)
-  }
-}
-
-
 // Phase 13.5: 根据输入的 width/height 创建新地图
 function createNewMap() {
   newMapError.value = ''
-  const w = newMapWidth.value
-  const h = newMapHeight.value
-
-  // 刚性约束
-  if (w < 10 || w > 200 || h < 10 || h > 200) {
-    newMapError.value = '尺寸必须在 10–200 范围内'
-    return
-  }
-  if (!Number.isInteger(w) || !Number.isInteger(h)) {
-    newMapError.value = '尺寸必须为整数'
-    return
-  }
+  // ★ 画布固定 50×50（忽略前端输入）
+  const w = 50
+  const h = 50
 
   // 清空旧地形
   Object.keys(terrainMap).forEach(k => delete terrainMap[k])
@@ -708,7 +702,10 @@ async function saveMap() {
   try {
     const terrainData = {}
     Object.entries(terrainMap).forEach(([key, val]) => {
-      if (val && extractTerrainId(val) !== 'moon') terrainData[key] = val
+      if (!val) return
+      const tid = typeof val === 'string' ? val : extractTerrainId(val)
+      // 留白(void)=画板背景，不入库；月面(moon)是真实地形，入库
+      if (tid !== 'void') terrainData[key] = val
     })
     await mapAPI.updateBattlefield(battlefield.value.id, {
       terrain: terrainData,
@@ -760,9 +757,28 @@ async function deleteCurrentMap() {
 
 function exportJSON() {
   const name = battlefield.value?.name || '未命名'
+  // B: 裁剪到"画"边界——导出真实地形格子（含月面 moon），仅剔除留白(void)背景。
+  // 坐标保持绝对 (q,r) 不变（与后端 100×100 纸模型兼容），附带 bounds 元数据。
+  const paintedMap = {}
+  let minQ = Infinity, maxQ = -Infinity, minR = Infinity, maxR = -Infinity
+  Object.entries(terrainMap).forEach(([key, val]) => {
+    if (!val) return
+    const tid = typeof val === 'string' ? val : extractTerrainId(val)
+    if (tid === 'void') return // 留白(void)=画板背景，不入库
+    paintedMap[key] = val
+    const [q, r] = key.split(',').map(Number)
+    if (q < minQ) minQ = q
+    if (q > maxQ) maxQ = q
+    if (r < minR) minR = r
+    if (r > maxR) maxR = r
+  })
+  const bounds = (minQ !== Infinity)
+    ? { minQ, maxQ, minR, maxR, width: maxQ - minQ + 1, height: maxR - minR + 1 }
+    : null
   const exportData = {
     version: '1.0',
     exportDate: new Date().toISOString(),
+    bounds, // 画的范围（裁剪边界），供导入/工具使用
     battlefield: {
       name,
       width: gridW.value,
@@ -772,10 +788,10 @@ function exportJSON() {
         spacingV: spacingV.value,
         offsetFactor: offsetFactor.value,
       },
-      terrainData: JSON.parse(JSON.stringify(terrainMap)),
+      terrainData: JSON.parse(JSON.stringify(paintedMap)),
       terrainTypes: Object.entries(UNIVERSAL_TERRAIN_MAP).map(([id, d]) => ({ id, ...d })),
       cellCount: totalCellCount.value,
-      terrainCount: Object.keys(terrainMap).filter(k => terrainMap[k] && terrainMap[k] !== 'moon').length,
+      terrainCount: Object.keys(paintedMap).length,
     },
   }
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })

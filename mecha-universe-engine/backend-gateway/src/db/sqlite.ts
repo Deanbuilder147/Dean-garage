@@ -154,11 +154,13 @@ function createTables(): void {
       id TEXT PRIMARY KEY,
       owner_id TEXT NOT NULL REFERENCES users(id),
       name TEXT NOT NULL,
+      codename TEXT DEFAULT '',
       faction TEXT DEFAULT 'earth',
       category TEXT DEFAULT 'melee',
       tier INTEGER DEFAULT 1,
       total_points INTEGER DEFAULT 0,
       sprite_key TEXT,
+      view_urls TEXT DEFAULT '{}',
       stats TEXT NOT NULL DEFAULT '{}',
       skills TEXT DEFAULT '[]',
       is_public_copy INTEGER DEFAULT 0,
@@ -221,6 +223,14 @@ function _migrateExistingTablesInner(): void {
     console.log('[DB] 迁移：units 表添加 original_author_id 列');
   }
 
+  // Phase 30-Fix: 持久化行动代号与七视图 URL
+  if (!unitColNames.includes('codename')) {
+    try { db.run("ALTER TABLE units ADD COLUMN codename TEXT DEFAULT ''"); console.log('[DB] 迁移：units 表添加 codename 列'); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
+  }
+  if (!unitColNames.includes('view_urls')) {
+    try { db.run("ALTER TABLE units ADD COLUMN view_urls TEXT DEFAULT '{}'"); console.log('[DB] 迁移：units 表添加 view_urls 列'); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
+  }
+
   // Phase 29-DataSecurity: is_public / review_status 审核卡口
   // 防御性迁移: sql.js 的 PRAGMA table_info 对已持久化 DB 可能不准确，用 try-catch 兜底
   const safeAlter = (table: string, col: string, sql: string, label: string) => {
@@ -255,8 +265,8 @@ function _migrateExistingTablesInner(): void {
     CREATE TABLE IF NOT EXISTS maps (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      width INTEGER DEFAULT 20,
-      height INTEGER DEFAULT 30,
+      width INTEGER DEFAULT 100,
+      height INTEGER DEFAULT 100,
       cells TEXT DEFAULT '[]',
       spawn_points TEXT DEFAULT '[]',
       is_public_copy INTEGER DEFAULT 0,

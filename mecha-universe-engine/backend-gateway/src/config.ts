@@ -27,10 +27,10 @@ export const config = {
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:8081')
     .split(',').map(s => s.trim()),
 
-  // 限流配置
+  // 限流配置（trust proxy 开启后按真实客户端 IP 分桶，可放宽单用户额度）
   rateLimit: {
     windowMs: 15 * 60 * 1000, // 15 分钟
-    max: 100,                   // 100 次/窗口
+    max: parseInt(process.env.RATE_LIMIT_MAX || '300', 10), // 300 次/窗口/IP（单页初始化+上传+轮询有余量）
     loginMax: 10,               // 登录特殊限流
   },
 

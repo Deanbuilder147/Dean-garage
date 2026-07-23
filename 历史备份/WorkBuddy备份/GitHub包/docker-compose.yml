@@ -1,0 +1,131 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: mecha-battle-db
+    environment:
+      POSTGRES_DB: mecha_battle
+      POSTGRES_USER: mecha_user
+      POSTGRES_PASSWORD: mecha_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mecha_user -d mecha_battle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auth Service (Port 3001)
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: mecha-auth
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Hangar Service (Port 3002)
+  hangar-service:
+    build:
+      context: ./services/hangar-service
+      dockerfile: Dockerfile
+    container_name: mecha-hangar
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Map Service (Port 3003)
+  map-service:
+    build:
+      context: ./services/map-service
+      dockerfile: Dockerfile
+    container_name: mecha-map
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Combat Service (Port 3004)
+  combat-service:
+    build:
+      context: ./services/combat-service
+      dockerfile: Dockerfile
+    container_name: mecha-combat
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgresql://mecha_user:mecha_secure_password@postgres:5432/mecha_battle
+      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Comm Service (Port 3005)
+  comm-service:
+    build:
+      context: ./services/comm-service
+      dockerfile: Dockerfile
+    container_name: mecha-comm
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      JWT_SECRET: ${JWT_SECRET:-mecha-battle-auth-secret-key}
+    ports:
+      - "3005:3005"
+    depends_on:
+      - auth-service
+    restart: unless-stopped
+
+  # Frontend (Port 8081)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mecha-frontend
+    ports:
+      - "8081:8081"
+    environment:
+      VITE_API_BASE: /api
+    depends_on:
+      - auth-service
+      - hangar-service
+      - map-service
+      - combat-service
+      - comm-service
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: mecha-network

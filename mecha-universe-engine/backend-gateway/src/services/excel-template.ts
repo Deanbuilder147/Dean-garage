@@ -5,7 +5,8 @@
  * 坐标完全对齐 hangar-service /import-excel 直导模式：
  *   - 工作表: 优先 "设定器"，回退第一个
  *   - 基本信息: name=C2, codename=F2, faction=I2
- *   - 单位属性: 行4-8 (主机体/跟随/左手/右手/其它)
+ *   - 单位属性: 行4-8，单位归属由 A 列内容判定 (resolveUnitKey 归一为 主机体/跟随/左手/右手/其它)
+ *     注意: rows[].name 仅作行号定位占位，实际单位 key 取自 A 列内容，而非写死 name
  *   - 技能列表: 行12-22, 按行号范围分配归属
  */
 
@@ -79,6 +80,7 @@ export const EXCEL_TEMPLATE: ExcelTemplate = {
     },
     units: {
       name: '单位属性',
+      // ★ 单位归属由 A 列内容判定 (见 excel-parser.ts resolveUnitKey)，rows[].name 仅占位
       rows: [
         { name: '主机体', row: 4, fields: ['type', '格斗', '射击', '结构', '机动', 'skillSlots'] },
         { name: '跟随', row: 5, fields: ['type', '格斗', '射击', '结构', '机动', 'skillSlots'] },
@@ -128,7 +130,8 @@ export const EXCEL_TEMPLATE: ExcelTemplate = {
     },
     required: ['name', '主机体'],
     factions: ['earth', 'balon', 'maxion'],
-    unitTypes: ['机体', '装甲', '推进器', '武器', '盾牌', '辅助', 'none'],
+    // 含 weirdnova 等真实文件的合法值 (Royroy/载具) — 避免误报 warning
+    unitTypes: ['机体', '装甲', '推进器', '武器', '盾牌', '辅助', 'none', 'Royroy', '载具'],
   },
 };
 

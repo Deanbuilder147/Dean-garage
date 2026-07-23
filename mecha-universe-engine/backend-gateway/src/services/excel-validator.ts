@@ -53,6 +53,13 @@ export class ExcelValidator {
       `错误=${this.errors.length}, 警告=${this.warnings.length}`
     );
 
+    if (!result.valid) {
+      console.log(
+        `[ExcelValidator] 失败诊断: 实际单位key=[${data.units ? Object.keys(data.units).join(', ') : '无'}] ` +
+        `basic.name=${data.basic?.name || '(空)'}`
+      );
+    }
+
     return result;
   }
 
@@ -87,9 +94,17 @@ export class ExcelValidator {
 
     // 必须有主机体
     const required = ['主机体'];
+    const actualKeys = Object.keys(units);
     for (const name of required) {
       if (!units[name]) {
-        this.errors.push({ field: `units.${name}`, message: `${name}数据缺失 (期望在第 ${this.getUnitRow(name)} 行)` });
+        this.errors.push({
+          field: `units.${name}`,
+          message:
+            `${name}数据缺失 (期望在第 ${this.getUnitRow(name)} 行)。` +
+            `已识别单位=[${actualKeys.join(', ') || '无'}]；` +
+            `请确认「设定器」sheet 的 A4-A8 填写了"${name}"或其别名(主机/本体/主体/机体)`,
+
+        });
       }
     }
 
@@ -162,8 +177,8 @@ export class ExcelValidator {
 
       if (!skill.name || skill.name.trim() === '') continue;
 
-      // 技能类型软校验
-      if (skill.type && !['自动', '自动化', '手动', '被动'].includes(skill.type)) {
+      // 技能类型软校验 (含 weirdnova 真实值 近战/远程)
+      if (skill.type && !['自动', '自动化', '手动', '被动', '近战', '远程'].includes(skill.type)) {
         this.warnings.push({
           field: `skills[${i}].type`,
           message: `未知的技能类型: ${skill.type} (行${skill.row})`,

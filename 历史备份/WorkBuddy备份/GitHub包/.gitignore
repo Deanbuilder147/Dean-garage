@@ -1,0 +1,62 @@
+# Node
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Build
+dist/
+dist-ssr/
+*.local
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Test
+coverage/
+.nyc_output/
+
+# Temporary
+tmp/
+temp/
+.cache/
+*.tmp
+*.temp
+
+# Battle Simulator specific
+Battle Simulator*/
+战斗模拟器*/

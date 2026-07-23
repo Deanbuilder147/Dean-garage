@@ -19,7 +19,7 @@
         <div v-else class="units-grid">
           <div v-for="unit in units" :key="unit.id" class="unit-card" @click="editUnit(unit)">
             <div class="unit-image">
-              <img v-if="unit.main_image_url" :src="unit.main_image_url" :alt="unit.name">
+              <img v-if="coverUrl(unit)" :src="coverUrl(unit)" :alt="unit.name" @error="onImgError">
               <span v-else class="placeholder">无图</span>
             </div>
             <div class="unit-info">
@@ -72,16 +72,14 @@
             </div>
           </div>
           <div class="form-row">
-            <label for="unit-image-field">主机体图片</label>
+            <label for="unit-image-field">机体封面</label>
             <div class="file-upload-wrapper">
-              <input id="unit-image-field" name="main_image" type="file" ref="imageInputRef" @change="uploadImage" accept="image/*" class="file-input-hidden">
-              <button type="button" @click="$refs.imageInputRef.click()" class="btn-file-upload">
-                选择文件...
-              </button>
-              <span class="file-hint" v-if="!form.main_image_url">未选择任何文件</span>
-              <span class="file-name" v-else>{{ imageFileName || '已选择图片' }}</span>
+              <div class="cover-preview-box">
+                <img v-if="frontViewUrl" :src="frontViewUrl" class="preview-image" alt="封面" @error="onImgError">
+                <span v-else class="file-hint">未配置七视图，将显示「无图」占位</span>
+              </div>
+              <p class="file-hint">封面自动取自「七视图」正视图（方向 0），无需单独上传主图。</p>
             </div>
-            <img v-if="form.main_image_url" :src="form.main_image_url" class="preview-image">
           </div>
         </section>
 
@@ -314,11 +312,11 @@ const showImportDialog = ref(false)
 const importing = ref(false)
 const confirming = ref(false)
 const previewData = ref(null)
+const previewNormalized = ref(null)  // 结构化 { normalized, legacy } 供 confirmImport 使用
+const importPayloadStr = ref('')  // _importPayload JSON 字符串，绕过序列化问题
 const previewWarnings = ref([])
 const fileInputRef = ref(null)
 const importFileName = ref('')
-const imageInputRef = ref(null)
-const imageFileName = ref('')
 const form = ref(createEmptyForm())
 
 // Phase 28: 动态阵营管理
@@ -398,13 +396,17 @@ async function uploadAllViews() {
       fd.append('image', viewFiles.value[dv.value])
       fd.append('unitCode', unitCode)
       fd.append('direction', String(dv.value))
-      await hangarAPI.uploadUnitView(fd)
+      const { data } = await hangarAPI.uploadUnitView(fd)
+      const url = data?.url
+      if (url) {
+        form.value.view_urls = { ...(form.value.view_urls || {}), [dv.value]: url }
+        viewPreviews.value = { ...viewPreviews.value, [dv.value]: url }
+      }
     }
     viewError.value = ''
     alert('七视图上传成功！')
-    // 清空临时文件缓存
+    // 清空临时文件句柄，但保留预览，避免误以为丢失
     viewFiles.value = {}
-    viewPreviews.value = {}
   } catch (e) {
     viewError.value = '上传失败: ' + e.message
   } finally {
@@ -421,9 +423,28 @@ function generateAIViews() {
   viewError.value = ''
 }
 
+// 主图/预览图加载失败时的占位，避免浏览器裂图图标（如 DB 引用了已丢失的旧文件）
+const NO_IMG = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" fill="%23e5e7eb"/><text x="60" y="64" font-size="13" text-anchor="middle" fill="%239ca3af">无图</text></svg>';
+function onImgError(e) {
+  e.target.onerror = null;
+  e.target.src = NO_IMG;
+}
+
+// Phase 30-Cover: 封面自动取七视图正视图（方向 0）；列表接口 view_urls 可能是 JSON 字符串，需兼容解析
+function coverUrl(u) {
+  let vu = u?.view_urls
+  if (typeof vu === 'string') { try { vu = JSON.parse(vu) } catch { vu = {} } }
+  if (vu && (vu['0'] || vu[0])) return vu['0'] || vu[0]
+  return null
+}
+// 编辑态封面：优先用本地预览（上传后），回退到已保存的 view_urls 正视图
+const frontViewUrl = computed(() =>
+  viewPreviews.value[0] || form.value.view_urls?.['0'] || form.value.view_urls?.[0] || null
+)
+
 function createEmptyForm() {
   return {
-    name:'', codename:'', faction:'earth', main_image_url:null, main_type:'机体',
+    name:'', codename:'', faction:'earth', main_type:'机体',
     main_格斗:0, main_射击:0, main_结构:0, main_机动:0, main_skills:[],
     has_royroy:false, royroy_image_url:null,
     royroy_格斗:0, royroy_射击:0, royroy_结构:0, royroy_机动:0, royroy_skills:[],
@@ -432,7 +453,8 @@ function createEmptyForm() {
     right_type:'none', right_image_url:null,
     right_格斗:0, right_射击:0, right_结构:0, right_机动:0, right_skills:[],
     extra_type:'none', extra_image_url:null,
-    extra_格斗:0, extra_射击:0, extra_结构:0, extra_机动:0, extra_skills:[]
+    extra_格斗:0, extra_射击:0, extra_结构:0, extra_机动:0, extra_skills:[],
+    view_urls: {}
   }
 }
 
@@ -541,7 +563,49 @@ async function editUnit(unit) {
   try {
     const {data}=await hangarAPI.getUnit(unit.id)
     // Phase 30: 深拷贝避免引用污染，确保 skills/attributes 等嵌套对象独立
-    form.value = JSON.parse(JSON.stringify({...createEmptyForm(), ...data}))
+    const base = JSON.parse(JSON.stringify({...createEmptyForm(), ...data}))
+
+    // Phase 30-Fix: attributes.parts → 扁平装备字段映射
+    const parts = data?.attributes?.parts
+    if (parts) {
+      const partMap = {
+        '主机体': { type: 'main_type', 格斗: 'main_格斗', 射击: 'main_射击', 结构: 'main_结构', 机动: 'main_机动' },
+        '跟随': { type: 'royroy', 格斗: 'royroy_格斗', 射击: 'royroy_射击', 结构: 'royroy_结构', 机动: 'royroy_机动', hasPart: 'has_royroy' },
+        '左手': { type: 'left_type', 格斗: 'left_格斗', 射击: 'left_射击', 结构: 'left_结构', 机动: 'left_机动' },
+        '右手': { type: 'right_type', 格斗: 'right_格斗', 射击: 'right_射击', 结构: 'right_结构', 机动: 'right_机动' },
+        '其它': { type: 'extra_type', 格斗: 'extra_格斗', 射击: 'extra_射击', 结构: 'extra_结构', 机动: 'extra_机动' },
+      }
+      for (const [cnName, mapping] of Object.entries(partMap)) {
+        const p = parts[cnName]
+        if (!p) continue
+        if (mapping.type === 'royroy') base.has_royroy = true
+        else if (mapping.type && p.type) base[mapping.type] = p.type
+        base[mapping.格斗] = p.格斗 ?? 0
+        base[mapping.射击] = p.射击 ?? 0
+        base[mapping.结构] = p.结构 ?? 0
+        base[mapping.机动] = p.机动 ?? 0
+      }
+    }
+
+    // Phase 30-Fix: skills_by_owner → 技能槽映射
+    const sbo = data?.attributes?.skills_by_owner
+    if (sbo) {
+      const ownerSkillMap = { '主机体': 'main_skills', '跟随': 'royroy_skills', '左手': 'left_skills', '右手': 'right_skills', '其它': 'extra_skills' }
+      for (const [owner, slotKey] of Object.entries(ownerSkillMap)) {
+        if (Array.isArray(sbo[owner])) base[slotKey] = sbo[owner]
+      }
+    }
+
+    form.value = base
+    // Phase 30-Fix: 从 DB 回填七视图 URL，刷新后可重新显示
+    const vu = data.view_urls || {}
+    form.value.view_urls = vu
+    const restoredPreviews = { ...viewPreviews.value }
+    for (const dv of directionViews) {
+      const u = vu[String(dv.value)] || vu[dv.value]
+      if (u) restoredPreviews[dv.value] = u
+    }
+    viewPreviews.value = restoredPreviews
     editingUnit.value = JSON.parse(JSON.stringify(unit))
     errors.value=[]
   } catch(e){ console.error(e) }
@@ -552,9 +616,12 @@ function cancelEdit() { editingUnit.value=null; errors.value=[]; highlightFields
 async function saveUnit() {
   errors.value=[]; highlightFields.value={}
   try {
+    // Phase 30-Cover: 剥离废弃主图字段，封面改由七视图正视图派生
+    const payload = { ...form.value }
+    delete payload.main_image_url
     const isUpdate=!!editingUnit.value?.id
-    if(isUpdate) await hangarAPI.updateUnit(editingUnit.value.id,form.value)
-    else await hangarAPI.createUnit(form.value)
+    if(isUpdate) await hangarAPI.updateUnit(editingUnit.value.id,payload)
+    else await hangarAPI.createUnit(payload)
     await loadUnits(); editingUnit.value=null
     alert('保存成功')
   } catch(e) {
@@ -571,17 +638,6 @@ async function saveUnit() {
 
 async function deleteUnit(id) { if(!confirm('确定要删除吗？')) return; try { await hangarAPI.deleteUnit(id); await loadUnits() } catch(e){ console.error(e) } }
 
-async function uploadImage(e) {
-  const file=e.target.files[0]; if(!file) return
-  imageFileName.value = file.name
-  // Phase 30-Fix: 字段名 'file' 与后端 multer.single('file') 对齐
-  const fd=new FormData(); fd.append('file',file)
-  try {
-    const { data } = await hangarAPI.uploadUnitImage(fd)
-    form.value.main_image_url = data.url
-  } catch(e){ console.error(e) }
-}
-
 function importExcel() { showImportDialog.value=true; previewData.value=null; previewWarnings.value=[]; importFileName.value=''; if(fileInputRef.value) fileInputRef.value.value='' }
 
 async function handleFileSelect(e) {
@@ -591,24 +647,51 @@ async function handleFileSelect(e) {
   const fd=new FormData(); fd.append('file',file)
   try {
     const { data } = await hangarAPI.parseExcel(fd)
-    previewData.value=data.preview; previewWarnings.value=data.warnings||[]; importing.value=false
-  } catch(e){ importing.value=false; alert('解析失败: '+(e.response?.data?.error||e.message)) }
+    previewData.value=data.preview; previewNormalized.value=data.previewNormalized; importPayloadStr.value=data._importPayload||''; previewWarnings.value=data.warnings||[]; importing.value=false
+  } catch(e){
+    importing.value=false
+    const d=e.response?.data
+    let msg='解析失败: '+(d?.error||e.message)
+    if(d?.errors?.length) msg+='\n\n缺失项:\n'+d.errors.map(x=>`• ${x.field}: ${x.message}`).join('\n')
+    if(d?.warnings?.length) msg+='\n\n警告:\n'+d.warnings.map(x=>`• ${x.message}`).join('\n')
+    alert(msg)
+  }
 }
 
-function closePreview() { previewData.value=null; previewWarnings.value=[]; showImportDialog.value=false }
+function closePreview() { previewData.value=null; previewNormalized.value=null; importPayloadStr.value=''; previewWarnings.value=[]; showImportDialog.value=false }
 
 async function confirmImport() {
-  if(!previewData.value) return; confirming.value=true
+  // Phase 30-RobustData: 优先用 _importPayload 字符串（可靠），其次 previewNormalized 对象
+  let payload = null
+  if(importPayloadStr.value) {
+    try { payload = JSON.parse(importPayloadStr.value) } catch(_) { payload = null }
+  }
+  if(!payload && previewNormalized.value?.normalized) {
+    payload = previewNormalized.value
+  }
+  if(!payload) return
+  confirming.value=true
   try {
-    const { data } = await hangarAPI.createFromJson(previewData.value)
+    const { data } = await hangarAPI.createFromJson(payload)
     showImportDialog.value=false
     const importedName=previewData.value?.name||'新棋子'
-    previewData.value=null; previewWarnings.value=[]; await loadUnits()
+    previewData.value=null; previewNormalized.value=null; previewWarnings.value=[]; await loadUnits()
+    // Phase 30-Fix: 导入后立即进入该单位编辑态，使后续保存走 UPDATE 而非重复 INSERT
+    if (data?.unit?.id) {
+      try { await editUnit({ id: data.unit.id }) } catch (_) {}
+    }
     const toast=document.createElement('div')
     toast.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ffb000;color:#0a1628;padding:12px 24px;z-index:9999;font-size:14px;font-weight:700;font-family:monospace;'
     toast.textContent=`已导入: ${importedName}`; document.body.appendChild(toast)
     setTimeout(()=>toast.remove(),3000); confirming.value=false
-  } catch(e){ confirming.value=false; alert('导入失败: '+(e.response?.data?.error||e.message)) }
+  } catch(e){
+    confirming.value=false
+    const d=e.response?.data
+    let msg='导入失败: '+(d?.error||e.message)
+    if(d?.errors?.length) msg+='\n\n错误:\n'+d.errors.map(x=>`• ${x.field}: ${x.message}`).join('\n')
+    if(d?.warnings?.length) msg+='\n\n警告:\n'+d.warnings.map(x=>`• ${x.message}`).join('\n')
+    alert(msg)
+  }
 }
 
 onMounted(()=>{ loadUnits(); loadFactions() })

@@ -16,11 +16,19 @@ import unitRoutes from './routes/units.js';
 import adminRoutes from './routes/admin.js';
 import combatRoutes from './routes/combat.js';
 import mapRoutes from './routes/maps.js';
-import glossaryRoutes from './routes/glossary.js';
+import glossaryRoutes from './routes/glossary.js'
+import terrainRoutes from './routes/terrain.js';
 import { authenticate } from './middleware/auth.js';
 
 export function createApp(): express.Application {
   const app = express();
+
+  // ========================================
+  // 反向代理信任链（关键：还原真实客户端 IP）
+  // 前端 nginx 反代后，需信任一层代理才能从 X-Forwarded-For 取真实 IP，
+  // 否则 req.ip 恒为 nginx 容器 IP → express-rate-limit 全站共用一个限流桶。
+  // ========================================
+  app.set('trust proxy', 1);
 
   // ========================================
   // 安全中间件
@@ -37,12 +45,13 @@ export function createApp(): express.Application {
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
 
-  // 全局限流
+  // 全局限流（健康检查豁免，避免探针占用配额）
   app.use(rateLimit({
     windowMs: config.rateLimit.windowMs,
     max: config.rateLimit.max,
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => req.path === '/health',
     message: { error: 'RATE_LIMIT', message: '请求过于频繁，请稍后重试' },
   }));
 
@@ -93,6 +102,9 @@ export function createApp(): express.Application {
 
   // Phase 29-Debug: 词条库独立路由（脱离 battleId 沙盒，GlossaryView 自由读写）
   app.use('/api/combat-glossary', glossaryRoutes);
+
+  // 需求④ 地图素材上传（全局地形素材库）
+  app.use('/api/terrain', terrainRoutes);
 
   // Phase 29-P1: 试玩战役端点（游客可访问，无需 Token）
   app.get('/api/campaign/trial', (_req, res) => {

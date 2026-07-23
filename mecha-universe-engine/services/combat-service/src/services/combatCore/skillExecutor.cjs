@@ -964,9 +964,13 @@ class SkillExecutor {
 
     _hexDistance(a, b) {
         if (!a || !b) return 999;
-        const dq = Math.abs((a.q || 0) - (b.q || 0));
-        const dr = Math.abs((a.r || 0) - (b.r || 0));
-        const ds = Math.abs(((a.q || 0) - (b.q || 0)) + ((a.r || 0) - (b.r || 0)));
+        // ★ 阶段 B：Even-R offset 语义统一（前端坐标即 offset，禁止 axial 公式误算）
+        const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+        const ax = offToAx(a.q || 0, a.r || 0);
+        const bx = offToAx(b.q || 0, b.r || 0);
+        const dq = Math.abs(ax.q - bx.q);
+        const dr = Math.abs(ax.r - bx.r);
+        const ds = Math.abs(ax.q + ax.r - bx.q - bx.r);
         return Math.max(dq, dr, ds);
     }
 

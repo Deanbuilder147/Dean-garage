@@ -20,6 +20,11 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // FormData 请求：删除实例默认的 application/json，让浏览器自动补带 boundary 的 multipart/form-data
+    // 手动写 'multipart/form-data'（无 boundary）或保留 json 都会让 multer 收不到文件
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
     return config;
   },
   (error) => Promise.reject(error)
@@ -42,10 +47,30 @@ const PUBLIC_PATH_PREFIXES = [
   '/leaderboard',          // P1: 天梯排行榜（公开）
 ];
 
-// 响应拦截器：白名单柔性放行，严禁无差别踢回登录
+// 响应拦截器：429 退避重试 + 白名单柔性放行，严禁无差别踢回登录
+const RATE_LIMIT_MAX_RETRY = 2;
+
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    // 429 限流：指数退避自动重试，缓解偶发触顶
+    const cfg = error.config;
+    if (error.response?.status === 429 && cfg) {
+      cfg.__retryCount = cfg.__retryCount || 0;
+      if (cfg.__retryCount < RATE_LIMIT_MAX_RETRY) {
+        cfg.__retryCount += 1;
+        // 优先遵循后端 Retry-After（秒），否则指数退避 1s / 2s
+        const retryAfter = parseInt(error.response.headers?.['retry-after'] || '0', 10);
+        const delay = retryAfter > 0
+          ? retryAfter * 1000
+          : Math.pow(2, cfg.__retryCount - 1) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return apiClient(cfg);
+      }
+      // 重试耗尽：附加友好提示，供调用方展示
+      error.friendlyMessage = '请求过于频繁，服务器繁忙，请稍候片刻再试';
+    }
+
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
       const isPublic = PUBLIC_PATH_PREFIXES.some(p => url.startsWith(p));
@@ -80,9 +105,10 @@ export const hangarAPI = {
   // Phase 28: 阵营管理 → Phase 29-Debug: 路径纠偏 /units/factions
   getFactions: () => apiClient.get('/units/factions'),
   // Phase 29: 编辑器上传/解析归一化（FormData / JSON 均走拦截器管线）
+  // Phase 30-Fix: FormData 请求必须覆盖全局 application/json 头，否则 multer 收不到文件
+  // 注：FormData 请求不要手动设 Content-Type，否则缺少 boundary 导致 multer 收不到文件
   uploadUnitView: (data) => apiClient.post('/units/upload-view', data),
   uploadFactionLogo: (data) => apiClient.post('/units/factions/upload', data),
-  uploadUnitImage: (data) => apiClient.post('/units/upload-image', data),
   parseExcel: (data) => apiClient.post('/units/parse-excel', data),
   createFromJson: (data) => apiClient.post('/units/create-from-json', data),
 };
@@ -148,6 +174,17 @@ export const glossaryAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
   importApply: (data) => apiClient.post('/combat-glossary/import-apply', data),
+};
+
+// 需求④ 地图素材上传（全局地形素材库）
+export const terrainAPI = {
+  uploadMaterial: (terrainId, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return apiClient
+      .post(`/terrain/upload?terrain=${encodeURIComponent(terrainId)}`, fd)
+      .then((r) => r.data)
+  },
 };
 
 // Phase 29-I: 鹦鹉螺号置换 — 房间写操作主权已移交 3006 onlineBattleAPI

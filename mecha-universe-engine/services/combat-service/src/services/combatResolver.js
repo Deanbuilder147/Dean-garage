@@ -260,6 +260,13 @@ class CombatResolver {
         // Step 5: 配置驱动权威伤害种类——优先词条 damage_kind，缺失回退 weaponType
         const damageKind = getDamageType(skillUf, attacker.weaponType);
 
+        // 阶段二：上下文有效机动（武器机动仅在使用该武器技能时生效；防具机动仅在携带方为被攻击方时生效）
+        const _weaponMob = (attacker.equipState || []).filter(e => e.type === '武器').reduce((s, e) => s + (e.mobility || 0), 0);
+        const _usesWeapon = attackType === 'melee' || attackType === 'ranged';
+        const _attEffMob = (attacker.mobility || 0) + (_usesWeapon ? _weaponMob : 0);
+        const _armorMob = (defender.equipState || []).filter(e => e.type === '防具').reduce((s, e) => s + (e.mobility || 0), 0);
+        const _defEffMob = (defender.mobility || 0) + _armorMob;
+
         // 伤害计算 (Phase 10: 传入 terrainDefs 和新字段)
         const damageResult = DamagePipe.calculate({
             attacker: {
@@ -276,8 +283,9 @@ class CombatResolver {
                 equipment: attacker.equipment || {}
             },
             defender: {
-                defense: defender.defense || 5,
+                defense: defender.defense ?? 0,
                 armorType: defender.armorType || 'normal',
+                armor: defender.armor || 0,
                 shield: defender.shield || 0,
                 resistance: defender.resistance || null,
                 buffs: defender.buffs || [],
@@ -293,6 +301,9 @@ class CombatResolver {
             terrainDefs,
             // Step 5: 显式注入归一化伤害种类（覆盖 weaponType）
             damage_kind: damageKind,
+            // 阶段二：注入上下文有效机动（供 DamagePipe 机动差额计算，上限 +5）
+            attacker_effective_mobility: _attEffMob,
+            defender_effective_mobility: _defEffMob,
             // Phase 10: 万能语法字段注入管道
             is_manual_roll: skillUf.is_manual_roll || false,
             dice_type: skillUf.dice_type || '1d6',

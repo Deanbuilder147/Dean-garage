@@ -9,7 +9,8 @@ const SERVICE_HOSTS = {
   map: process.env.MAP_SERVICE_HOST || 'localhost',
   combat: process.env.COMBAT_SERVICE_HOST || 'localhost',
   comm: process.env.COMM_SERVICE_HOST || 'localhost',
-  online: process.env.ONLINE_SERVICE_HOST || 'mecha-online-battle',
+  // 默认 localhost 以便本地 dev 直接连本机网关(3006)；线上前端走 nginx 反代，不依赖此项
+  online: process.env.ONLINE_SERVICE_HOST || 'localhost',
 };
 
 export default defineConfig({
@@ -62,7 +63,9 @@ export default defineConfig({
       '/api/matchmaking': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
       '/api/rooms': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
       '/api/leaderboard': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
-      '/api/battles': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
+      '/api/battles': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      // Phase 29-HangarRestoration: 单位/棋子管理 (大一统网关, Port 3006)
+      '/api/units': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
     }
   },
   preview: {

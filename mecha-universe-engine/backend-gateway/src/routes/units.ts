@@ -47,8 +47,15 @@ const upload = multer({
   },
 });
 
-// 所有单位路由需认证（图片静态服务除外）
-router.use('/api/units', authenticate, requireAuth);
+// 所有单位路由需认证；但图片/Logo 静态服务公开（浏览器 <img> 不携带 token，否则 401 裂图）
+// 注意：router.use('/api/units', mw) 会把前缀从 req.path 剥离，故中间件内 req.path 形如 /views/...
+const PUBLIC_IMAGE_RE = /^\/?(api\/units\/)?(images|views|factions\/logo)\//;
+router.use('/api/units', (req, res, next) => {
+  if (PUBLIC_IMAGE_RE.test(req.path)) {
+    return next(); // 静态资源公开访问
+  }
+  return authenticate(req, res, () => requireAuth(req, res, next));
+});
 
 // ========================================
 // Phase 29-DataSecurity: 权限卡口 — 审核状态机
@@ -76,10 +83,15 @@ function computeVisibility(userRole: string, requestedPublic: boolean): { is_pub
 // 获取当前用户的单位列表
 // ========================================
 router.get('/api/units', (req, res) => {
-  const units = all(
+  const rows = all(
     'SELECT * FROM units WHERE owner_id = ? ORDER BY updated_at DESC',
     [req.auth!.userId]
-  );
+  ) as any[];
+  // Phase 30-Fix: 映射 sprite_key → main_image_url，与前端字段名对齐
+  const units = rows.map(r => ({
+    ...r,
+    main_image_url: r.sprite_key || null,
+  }));
   res.json({ units });
 });
 
@@ -129,6 +141,7 @@ router.get('/api/units/:unitId', (req, res) => {
     totalPoints: unit.total_points ?? 0,
     sprite_key: unit.sprite_key,
     main_image_url: unit.sprite_key || null,
+    view_urls: unit.view_urls ? JSON.parse(unit.view_urls) : {},
     stats: JSON.parse(unit.stats || '{}'),
     skills: JSON.parse(unit.skills || '[]'),
     attributes: JSON.parse(unit.attributes || '{}'),
@@ -144,7 +157,9 @@ router.get('/api/units/:unitId', (req, res) => {
 // ========================================
 router.post('/api/units', (req, res) => {
   try {
-    const { name, faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, is_public = false } = req.body;
+    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key: sk, stats = {}, skills = [], attributes = {}, is_public = false, view_urls = {} } = req.body;
+    // Phase 30-Cover: 废弃单图 main_image_url，封面改由七视图正视图派生；sprite_key 不再从 main_image_url 映射
+    const sprite_key = sk || null;
 
     if (!name) {
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '单位名称为必填项' });
@@ -157,9 +172,9 @@ router.post('/api/units', (req, res) => {
 
     const id = uuidv4();
     run(
-      `INSERT INTO units (id, owner_id, name, faction, category, tier, sprite_key, stats, skills, is_public, review_status, attributes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, req.auth!.userId, name, faction, category, tier, sprite_key || null, JSON.stringify(stats), JSON.stringify(skills), finalIsPublic, review_status, JSON.stringify(attributes)]
+      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, sprite_key, view_urls, stats, skills, is_public, review_status, attributes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, req.auth!.userId, name, codename || null, faction, category, tier, sprite_key, JSON.stringify(view_urls ?? {}), JSON.stringify(stats), JSON.stringify(skills), finalIsPublic, review_status, JSON.stringify(attributes)]
     );
     persistChanges();
 
@@ -229,18 +244,23 @@ router.put('/api/units/:unitId', (req, res) => {
     return;
   }
 
-  const { name, faction, category, tier, sprite_key, stats, skills, attributes, is_public } = req.body;
+  const { name, codename, faction, category, tier, sprite_key: sk, stats, skills, attributes, is_public, view_urls } = req.body;
+  // Phase 30-Cover: 移除废弃 main_image_url 映射，仅保留七视图 view_urls
+  const sprite_key = sk ?? unit.sprite_key;
 
   // Phase 29-DataSecurity: 审核状态机卡口
   const userRole = req.auth!.role || 'user';
   const requestedPublic = is_public !== undefined ? is_public : (unit.is_public === 1);
   const { is_public: finalIsPublic, review_status } = computeVisibility(userRole, requestedPublic);
 
+  const finalCodename = codename !== undefined ? codename : unit.codename;
+  const finalViewUrls = (view_urls && typeof view_urls === 'object') ? view_urls : (unit.view_urls ? JSON.parse(unit.view_urls) : {});
+
   run(
-    `UPDATE units SET name = ?, faction = ?, category = ?, tier = ?, sprite_key = ?, stats = ?, skills = ?, is_public = ?, review_status = ?, attributes = ?, updated_at = datetime('now')
+    `UPDATE units SET name = ?, codename = ?, faction = ?, category = ?, tier = ?, sprite_key = ?, view_urls = ?, stats = ?, skills = ?, is_public = ?, review_status = ?, attributes = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name || unit.name, faction || unit.faction, category || unit.category, tier ?? unit.tier,
-     sprite_key ?? unit.sprite_key, JSON.stringify(stats ?? JSON.parse(unit.stats)),
+    [name || unit.name, finalCodename || null, faction || unit.faction, category || unit.category, tier ?? unit.tier,
+     sprite_key, JSON.stringify(finalViewUrls), JSON.stringify(stats ?? JSON.parse(unit.stats)),
      JSON.stringify(skills ?? JSON.parse(unit.skills || '[]')),
      finalIsPublic, review_status,
      JSON.stringify(attributes ?? JSON.parse(unit.attributes || '{}')), req.params.unitId]
@@ -287,13 +307,44 @@ router.post('/api/units/parse-excel', upload.single('file'), (req, res) => {
     // 3. Schema 归一化
     const { normalized, legacy } = normalizeParsedData(parsed);
 
-    // 4. 返回预览（前端确认后调 create-from-json）
+    // 4. 构建扁平预览 + 保留结构化数据用于 confirmImport
+    // 注意：前端模板用英文前缀（royroy/left/right/extra），须与这里一致
+    const partNameMap: Record<string, string> = { '跟随': 'royroy', '左手': 'left', '右手': 'right', '其它': 'extra' };
+    const partFields = ['格斗', '射击', '结构', '机动'] as const;
+
+    const partStatsFlat: Record<string, number> = {};
+    for (const [cnName, enPrefix] of Object.entries(partNameMap)) {
+      const u = legacy.units[cnName];
+      for (const f of partFields) {
+        partStatsFlat[`${enPrefix}_${f}`] = u?.[f] ?? 0;
+      }
+    }
+
+    const previewFlat = {
+      name: normalized.name,
+      codename: legacy.codename,
+      faction: normalized.faction,
+      totalPoints: legacy.totalPoints,
+      main_格斗: legacy.main_格斗,
+      main_射击: legacy.main_射击,
+      main_结构: legacy.main_结构,
+      main_机动: legacy.main_机动,
+      main_skills: legacy.skills.filter((s: any) => s.owner === '主机体'),
+      has_royroy: !!legacy.units['跟随'],
+      left_type: legacy.units['左手']?.type || 'none',
+      right_type: legacy.units['右手']?.type || 'none',
+      extra_type: legacy.units['其它']?.type || 'none',
+      ...partStatsFlat,
+    };
+
+    // Phase 30-RobustData: previewNormalized 可能在 JSON 往返中丢失嵌套结构，
+    // 额外提供 _importPayload 字符串确保结构化数据完整到达前端
+    const importPayload = JSON.stringify({ normalized, legacy });
+
     res.json({
-      preview: {
-        normalized,
-        legacy,
-        metadata: parsed.metadata,
-      },
+      preview: previewFlat,
+      previewNormalized: { normalized, legacy },
+      _importPayload: importPayload,
       warnings: validation.warnings,
     });
   } catch (err) {
@@ -313,14 +364,39 @@ router.post('/api/units/create-from-json', (req, res) => {
   try {
     const userId = req.auth!.userId;
     const userRole = req.auth!.role || 'user';
-    const { normalized } = req.body;
+
+    // Phase 30-Debug: 诊断 req.body 结构
+    const bodyKeys = Object.keys(req.body || {});
+    const normType = req.body?.normalized ? typeof req.body.normalized : 'missing';
+    const normName = req.body?.normalized?.name ?? '(none)';
+    const hasDirectName = !!req.body?.name;
+    const hasImportPayload = !!req.body?._importPayload;
+    console.log(`[Units/create-from-json] body keys: [${bodyKeys.join(', ')}], normalized type: ${normType}, normalized.name: ${normName}, hasDirectName: ${hasDirectName}, hasImportPayload: ${hasImportPayload}`);
+
+    // Phase 30-RobustData: 优先用结构化 payload 字符串，其次嵌套对象，最后扁平 fallback
+    let normalized: any;
+    if (req.body?._importPayload && typeof req.body._importPayload === 'string') {
+      // 前端传回了 JSON 字符串格式的结构化数据
+      const parsed = JSON.parse(req.body._importPayload);
+      normalized = parsed.normalized;
+      console.log(`[Units/create-from-json] 使用 _importPayload 字符串，normalized.name=${normalized?.name}`);
+    } else if (req.body?.normalized && typeof req.body.normalized === 'object') {
+      normalized = req.body.normalized;
+    } else if (req.body?.name && typeof req.body === 'object') {
+      normalized = req.body;
+    }
+
+    // Phase 30-DeepDebug: 输出 normalized 核心字段的实际内容
+    console.log(`[Units/create-from-json] normalized.stats=${JSON.stringify(normalized?.stats)?.slice(0,200)}`);
+    console.log(`[Units/create-from-json] normalized.skills#=${normalized?.skills?.length}`);
+    console.log(`[Units/create-from-json] normalized.attributes=${JSON.stringify(normalized?.attributes)?.slice(0,200)}`);
 
     if (!normalized || !normalized.name) {
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '缺少单位数据（normalized.name 为必填项）' });
       return;
     }
 
-    const { name, faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0 } = normalized;
+    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0, view_urls = {} } = normalized;
 
     // Phase 29-DataSecurity: 审核状态机卡口
     const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
@@ -336,9 +412,9 @@ router.post('/api/units/create-from-json', (req, res) => {
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
     run(
-      `INSERT INTO units (id, owner_id, name, faction, category, tier, total_points, sprite_key, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?)`,
-      [id, userId, name, faction, category, tier, totalPoints, sprite_key || null, statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, now, now]
+      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, total_points, sprite_key, view_urls, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?)`,
+      [id, userId, name, codename || null, faction, category, tier, totalPoints, sprite_key || null, JSON.stringify(view_urls ?? {}), statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, now, now]
     );
     persistChanges();
 
@@ -380,7 +456,8 @@ router.delete('/api/units/:unitId', (req, res) => {
 
 // ========================================
 // Phase 30-ImageUpload: 图片上传基建
-// POST /api/units/upload-image — 单位机体图片
+// 所有图片存储在 /data/images/ (持久化 Docker volume gateway_data)
+// POST /api/units/upload-view  — 七视图图片 (封面自动取正视图，废弃单图上传)
 // POST /api/units/factions/upload — 阵营 Logo 图片
 // ========================================
 const imageUpload = multer({
@@ -396,33 +473,44 @@ const imageUpload = multer({
   },
 });
 
-router.post('/api/units/upload-image', imageUpload.single('file'), (req, res) => {
+// Phase 30-Fix: 图片持久化目录统一为 /data/images/ (Docker volume)
+const IMG_DIR = '/data/images';
+
+// Phase 30-Cover: 废弃单图上传 (POST /api/units/upload-image) 及其静态服务 (GET /api/units/images/:filename) 已移除。
+// 封面图统一由七视图 (POST /api/units/upload-view) 的正视图派生，见下方七视图上传端点。
+
+// ========================================
+// Phase 30-Fix: 七视图上传端点
+// POST /api/units/upload-view
+// ========================================
+router.post('/api/units/upload-view', imageUpload.single('image'), (req, res) => {
   try {
     if (!req.file) {
-      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请上传图片文件' });
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请上传七视图图片' });
       return;
     }
-    const ext = req.file.originalname.split('.').pop() || 'png';
-    const filename = `unit-${uuidv4().slice(0, 8)}.${ext}`;
-    const dir = path.resolve(__dirname, '../../data/images');
+    const unitCode = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
+    const direction = req.body.direction || '0';
+    const filename = `${unitCode}_${direction}_idle.png`;
+    const dir = path.join(IMG_DIR, 'views');
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(path.join(dir, filename), req.file.buffer);
-    const url = `/api/units/images/${filename}`;
-    console.log(`[Units/Image] 上传成功: ${req.file.originalname} -> ${filename}`);
+    const url = `/api/units/views/${filename}`;
+    console.log(`[Units/View] 七视图上传: ${unitCode}_${direction} -> ${filename}`);
     res.json({ success: true, url, filename });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `图片上传失败: ${msg}` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `七视图上传失败: ${msg}` });
   }
 });
 
-// Phase 30: 静态图片服务 (匹配 upload-image 返回的 URL)
-router.get('/api/units/images/:filename', (req, res) => {
-  const filePath = path.resolve(__dirname, '../../data/images', req.params.filename);
+// 七视图静态服务
+router.get('/api/units/views/:filename', (req, res) => {
+  const filePath = path.join(IMG_DIR, 'views', req.params.filename);
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {
-    res.status(404).json({ error: 'IMAGE_NOT_FOUND' });
+    res.status(404).json({ error: 'VIEW_NOT_FOUND' });
   }
 });
 
@@ -434,7 +522,7 @@ router.post('/api/units/factions/upload', imageUpload.single('file'), (req, res)
     }
     const ext = req.file.originalname.split('.').pop() || 'png';
     const filename = `faction-${uuidv4().slice(0, 8)}.${ext}`;
-    const dir = path.resolve(__dirname, '../../data/images/factions');
+    const dir = path.join(IMG_DIR, 'factions');
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(path.join(dir, filename), req.file.buffer);
     const url = `/api/units/factions/logo/${filename}`;
@@ -448,7 +536,7 @@ router.post('/api/units/factions/upload', imageUpload.single('file'), (req, res)
 
 // Phase 30: 阵营 Logo 静态服务
 router.get('/api/units/factions/logo/:filename', (req, res) => {
-  const filePath = path.resolve(__dirname, '../../data/images/factions', req.params.filename);
+  const filePath = path.join(IMG_DIR, 'factions', req.params.filename);
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {

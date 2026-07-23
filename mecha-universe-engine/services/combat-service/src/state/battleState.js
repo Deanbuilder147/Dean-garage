@@ -5,16 +5,27 @@
 
 const battles = new Map();
 
-// ===== Terrain cost map (must match frontend TERRAIN_MAP) =====
+// ===== Terrain cost map — 与网关 backend-gateway/src/routes/terrainCosts.ts 及
+// 前端 hexUtils.js 的 UNIVERSAL_TERRAIN_MAP.cost 三方对齐（阶段 B·审计修复）=====
+// void=999 不可通行；wall=99 不可通行；spawn_*=0 不消耗；特殊地形更高代价。
 const TERRAIN_COST_MAP = {
-  space: 1, moon: 1, lunar: 1, empty: 1, base: 1, mothership: 1,
+  space: 1, moon: 1, lunar: 1, void: 999, empty: 1, base: 1, mothership: 1,
   repair_station: 1, spawn_earth: 0, spawn_maxion: 0, spawn: 0,
   desert: 1.5, forest: 2, water: 2.5, mountain: 3, fortress: 5,
-  wall: 99
+  wall: 99,
+  plain: 1, ruins: 2, crystal: 2, rubble: 2, city_building: 1,
 };
 
 function getTerrainCost(terrainId) {
   return TERRAIN_COST_MAP[terrainId] || 1;
+}
+
+// ★ 阶段 B：Even-R offset 邻居方向表（与前端 hexUtils.getHexNeighbors 一致，含奇偶行分支）
+function evenROffsetDirs(q, r) {
+  if (r % 2 === 0) {
+    return [[1, 0], [1, -1], [0, -1], [-1, 0], [0, 1], [1, 1]];
+  }
+  return [[1, 0], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1]];
 }
 
 /**
@@ -40,7 +51,6 @@ function canMoveTo(state, unit, target_q, target_r, movementRange) {
   // Target must not be occupied (unless it's the unit's own position)
   if (targetKey !== startKey && unitMap[targetKey]) return false;
 
-  const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
   const costMap = {};
   costMap[startKey] = 0;
   const queue = [{ q: unit.q, r: unit.r, cost: 0 }];
@@ -49,13 +59,13 @@ function canMoveTo(state, unit, target_q, target_r, movementRange) {
     queue.sort((a, b) => a.cost - b.cost);
     const cur = queue.shift();
 
+    const dirs = evenROffsetDirs(cur.q, cur.r);
     for (const [dq, dr] of dirs) {
       const nq = cur.q + dq;
       const nr = cur.r + dr;
       const nkey = `${nq},${nr}`;
 
       // Check bounds
-      if (nq < 0 || nq >= (state.width || 15) || nr < 0 || nr >= (state.height || 10)) continue;
 
       // Get terrain cost
       const cell = cellMap[nkey];
@@ -80,12 +90,77 @@ function canMoveTo(state, unit, target_q, target_r, movementRange) {
 }
 
 /**
+ * BFS/Dijkstra 回溯完整路径（含起点与终点）。返回坐标数组或 null。
+ */
+function findPath(state, unit, target_q, target_r, movementRange) {
+  const cells = state.cells || [];
+  const cellMap = {};
+  cells.forEach(c => { cellMap[`${c.q},${c.r}`] = { terrain: c.terrain || 'moon' }; });
+
+  const units = state.units || [];
+  const unitMap = {};
+  units.forEach(u => {
+    if (u.q !== undefined && u.r !== undefined) unitMap[`${u.q},${u.r}`] = true;
+  });
+
+  const startKey = `${unit.q},${unit.r}`;
+  const targetKey = `${target_q},${target_r}`;
+  if (unitMap[startKey]) delete unitMap[startKey];
+  if (targetKey !== startKey && unitMap[targetKey]) return null;
+
+  const costMap = { [startKey]: 0 };
+  const prev = { [startKey]: null };
+  const queue = [{ q: unit.q, r: unit.r, cost: 0 }];
+
+  while (queue.length > 0) {
+    queue.sort((a, b) => a.cost - b.cost);
+    const cur = queue.shift();
+
+    const dirs = evenROffsetDirs(cur.q, cur.r);
+    for (const [dq, dr] of dirs) {
+      const nq = cur.q + dq;
+      const nr = cur.r + dr;
+      const nkey = `${nq},${nr}`;
+
+      const cell = cellMap[nkey];
+      if (!cell) continue;
+      const terrainCost = getTerrainCost(cell.terrain);
+      if (terrainCost >= 99) continue;
+      if (unitMap[nkey] && nkey !== startKey) continue;
+
+      const newCost = cur.cost + terrainCost;
+      if (newCost > movementRange) continue;
+
+      if (costMap[nkey] === undefined || newCost < costMap[nkey]) {
+        costMap[nkey] = newCost;
+        prev[nkey] = `${cur.q},${cur.r}`;
+        queue.push({ q: nq, r: nr, cost: newCost });
+      }
+    }
+  }
+
+  if (costMap[targetKey] === undefined) return null;
+  const path = [];
+  let k = targetKey;
+  while (k) {
+    const [q, r] = k.split(',').map(Number);
+    path.unshift({ q, r });
+    k = prev[k];
+  }
+  return path;
+}
+
+/**
  * 六边形距离计算
  */
 function hexDistance(q1, r1, q2, r2) {
-  const dq = Math.abs(q1 - q2);
-  const dr = Math.abs(r1 - r2);
-  const ds = Math.abs((q1 - q2) + (r1 - r2));
+  // ★ 阶段 B：Even-R offset 语义统一（offset→axial 后取 cube 距离）
+  const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+  const a = offToAx(q1, r1);
+  const b = offToAx(q2, r2);
+  const dq = Math.abs(a.q - b.q);
+  const dr = Math.abs(a.r - b.r);
+  const ds = Math.abs(a.q + a.r - b.q - b.r);
   return Math.max(dq, dr, ds);
 }
 
@@ -98,8 +173,8 @@ const BattleState = {
     const battle = {
       id,
       name: config.name || 'Untitled Battle',
-      width: config.width || 15,
-      height: config.height || 10,
+      width: config.width || 100,
+      height: config.height || 100,
       fogOfWar: config.fogOfWar || false,
       cells: config.cells || [],
       units: [],
@@ -222,18 +297,16 @@ const BattleState = {
     if (unit.hp <= 0) throw new Error('单位已阵亡，无法移动');
     if (unit.has_moved) throw new Error('本回合已移动过');
 
-    // 计算移动力
-    const mobility = unit.mobility || 3;
-    const movementRange = Math.floor(mobility / 2) || 1;
+    // 阶段一+二：移动范围 = 机体+载具(耐久>0)+背包(耐久>0)（移动力直接等于有效机动总和）
+    // ★ 阶段 B·2：统一移动范围公式（与网关一致），并修复 ?? 不捕获 0 的 bug
+    const rawMob = (unit.moveRange > 0 ? unit.moveRange : (unit.mobility > 0 ? unit.mobility : 3));
+    const movementRange = Math.max(1, Math.round(rawMob));
 
-    // BFS 地形代价校验
-    if (!canMoveTo(state, unit, targetQ, targetR, movementRange)) {
+    // BFS 回溯完整路径（含地形代价）
+    const path = findPath(state, unit, targetQ, targetR, movementRange);
+    if (!path) {
       throw new Error('目标超出移动范围（考虑地形）');
     }
-
-    // 检查目标位置是否被占用
-    const occupied = state.units.find(u => u.q === targetQ && u.r === targetR && u.id !== unit.id);
-    if (occupied) throw new Error(`位置 (${targetQ},${targetR}) 已被 ${occupied.name} 占用`);
 
     const fromQ = unit.q;
     const fromR = unit.r;
@@ -242,7 +315,7 @@ const BattleState = {
     unit.r = targetR;
     unit.has_moved = true;
 
-    // Phase 28-D: 使用 atan2 角度量化法计算朝向 (1-6)
+    // 朝向在客户端逐段计算（后端仅保留最终方向备用）
     if (fromQ !== targetQ || fromR !== targetR) {
       const dx = targetQ - fromQ;
       const dy = targetR - fromR;
@@ -263,6 +336,7 @@ const BattleState = {
       to: { q: targetQ, r: targetR },
       distance: dist,
       direction: unit.direction,
+      path, // 供前端逐段行走 + 动态朝向
       unit
     };
   },
@@ -278,8 +352,9 @@ const BattleState = {
     if (!unit) throw new Error('找不到该单位');
     if (unit.hp <= 0) return [];
 
-    const mobility = unit.mobility || 3;
-    const movementRange = Math.floor(mobility / 2) || 1;
+    // ★ 阶段 B·2：统一移动范围公式（与网关一致）
+    const rawMob = (unit.moveRange > 0 ? unit.moveRange : (unit.mobility > 0 ? unit.mobility : 3));
+    const movementRange = Math.max(1, Math.round(rawMob));
 
     const cells = state.cells || [];
     const cellMap = {};
@@ -293,8 +368,7 @@ const BattleState = {
     const startKey = `${unit.q},${unit.r}`;
     if (unitMap[startKey]) delete unitMap[startKey];
 
-    const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
-    const costMap = {};
+      const costMap = {};
     costMap[startKey] = 0;
     const result = new Set();
     const queue = [{ q: unit.q, r: unit.r, cost: 0 }];
@@ -303,13 +377,13 @@ const BattleState = {
       queue.sort((a, b) => a.cost - b.cost);
       const cur = queue.shift();
 
-      for (const [dq, dr] of dirs) {
+      const dirs = evenROffsetDirs(cur.q, cur.r);
+    for (const [dq, dr] of dirs) {
         const nq = cur.q + dq;
         const nr = cur.r + dr;
         const nkey = `${nq},${nr}`;
 
-        if (nq < 0 || nq >= (state.width || 15) || nr < 0 || nr >= (state.height || 10)) continue;
-
+  
         const cell = cellMap[nkey];
         if (!cell) continue;
         const terrainCost = getTerrainCost(cell.terrain);

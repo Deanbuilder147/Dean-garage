@@ -10,7 +10,7 @@
           <span class="sep">|</span>
           <span class="meta-item">{{ battlefieldSize }}</span>
           <span class="sep">|</span>
-          <span class="meta-item">{{ battleState?.faction_turn || '准备中' }}</span>
+          <span class="meta-item">{{ currentFactionLabel }} | 第 {{ battleState?.round || 1 }} 轮</span>
         </div>
         <span class="header-id">#{{ route.params.id?.slice(0,8) }}</span>
       </div>
@@ -47,6 +47,8 @@
         :show-hover="true"
         :use-terrain-cache="false"
         :iso-config="isoConfig"
+        :extrude="extrudeEnabled"
+        :terrain-materials="terrainMaterials"
         @cell-clicked="onHexClick"
       />
       <!-- Legend (浮动壳, 锚定于 .dm-main position:relative) -->
@@ -55,6 +57,18 @@
           <i class="legend-swatch" :style="{ background: info.color }"></i>{{ info.name }}
         </span>
       </div>
+
+      <!-- 需求② 略缩图栏（右下角浮动层，pointer-events:auto 可交互） -->
+      <div class="floating-card battle-minimap" style="position:absolute; bottom:12px; right:12px; z-index:10;">
+        <BattleMinimap
+          :grid-data="gridData"
+          :cells="cells"
+          :units="allUnits"
+          :engine="hexGrid"
+          :size="180"
+        />
+      </div>
+
       <!-- Phase8: Manual Dice Roll Overlay -->
       <div v-if="diceRollState.active" class="dice-overlay" @click.self="cancelDiceRoll">
         <div class="dice-panel">
@@ -221,10 +235,10 @@
         <div class="ap-stats">
           <div class="ap-stat-row"><span>HP</span><span class="ap-stat-val">{{ selectedUnit.hp || '?' }}/100</span></div>
           <div class="ap-stat-row"><span>护盾</span><span class="ap-stat-val">{{ selectedUnit.shield || 0 }}</span></div>
-          <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedUnit.attack || '?' }}</span></div>
-          <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedUnit.defense || '?' }}</span></div>
+          <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedUnit.attack ?? '?' }}</span></div>
+          <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedUnit.defense ?? '?' }}</span></div>
           <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ selectedUnit.mobility || selectedUnit['机动'] || '?' }}</span></div>
-          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedUnit.range || 1 }}</span></div>
+          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedUnit.range ?? 1 }}</span></div>
           <div class="ap-stat-row" v-if="selectedUnit.q !== undefined"><span>位置</span><span class="ap-stat-val">{{ formatCoord(selectedUnit.q, selectedUnit.r) }}</span></div>
         </div>
 
@@ -352,6 +366,20 @@
               <span class="sk-attrinfo">ATK {{ selectedUnit.royroy.attack || '?' }} | DEF {{ selectedUnit.royroy.defense || '?' }} | HP {{ selectedUnit.royroy.hp || '?' }}</span>
             </div>
           </button>
+          <!-- RoyRoy 回收按钮（规则5：仅已部署且未损毁时可回收，不消耗行动点） -->
+          <button
+            v-if="selectedUnit.royroy && selectedUnit.royroy_deployed && selectedUnit.royroy_status !== 'destroyed'"
+            class="ap-skill-btn ap-royroy-retrieve"
+            @click="retrieveRoyroy"
+          >
+            <div class="sk-top">
+              <span class="sk-name">🤖 回收 RoyRoy</span>
+              <span class="skill-type-badge badge-retrieve">回收</span>
+            </div>
+            <div class="sk-meta">
+              <span class="sk-attrinfo">HP {{ selectedUnit.royroy.hp }}/{{ selectedUnit.royroy.maxHp }} | 冷却 {{ selectedUnit.royroy.cooldownRound || 0 }} 轮</span>
+            </div>
+          </button>
         </div>
 
         <!-- Action mode hint -->
@@ -409,12 +437,14 @@
 //  ✅ 所有入口已对账: 逆变换原子化、防爆清洗器激活、Canvas崩溃边界捕获
 // ================================================================
 import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, drawHexPath, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection } from '../utils/hexUtils.js'
+import { drawHexPath } from '../utils/hexDraw.js'
+import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection } from '../utils/hexUtils.js'
 import HexGridCanvasEngine from '../components/HexGridCanvasEngine.vue'
+import BattleMinimap from '../components/BattleMinimap.vue'
 import { unitSpriteResolver } from '../resolvers/unitSpriteResolver.js'
 import { useUserStore } from '../stores/user'
 import { useRoute, useRouter } from 'vue-router'
-import { combatAPI, hangarAPI, glossaryAPI } from '@/api/client'
+import { combatAPI, hangarAPI, glossaryAPI, mapAPI } from '@/api/client'
 
 // ================================================================
 //  Phase 13: 地形数据向后兼容转换层 (Sanitizer)
@@ -462,7 +492,7 @@ function sanitizeTerrainCell(cellValue) {
   // 已经是完整的结构化对象 (含 terrain_id 或 terrain_hp 字段)
   if (cellValue && typeof cellValue === 'object' && !Array.isArray(cellValue)) {
     if (cellValue.terrain_id || cellValue.terrain_hp !== undefined || cellValue.is_destructible !== undefined) {
-      const tid = cellValue.terrain_id || cellValue.type || cellValue.terrain || 'moon'
+      const tid = cellValue.terrain_id || cellValue.type || cellValue.terrain || 'void'
       const mapping = TERRAIN_SANITIZER_MAP[tid] || {}
       return {
         terrain_id: tid,
@@ -635,6 +665,17 @@ const user = computed(() => userStore.user)
 // === Phase 6: 词条库配置动态同步（前端UI全量动态绑定）===
 const glossaryConfig = ref(null)
 
+// 需求④ 从词条库地形定义提取素材 url → terrainId→url 映射，传入引擎做 CanvasPattern 平铺
+const terrainMaterials = computed(() => {
+  const gc = glossaryConfig.value
+  const terrains = gc?.glossary?.terrains || gc?.terrains || {}
+  const map = {}
+  for (const [k, v] of Object.entries(terrains)) {
+    if (v && v.material_url) map[k] = v.material_url
+  }
+  return map
+})
+
 async function loadGlossaryConfig() {
   try {
     const res = await glossaryAPI.getConfig()
@@ -787,6 +828,8 @@ function getActiveSkillTooltip(skill) {
 
 const battleState = ref(null)
 const hexGrid = ref(null)
+// 需求③ 战场挤出开关（默认开启，营造 2.5D 立体感）
+const extrudeEnabled = ref(true)
 const showCoords = ref(true)
 const terminalLogs = ref([])
 const phaseText = ref('加载中...')
@@ -798,11 +841,35 @@ const unitSpriteState = reactive(new Map())
 
 /** 获取单位的视觉状态 */
 function getUnitVisual(unit) {
-  const state = unitSpriteState.get(unit.id)
+  const state = unitSpriteState.get(unit.unitId || unit.id)
   return {
     direction: state?.direction ?? 0,
     actionState: state?.actionState ?? 'idle',
   }
+}
+
+// === Phase 30-Cover: 七视图图片缓存与解析（按方向移动方向选帧，不全则回退正视图） ===
+const _sevenViewCache = new Map()
+function resolveSevenView(viewUrls, direction = 0) {
+  if (!viewUrls) return null
+  let map = viewUrls
+  if (typeof map === 'string') { try { map = JSON.parse(map) } catch { return null } }
+  if (!map || typeof map !== 'object') return null
+  const url = map[String(direction)] || map[direction] || map['0'] || map[0]
+  if (!url) return null
+  let img = _sevenViewCache.get(url)
+  if (!img) {
+    img = new Image()
+    img.onload = () => { if (hexGrid.value) hexGrid.value.redraw() }
+    // 加固：单张七视图 404 时也要触发重绘，让棋盘落到圆标+字母降级，避免画面卡在空帧
+    img.onerror = () => {
+      console.warn(`[resolveSevenView] 加载失败，降级回退: ${url}`)
+      if (hexGrid.value) hexGrid.value.redraw()
+    }
+    img.src = url
+    _sevenViewCache.set(url, img)
+  }
+  return (img.complete && img.naturalWidth > 0) ? img : null
 }
 
 /** 设置单位的视觉状态 */
@@ -812,6 +879,39 @@ function setUnitVisual(unitId, direction, actionState) {
     direction: direction ?? existing.direction ?? 0,
     actionState: actionState ?? existing.actionState ?? 'idle',
   })
+}
+
+// === Phase 30-Cover: 战场状态规范化（前端从 position 取坐标；补全渲染所需字段） ===
+function safeParseJson(v) { try { return JSON.parse(v) } catch { return v } }
+function normalizeBattleState(state) {
+  if (!state || !state.units) return state
+  const units = Array.isArray(state.units) ? state.units : Object.values(state.units)
+  for (const u of units) {
+    if (!u) continue
+    // 坐标契约：position 是真理源，同步出顶层 q/r（棋盘其余读取 unit.q/unit.r 处无需改动）
+    if (u.position && u.q === undefined) { u.q = u.position.q; u.r = u.position.r }
+    // id 别名：战斗逻辑用 unitId，前端多处用 unit.id
+    if (u.unitId !== undefined && u.id === undefined) u.id = u.unitId
+    // HP 条
+    if (u.currentStats && u.hp === undefined) u.hp = u.currentStats.hp
+    // 四维/护盾/护甲：后端 createBattleUnit 把它们放在 currentStats 内，
+    // 而行动面板读的是顶层 attack/defense/range/shield/armor/maxHp。
+    // 仅当顶层缺失时从 currentStats 提上来（不覆盖已有顶层值）。
+    if (u.currentStats) {
+      const cs = u.currentStats
+      if (u.attack === undefined && cs.attack !== undefined) u.attack = cs.attack
+      if (u.defense === undefined && cs.defense !== undefined) u.defense = cs.defense
+      if (u.range === undefined && cs.range !== undefined) u.range = cs.range
+      if (u.shield === undefined && cs.shield !== undefined) u.shield = cs.shield
+      if (u.armor === undefined && cs.armor !== undefined) u.armor = cs.armor
+      if (u.maxHp === undefined && cs.maxHp !== undefined) u.maxHp = cs.maxHp
+    }
+    // 七视图兼容（view_urls 字符串 → viewUrls 对象）
+    if (u.view_urls !== undefined && u.viewUrls === undefined) {
+      u.viewUrls = typeof u.view_urls === 'string' ? safeParseJson(u.view_urls) : u.view_urls
+    }
+  }
+  return state
 }
 
 // === Phase 3: 平滑位移插值引擎 (Lerp) ===
@@ -883,8 +983,8 @@ function getUnitDrawFlat(unit) {
   if (lerpEntry && lerpEntry.currentX !== undefined && lerpEntry.currentY !== undefined) {
     return { flatX: lerpEntry.currentX, flatY: lerpEntry.currentY }
   }
-  // fallback: 静态六角中心坐标
-  const { flatX, flatY } = pointyTopCenter(unit.q, unit.r, HEX_RADIUS, spacingH, spacingV)
+  // fallback: 静态六角中心坐标（spacingH/spacingV 是 ref，必须解包 .value）
+  const { flatX, flatY } = pointyTopCenter(unit.q, unit.r, HEX_RADIUS, spacingH.value, spacingV.value)
   return { flatX, flatY }
 }
 const hoverCoord = ref('')
@@ -892,7 +992,8 @@ const hoverCoord = ref('')
 const isDeployPhase = ref(false)
 const deployPool = ref([])
 const deployedCount = computed(() => {
-  return allUnits.value.filter(u => deployPool.value.some(dp => dp.id === u.id)).length
+  // 已部署 = 已落入战局状态且拥有坐标 q 的单位（allUnits 仅含 battleState.units，即已部署单位）
+  return allUnits.value.filter(u => u.q !== undefined).length
 })
 const selectedDeployUnit = ref(null)
 const deploying = ref(false)
@@ -1343,10 +1444,15 @@ const battlefieldSize = computed(() => {
 const gridData = computed(() => {
   const raw = cells.value
   if (!gridWidth.value || !gridHeight.value) {
-    // 仍未获取到有效战场数据，返回最小占位 grid 防止引擎崩溃
+    // 仍未获取到有效战场数据，尝试从已部署单位坐标推算最小尺寸，
+    // 避免单位被画在 1×1 视口外导致"完全看不见"。
+    const unitQs = allUnits.value.filter(u => u.q !== undefined).map(u => u.q)
+    const unitRs = allUnits.value.filter(u => u.r !== undefined).map(u => u.r)
+    const minW = unitQs.length > 0 ? Math.max(...unitQs) + 1 : 1
+    const minH = unitRs.length > 0 ? Math.max(...unitRs) + 1 : 1
     return {
-      width: 1,
-      height: 1,
+      width: minW,
+      height: minH,
       cells: [],
       topologyParam: { spacingH: 1.0, spacingV: 1.0, offsetFactor: 0.0 }
     }
@@ -1451,7 +1557,7 @@ const factionGroups = computed(() => {
 const usedTerrains = computed(() => {
   const found = {}
   cells.value.forEach(c => {
-    const t = c.terrain || 'moon'
+    const t = c.terrain || 'void'
     if (!found[t]) found[t] = getTerrainDef(t)
   })
   return found
@@ -1468,7 +1574,7 @@ function pixelToHex(px, py) {
   return pointyTopToHex(px, py, HEX_RADIUS, spacingH, spacingV)
 }
 
-// getHexNeighbors 和 drawHexPath 直接从 hexUtils 导入
+// getHexNeighbors 仍从 hexUtils 导入；drawHexPath 已从 hexUtils 迁至 hexDraw.js（阶段 1 · §3.1g / §3.4e）
 
 function hexToRGBA(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16)
@@ -1512,9 +1618,10 @@ function drawBattleScene(ctx, opts) {
   const moveRangeHexes = new Set()
   if (actionMode.value === 'move' && selectedUnit.value) {
     const su = selectedUnit.value
-    const rawMob = su.mobility || su['机动'] || 3
-    // mobility > 20 means raw stat (0-99), divide by 10 to get hex range
-    const movePoints = Math.floor(rawMob / 2) || 1
+    // 移动力即移动值预算（移动点）：普通地形 1 点/格，特殊地形更多（与后端 tsFindPath 对齐）。
+    // 优先取 moveRange（机体+载具+背包合计），回退 mobility（仅机体），最后兜底 3。不再 /10。
+    const rawMob = su.moveRange || su.mobility || su['机动'] || 3
+    const movePoints = Math.max(1, Math.round(rawMob))
     const startKey = `${su.q},${su.r}`
     const visited = new Set([startKey])
     const queue = [{ q: su.q, r: su.r, cost: 0 }]
@@ -1525,7 +1632,7 @@ function drawBattleScene(ctx, opts) {
         if (visited.has(nKey)) continue
         if (n.q < 0 || n.q >= gridWidth.value || n.r < 0 || n.r >= gridHeight.value) continue
         const cell = cellMap[nKey]
-        const terrain = getTerrainDef(cell?.terrain || 'moon')
+        const terrain = getTerrainDef(cell?.terrain || 'void')
         const stepCost = terrain.cost || 1
         const newCost = cur.cost + stepCost
         if (newCost <= movePoints) {
@@ -1548,7 +1655,7 @@ function drawBattleScene(ctx, opts) {
       const nKey = `${n.q},${n.r}`
       if (n.q >= 0 && n.q < gridWidth.value && n.r >= 0 && n.r < gridHeight.value) {
         const cell = cellMap[nKey]
-        const terrain = getTerrainDef(cell?.terrain || 'moon')
+        const terrain = getTerrainDef(cell?.terrain || 'void')
         if (terrain.cost < 99 && !unitMap[nKey]) {
           royroyHexes.add(nKey)
         }
@@ -1564,6 +1671,8 @@ function drawBattleScene(ctx, opts) {
   if (actionMode.value === 'tactical' && selectedUnit.value && !royroyDeployMode.value) {
     const su = selectedUnit.value
     const range = getSkillRange(selectedAttackSkill.value)
+    // 审计报告 #4 修复：范围预览需排除最小施放距离(min_range)内的格
+    const rangeMin = getSkillRangeMin(selectedAttackSkill.value)
     // BFS for hex range ring
     const startKey = `${su.q},${su.r}`
     const visited = new Set([startKey])
@@ -1578,9 +1687,10 @@ function drawBattleScene(ctx, opts) {
         visited.add(nKey)
         queue.push({ q: n.q, r: n.r, dist: cur.dist + 1 })
         const cell = cellMap[nKey]
-        const terrain = getTerrainDef(cell?.terrain || 'moon')
+        const terrain = getTerrainDef(cell?.terrain || 'void')
         // For range display, use raw hex distance (don't count terrain cost)
-        if (cur.dist + 1 <= range) {
+        // 同时排除 min_range 内的格（审计报告 #4）
+        if (cur.dist + 1 <= range && cur.dist + 1 >= rangeMin) {
           skillRangeHexes.add(nKey)
         }
       }
@@ -1611,7 +1721,7 @@ function drawBattleScene(ctx, opts) {
       // 视口裁剪：跳过不可见的格子
       if (isInViewport && !isInViewport(q, r)) continue
 
-      const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, spacingH, spacingV)
+      const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, spacingH.value, spacingV.value)
       const cx = flatX
       const cy = flatY
       const hexKey = `${q},${r}`
@@ -1709,6 +1819,13 @@ function drawBattleScene(ctx, opts) {
     })
     .sort((a, b) => a.screenY - b.screenY)  // Y小(靠后)先绘 → Y大(靠前)覆盖
 
+  if (unitsWithScreenY.length > 0) {
+    const first = unitsWithScreenY[0]
+    const fx = ox + s * (iso.scaleX * first.flatX + iso.shearX * first.flatY)
+    const fy = oy + s * (iso.shearY * first.flatX + iso.scaleY * first.flatY)
+    console.log('[drawBattleScene] units=', unitsWithScreenY.length, 'first unit q/r=', first.unit.q, first.unit.r, 'screenXY=', Math.round(fx), Math.round(fy))
+  }
+
   unitsWithScreenY.forEach(({ unit, flatX, flatY }) => {
     if (unit.q === undefined) return
 
@@ -1728,17 +1845,41 @@ function drawBattleScene(ctx, opts) {
     ctx.translate(screenX, screenY)
     ctx.scale(s, s)  // 只缩放，不倾斜
 
+    // === Step C2: 脚底投影椭圆（需求③：挤出 + 有高度时阴影加深；否则轻量） ===
+    const _tid = (cellMap[`${unit.q},${unit.r}`]?.terrain) || 'void'
+    const _colH = (UNIVERSAL_TERRAIN_MAP[_tid]?.height) || 0
+    const _projA = (extrudeEnabled.value && _colH > 0) ? 0.34 : 0.16
+    ctx.beginPath()
+    ctx.ellipse(0, 0, HEX_RADIUS * 0.52, HEX_RADIUS * 0.3, 0, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(0,0,0,${_projA})`
+    ctx.fill()
+
     // === Step D: 查询切图纹理 ===
     const visual = getUnitVisual(unit)
-    const unitCode = unit.unitCode || unit.type || String(unit.id)
+    // unitCode 净化：只允许英文/数字/下划线/连字符，避免中文 type（如"突击型"）泄漏进 /assets/sprites/units/ 路径
+    const rawCode = unit.unitCode || unit.sprite_key || unit.type || String(unit.id)
+    const unitCode = /^[a-zA-Z0-9_-]+$/.test(rawCode) ? rawCode : 'DEFAULT'
     const fallbackCode = 'DEFAULT'
+
+    // === Phase 30-Cover: 七视图棋子优先渲染（不全则回退圆标+字母） ===
+    const _sevenImg = resolveSevenView(unit.viewUrls || unit.view_urls, visual.direction)
+    const _hasSeven = !!(_sevenImg && _sevenImg.complete && _sevenImg.naturalWidth > 0 && !isConcealed)
+    if (_hasSeven) {
+      const iw = _sevenImg.naturalWidth, ih = _sevenImg.naturalHeight
+      const maxH = HEX_RADIUS * 1.7, maxW = HEX_RADIUS * 1.5
+      const aspect = iw / ih
+      let dw, dh
+      if (aspect > maxW / maxH) { dw = maxW; dh = dw / aspect } else { dh = maxH; dw = dh * aspect }
+      ctx.drawImage(_sevenImg, -dw / 2, -dh, dw, dh)
+    }
+
     const sprite = !isConcealed
       ? unitSpriteResolver.getTexture(unitCode, visual.direction, visual.actionState, fallbackCode)
       : null
 
     const hasSprite = sprite && sprite.image.complete && sprite.image.naturalWidth > 0
 
-    if (hasSprite && !isConcealed) {
+    if (!_hasSeven && hasSprite && !isConcealed) {
       // ---- 2D 棋子以 1:1 正常比例绘制 (不受 ISO 压扁) ----
       ctx.drawImage(
         sprite.image,
@@ -1746,7 +1887,7 @@ function drawBattleScene(ctx, opts) {
         -sprite.anchorX, -sprite.anchorY,
         sprite.renderW, sprite.renderH
       )
-    } else if (!isConcealed) {
+    } else if (!_hasSeven && !isConcealed) {
       // ================================================================
       //  Phase 28-D: 三层视觉降级金字塔 — Layer 1 / 2 / 3
       // ================================================================
@@ -1796,7 +1937,7 @@ function drawBattleScene(ctx, opts) {
         ctx.textBaseline = 'middle'
         ctx.fillText(letter, 0, 0)
       }
-    } else {
+    } else if (!_hasSeven) {
       // ---- 隐蔽状态: 低透明度圆形 + 首字母 ----
       const r = HEX_RADIUS * 0.4
       ctx.beginPath()
@@ -1905,7 +2046,7 @@ function onHexClick({ q, r }) {
     const isAdjacent = neighbors.some(n => n.q === q && n.r === r)
     const isOccupied = allUnits.value.some(u => u.q === q && u.r === r)
     const cell = cells.value.find(c => c.q === q && c.r === r)
-    const terrain = getTerrainDef(cell?.terrain || 'moon')
+    const terrain = getTerrainDef(cell?.terrain || 'void')
     if (isAdjacent && !isOccupied && terrain.cost < 99) {
       deployRoyroyAt(q, r)
     } else {
@@ -1914,8 +2055,11 @@ function onHexClick({ q, r }) {
     return
   }
 
-  // Action mode: move
-  if (actionMode.value === 'move' && selectedUnit.value) { executeMove(q, r); return }
+  // Action mode: move（阵营轮转门控）
+  if (actionMode.value === 'move' && selectedUnit.value) {
+    if (!isMyTurn(selectedUnit.value)) { addLog('warn', `当前行动阵营为 ${battleState.value?.activeFaction}，无法操作该单位`); return }
+    executeMove(q, r); return
+  }
 
   // Check if clicked on a unit
   const clickedUnit = findUnitAt(q, r)
@@ -1934,7 +2078,7 @@ function onHexClick({ q, r }) {
   // Clicked empty hex - show info
   if (!actionMode.value) {
     const cell = cells.value.find(c => c.q === q && c.r === r)
-    const t = cell?.terrain || 'moon'
+    const t = cell?.terrain || 'void'
     const def = getTerrainDef(t)
     terminalLogs.value.unshift(`// HEX ${formatCoord(q, r)} [${def.name}]`)
     if (terminalLogs.value.length > 5) terminalLogs.value.pop()
@@ -1963,15 +2107,9 @@ function selectUnit(unit) {
 function selectUnitById(unit) {
   if (unit.q !== undefined) {
     selectUnit(unit)
-    // Center view on unit (via HexGridCanvasEngine)
-    const hg = hexGrid.value
-    if (hg?.mainCanvas) {
-      const { x, y } = hexToPixel(unit.q, unit.r)
-      const canvas = hg.mainCanvas
-      const rect = canvas.getBoundingClientRect()
-      hg.offsetX.value = rect.width / 2 - (x + HEX_APOTHEM) * hg.scale.value
-      hg.offsetY.value = rect.height / 2 - (y + HEX_RADIUS) * hg.scale.value
-    }
+    // 居中到选中单位：战场为 iso 模式，必须走引擎自带的 centerOn（内部用 worldOf 等距变换），
+    // 严禁用 hexToPixel 的平面坐标直接算 offset——否则相机跳到空白区，地形被推出屏幕、只剩棋子。
+    hexGrid.value?.centerOn(unit.q, unit.r)
   }
   hexGrid.value?.redraw()
 }
@@ -2015,7 +2153,7 @@ async function executeAction(type, params = {}) {
     if (type === 'defend') {
       addLog('action', `${unit.name} 进入防御姿态 (+15 护盾)`)
       // Phase 2: 防御姿态视觉
-      setUnitVisual(unit.id, null, 'defend')
+      setUnitVisual(unit.unitId || unit.id, null, 'defend')
       // Attempt backend call
       try {
         await combatAPI.action(route.params.id, { actionType: 'defend', params: { unit_id: String(unit.id) } })
@@ -2023,7 +2161,7 @@ async function executeAction(type, params = {}) {
     } else if (type === 'wait') {
       addLog('action', `${unit.name} 原地待机`)
       // Phase 2: 待命视觉
-      setUnitVisual(unit.id, null, 'wait')
+      setUnitVisual(unit.unitId || unit.id, null, 'wait')
       try {
         await combatAPI.action(route.params.id, { actionType: 'wait', params: { unit_id: String(unit.id) } })
       } catch (e) { /* offline fallback */ }
@@ -2196,6 +2334,20 @@ function getSkillRange(skill) {
   return selectedUnit.value?.range || 1
 }
 
+// 获取技能的最小施放距离（hex距离）— 审计报告 #4 修复：范围预览需排除 min_range 内格
+function getSkillRangeMin(skill) {
+  if (!skill) return 0 // 普通攻击无最小距离
+  // 范围字符串 "1-3" → 取 min
+  if (skill.range) {
+    const parts = String(skill.range).split(/[-~]/)
+    const nums = parts.map(Number).filter(n => !isNaN(n))
+    return nums.length ? (nums[0] || 0) : 0
+  }
+  if (skill.min_cast_range !== undefined) return skill.min_cast_range
+  if (skill.range_min !== undefined) return skill.range_min
+  return 0
+}
+
 // 进入 RoyRoy 部署模式（点击六角格选择位置）
 function startRoyroyDeploy() {
   if (!selectedUnit.value?.royroy) return
@@ -2221,47 +2373,88 @@ function deployRoyroyAt(q, r) {
   })
 }
 
+// 回收 RoyRoy（规则5：不消耗行动点，回血至满，冷却 round+2）
+async function retrieveRoyroy() {
+  if (!selectedUnit.value?.royroy) return
+  const unit = selectedUnit.value
+  try {
+    const resp = await combatAPI.action(route.params.id, {
+      actionType: 'retrieve_royroy',
+      params: { unit_id: String(unit.id) }
+    })
+    const cd = resp?.data?.cooldownRound ?? resp?.cooldownRound ?? (unit.royroy.cooldownRound || 0)
+    addLog('deploy', `${unit.name} 回收 RoyRoy（回血至满，第 ${cd} 轮前不可再部署）`)
+    cancelAction()
+    await refreshState()
+  } catch (e) {
+    addLog('error', `RoyRoy 回收失败: ${e.response?.data?.error || e.message}`)
+  }
+}
+
+// 当前阵营行动标签（攻击/防守/偷袭 + faction 名）
+const currentFactionLabel = computed(() => {
+  const order = battleState.value?.factionTurnOrder || []
+  const af = battleState.value?.activeFaction
+  if (!af) return '准备中'
+  const idx = order.indexOf(af)
+  const roleName = ['攻击', '防守', '偷袭'][idx] || '行动'
+  return `${roleName}: ${getFactionLabel(af)}`
+})
+
+// 阵营轮转门控：unit 是否为当前行动阵营
+function isMyTurn(unit) {
+  const af = battleState.value?.activeFaction
+  if (!af) return true
+  return !unit?.faction || unit.faction === af
+}
+
 async function executeMove(tq, tr) {
   if (!selectedUnit.value) return
   const unit = selectedUnit.value
   const fromQ = unit.q, fromR = unit.r
 
-  // Phase 2+3: 计算移动方向并设置朝向 + 移动状态
-  const dir = computeDirection(fromQ, fromR, tq, tr)
-  if (dir !== null) {
-    setUnitVisual(unit.id, dir, 'move')
-  } else {
-    setUnitVisual(unit.id, null, 'move')
-  }
-
-  // Phase 3: 平滑位移 — 先发起 API，成功后启动 lerp 动画
+  // Phase 3: 平滑位移 — 先发起 API，成功后沿 path 逐段行走 + 动态朝向
   try {
+    const resp = await combatAPI.move(route.params.id, { unit_id: String(unit.id), target_q: tq, target_r: tr })
+    if (resp?.success === false || resp?.error) {
+      throw new Error(resp.error || '移动失败')
+    }
     const fromCoord = formatCoord(fromQ, fromR)
-    const { flatX: fromX, flatY: fromY } = pointyTopCenter(fromQ, fromR, HEX_RADIUS, spacingH, spacingV)
-    const { flatX: toX, flatY: toY } = pointyTopCenter(tq, tr, HEX_RADIUS, spacingH, spacingV)
-
-    await combatAPI.move(route.params.id, { unit_id: String(unit.id), target_q: tq, target_r: tr })
     const toCoord = formatCoord(tq, tr)
     addLog('move', `${unit.name} 从 ${fromCoord} 移动到 ${toCoord}`)
-
-    // 启动 lerp 动画 (每格约 300ms)
-    const distance = Math.sqrt((toX - fromX) ** 2 + (toY - fromY) ** 2)
-    const duration = Math.max(200, Math.min(600, distance * 2.5))
     actionMode.value = null
 
-    startLerpAnimation(unit.id, { flatX: fromX, flatY: fromY }, { flatX: toX, flatY: toY }, duration, async () => {
-      // lerp 完成后：刷新服务器状态 + 恢复 idle
-      stopLerpAnimation(unit.id)
-      await refreshState()
-      setUnitVisual(unit.id, dir ?? 0, 'idle')
-    })
+    // 阶段一：沿后端返回的路径逐段行走 + 切换七视图
+    let lastDir = null
+    const path = (resp?.path && resp.path.length >= 2) ? resp.path : [{ q: fromQ, r: fromR }, { q: tq, r: tr }]
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1]
+      const segDir = computeDirection(a.q, a.r, b.q, b.r)
+      if (segDir !== null) {
+        setUnitVisual(unit.unitId || unit.id, segDir, 'move')
+        lastDir = segDir
+      }
+      const { flatX: ax, flatY: ay } = pointyTopCenter(a.q, a.r, HEX_RADIUS, spacingH, spacingV)
+      const { flatX: bx, flatY: by } = pointyTopCenter(b.q, b.r, HEX_RADIUS, spacingH, spacingV)
+      await lerpSegment(unit.id, { flatX: ax, flatY: ay }, { flatX: bx, flatY: by }, 220)
+    }
+    stopLerpAnimation(unit.id)
+    await refreshState()
+    // 规则3：保留最后一步朝向，不重置回正面 0
+    setUnitVisual(unit.unitId || unit.id, lastDir ?? 0, 'idle')
   } catch (e) {
     addLog('error', `移动失败: ${e.response?.data?.error || e.message}`)
-    // Phase 2+3: 移动失败恢复默认状态
     stopLerpAnimation(unit.id)
-    setUnitVisual(unit.id, 0, 'idle')
+    setUnitVisual(unit.unitId || unit.id, 0, 'idle')
     cancelAction()
   }
+}
+
+// 单段 lerp 的 Promise 封装（供逐段行走）
+function lerpSegment(unitId, from, to, duration) {
+  return new Promise((resolve) => {
+    startLerpAnimation(unitId, from, to, duration, () => resolve())
+  })
 }
 
 // ===== 跳过战术环节 =====
@@ -2349,6 +2542,7 @@ function victoryLabel(info) {
 async function executeAttack(target) {
   if (!selectedUnit.value) return
   const attacker = selectedUnit.value
+  if (!isMyTurn(attacker)) { addLog('warn', `当前行动阵营为 ${battleState.value?.activeFaction}，无法攻击`); return }
   try {
     const attackType = (attacker.range || 1) > 1 ? 'ranged' : 'melee'
     const result = await combatAPI.attack(route.params.id, {
@@ -2359,11 +2553,11 @@ async function executeAttack(target) {
 
     // Phase 28-D: 攻击后更新攻击者朝向（后端计算并返回）
     if (result.data?.attacker_direction) {
-      setUnitVisual(attacker.id, result.data.attacker_direction, 'attack')
+      setUnitVisual(attacker.unitId || attacker.id, result.data.attacker_direction, 'attack')
     } else {
       // 兜底：前端计算朝向
       const dir = computeDirection(attacker.q, attacker.r, target.q, target.r)
-      if (dir !== null) setUnitVisual(attacker.id, dir, 'attack')
+      if (dir !== null) setUnitVisual(attacker.unitId || attacker.id, dir, 'attack')
     }
 
     if (result.data?.surprise_triggered) {
@@ -2533,7 +2727,9 @@ async function endTurn() {
 
 async function refreshState() {
   const { data } = await combatAPI.getBattleState(route.params.id)
-  battleState.value = data.battle || data
+  const rawMap = (data.battle || data)?.map
+  console.log('[refreshState] map keys:', rawMap ? Object.keys(rawMap) : 'undefined', '| units count:', Object.keys((data.battle || data)?.units || {}).length)
+  battleState.value = normalizeBattleState(data.battle || data)
   // Preserve selection if unit still exists
   if (selectedUnit.value) {
     const found = allUnits.value.find(u => u.id === selectedUnit.value.id)
@@ -2585,9 +2781,14 @@ const deployFsmState = ref(DEPLOY_FSM.IDLE)
 function startDeployUnit(unit) {
   if (!isDeployPhase.value) return
   if (deployFsmState.value === DEPLOY_FSM.DEPLOYING) return
+  // 已在战场上的单位（已部署）不可重复部署
+  if (unit.q !== undefined || unit.position) {
+    addLog('warn', `${unit.name || 'Unit-' + unit.id} 已在战场上，无需重复部署`)
+    return
+  }
   selectedDeployUnit.value = unit
   deployFsmState.value = DEPLOY_FSM.UNIT_SELECTED
-  addLog('info', `选择部署: ${unit.name || 'Unit-'+unit.id}`)
+  addLog('info', `选择部署: ${unit.name || 'Unit-' + unit.id}`)
 }
 
 function cancelDeploySelection() {
@@ -2608,6 +2809,7 @@ async function deployToHex(q, r) {
     selectedDeployUnit.value = null
     deployFsmState.value = DEPLOY_FSM.IDLE
     await refreshState()
+    hexGrid.value?.redraw() // 部署后状态已更新，必须重绘棋盘才能显示新棋子
     // Remove from pool
     const idx = deployPool.value.findIndex(u => u.id === unit.id)
     if (idx >= 0) deployPool.value.splice(idx, 1)
@@ -2625,6 +2827,7 @@ async function finishDeployment() {
     isDeployPhase.value = false
     addLog('turn', '===== 部署完成，战斗开始 =====')
     await refreshState()
+    hexGrid.value?.redraw() // 部署完成后重绘，确保终局状态即时呈现
   } catch (e) {
     addLog('error', `开始战斗失败: ${e.response?.data?.error || e.message}`)
   }
@@ -2722,7 +2925,7 @@ onMounted(async () => {
   // Phase 29-H: 合并到下方 loadGlossaryConfig() 统一拉取，消除重复请求
   try {
     const { data } = await combatAPI.getBattleState(route.params.id)
-    battleState.value = data.battle || data
+    battleState.value = normalizeBattleState(data.battle || data)
         // Phase 14: 出击装备 DKM 防爆清洗
         sanitizeAllUnitsEquipment()
 
@@ -2765,15 +2968,26 @@ onMounted(async () => {
     console.error('[BattleInit] getBattleState 失败:', e.message || e)
     // 自动创建战斗会话
     try {
-      console.warn('[BattleInit] getBattleState 失败，兜底 createBattle 使用硬编码 battlefield_id=1（maps 表为 UUID，易 404）。请确认房间真实 mapId。')
-      const res = await combatAPI.createBattle({ battlefield_id: 1 })
-      const newId = res.data?.id || res.data?.battle?.id || res.data?.battle_id || route.params.id
-      if (newId !== route.params.id) {
-        router.replace('/battle/' + newId)
-        return
+      // 兜底：动态获取一个真实存在的地图 UUID（maps 表为 UUID，禁止硬编码 1）
+      let fallbackMapId = null
+      try {
+        const { data: maps } = await mapAPI.getMapList()
+        const list = Array.isArray(maps) ? maps : (maps?.maps || maps?.data || [])
+        if (list.length > 0) fallbackMapId = list[0].id || list[0].mapId || list[0].battlefield_id
+      } catch (_) { /* 地图列表拉取失败则降级 */ }
+      if (!fallbackMapId) {
+        console.warn('[BattleInit] 无可用地图，跳过自动创建战局')
+      } else {
+        console.warn('[BattleInit] getBattleState 失败，兜底 createBattle 使用动态地图 ' + fallbackMapId)
+        const res = await combatAPI.createBattle({ battlefield_id: fallbackMapId })
+        const newId = res.data?.id || res.data?.battle?.id || res.data?.battle_id || route.params.id
+        if (newId !== route.params.id) {
+          router.replace('/battle/' + newId)
+          return
+        }
+        const { data: bd } = await combatAPI.getBattleState(newId)
+        battleState.value = normalizeBattleState(bd.battle || bd)
       }
-      const { data: bd } = await combatAPI.getBattleState(newId)
-      battleState.value = bd.battle || bd
     } catch (createErr) {
       console.warn('[BattleInit] auto-create failed:', createErr.message || createErr)
     }
@@ -2803,16 +3017,7 @@ onMounted(async () => {
     }
   initFloatingCardPositions()
   // Phase 29-CanvasTrueCenter: resize 防护 - 缩放浏览器时强制重算居中，防止左上角变平
-  const _resizeHandler = () => {
-    initFloatingCardPositions()
-    // 延迟一帧等待 DOM 尺寸稳定后重新居中
-    setTimeout(() => {
-      if (hexGrid.value) {
-        hexGrid.value.centerGrid()
-        hexGrid.value.redraw()
-      }
-    }, 100)
-  }
+  // 处理函数定义在顶层作用域（见文件下方 _resizeHandler），此处仅注册
   window.addEventListener('resize', _resizeHandler)
 
   // Phase 29-P0: 悬停坐标跟踪 — 监听引擎 Canvas 的 mousemove
@@ -2841,6 +3046,18 @@ onMounted(async () => {
   }
 })
 
+// Phase 29-CanvasTrueCenter: resize 防护处理函数（顶层作用域定义，确保 onMounted 注册与 onUnmounted 注销引用同一函数，避免 _resizeHandler is not defined）
+const _resizeHandler = () => {
+  initFloatingCardPositions()
+  // 延迟一帧等待 DOM 尺寸稳定后重新居中
+  setTimeout(() => {
+    if (hexGrid.value) {
+      hexGrid.value.centerGrid()
+      hexGrid.value.redraw()
+    }
+  }, 100)
+}
+
 // Phase 29-P0: 悬停处理器 — 通过引擎暴露的 getHexAtEvent 获取格子坐标
 function handleEngineHover(event) {
   if (!hexGrid.value?.getHexAtEvent) return
@@ -2852,10 +3069,16 @@ function handleEngineHover(event) {
   }
 }
 
-// Update faction_turn display
-watch(() => battleState.value?.faction_turn, (val) => {
-  if (val) phaseText.value = `行动中: ${getFactionLabel(val)}`
+// Update faction turn display（阶段二：阵营轮转）
+watch(() => battleState.value?.activeFaction, (val) => {
+  if (val) phaseText.value = `行动中: ${currentFactionLabel.value}`
 })
+
+// 战局单位集合变化（部署/移动/攻击/结算等）时强制重绘棋盘，确保棋子即时显示。
+// 此前部署后仅更新了 battleState.units，但缺少对单位列表的响应式重绘监听，导致棋子"已部署却不显示"。
+watch(() => battleState.value?.units, () => {
+  hexGrid.value?.redraw()
+}, { deep: true })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onDiceKeyDown)

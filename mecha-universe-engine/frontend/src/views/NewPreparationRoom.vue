@@ -268,7 +268,11 @@ async function startBattle() {
   if (!battleId) {
     try {
       const res = await combatAPI.createBattle({
-        battlefield_id: room.value?.room?.mapId || room.value?.mapId || 1
+        battlefield_id: room.value?.room?.mapId || room.value?.mapId || 1,
+        // 阶段二规则：阵营行动顺序（攻击→防守→偷袭，未分配角色的阵营跳过）
+        factionTurnOrder: ['attack', 'defense', 'ambush']
+          .map(role => Object.keys(factionRoles).find(fk => factionRoles[fk] === role))
+          .filter(Boolean),
       })
       battleId = res.data?.battle?.id || res.data?.battle_id || res.data?.id
 

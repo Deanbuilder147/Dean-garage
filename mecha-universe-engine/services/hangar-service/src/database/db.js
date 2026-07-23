@@ -95,6 +95,13 @@ async function initDatabase() {
   // 创建索引
   db.run('CREATE INDEX IF NOT EXISTS idx_units_user_id ON units(user_id)');
 
+  // 单位总点数列（兼容旧库：列已存在时 ALTER 会抛错，try/catch 忽略）
+  try {
+    db.run('ALTER TABLE units ADD COLUMN total_points INTEGER DEFAULT 0');
+  } catch (e) {
+    // 列已存在，忽略
+  }
+
   // 保存数据库
   saveDatabase();
 

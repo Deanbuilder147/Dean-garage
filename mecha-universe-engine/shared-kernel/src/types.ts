@@ -91,6 +91,7 @@ export interface UnitStats {
   attack: number;
   defense: number;
   speed: number;
+  mobility: number;
   range: number;
 }
 
@@ -223,6 +224,20 @@ export interface JoinRoomRequest {
 // 六、战斗运行时
 // ============================================
 
+/** 阶段二：装备战斗状态（耐久 / 独立 HP / 机动） */
+export interface BattleEquipment {
+  name: string;
+  type: string;        // 武器 / 防具 / 载具 / 背包
+  slot?: string;
+  mobility?: number;
+  hp: number;
+  maxHp: number;
+  durability: number;
+  maxDurability: number;
+  destroyed: boolean;
+  isShield: boolean;   // 防具/背包：独立伤害吸收槽
+}
+
 export interface BattleUnit {
   unitId: EntityId;
   matrixId: EntityId;
@@ -235,6 +250,44 @@ export interface BattleUnit {
   // 天然吞噬并完美兼容一切 TRPG 规则的多动/残余行动点机制
   // 默认机战规则积木：{ MOVE: 1, ATTACK: 1 }
   action_points: Record<string, number>;
+  // Phase 30-Cover: 战场端渲染补全字段（由 deploy-unit / initialize 注入，供前端渲染圆标/七视图）
+  faction?: string;
+  name?: string;
+  codename?: string;
+  unitCode?: string;
+  type?: string;
+  /** 七视图 URL 映射：{ "0": 正视图URL, ... "6": 方向6 URL }，每方向独立 PNG */
+  viewUrls?: Record<string, string> | string;
+  /** 阶段二：装备耐久/独立HP状态 */
+  equipState?: BattleEquipment[];
+  /** 阶段二：移动范围（= 有效机动总和，实际可走格子数） */
+  moveRange?: number;
+  /** 阶段二：基准机动（仅机体机动，机动差额基准） */
+  mobility?: number;
+  /** 阶段二规则6 Royroy 浮游辅机（属性模型，非独立单位） */
+  royroy?: RoyroyState;
+}
+
+/** Royroy 浮游辅机状态（随主机行动，非独立 BattleUnit） */
+export interface RoyroyState {
+  name: string;
+  attack: number;
+  defense: number;
+  hp: number;
+  maxHp: number;
+  /** 是否自动化技能：true=绑定主机随动（主机移动后自动重定位至邻域空格）；false=定点炮台/地雷，绝对不可移动 */
+  isAuto: boolean;
+  /** 部署模式：follow(随动) | fixed(定点) */
+  deployMode: 'follow' | 'fixed';
+  /** 生命周期：inactive(未部署) | deployed(场上) | destroyed(被击毁，本局不可再部署/回收) */
+  status: 'inactive' | 'deployed' | 'destroyed';
+  /** 是否已部署（冗余于 status，便于前端判断） */
+  deployed: boolean;
+  /** 场上坐标（部署后有效） */
+  q?: number;
+  r?: number;
+  /** 回收冷却：battle.round 达到此值前不可再部署、技能不可用 */
+  cooldownRound?: number;
 }
 
 export interface StatusEffect {
@@ -254,6 +307,14 @@ export interface BattleState {
   map: BattlefieldMap;
   log: BattleLogEntry[];
   startedAt: ISODateTime;
+  /** 阶段二规则：阵营行动顺序（攻击→防守→偷袭，空角色跳过），元素为 faction 键 */
+  factionTurnOrder: string[];
+  /** 当前行动阵营（faction 键） */
+  activeFaction: string;
+  /** 当前阵营在 factionTurnOrder 中的索引 */
+  activeFactionIndex: number;
+  /** 战斗回合（一轮 = 所有活跃阵营各行动一次） */
+  round: number;
 }
 
 export interface BattleLogEntry {

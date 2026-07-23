@@ -27,6 +27,66 @@ function computeMapVisibility(userRole: string, requestedPublic: boolean): { is_
   return { is_public: 0, review_status: 'pending' };
 }
 
+// ============================================
+// ★ 阶段 A·7：旧地图 cells 平滑迁移（固定画布 100×100）
+// 旧地图可能 cells 为空数组但有 width/height，直接渲染会全空白。
+// 这里按 100×100 自动补全 moon 地形 cells；所有地图 width/height 强制 100。
+// 注意：cells 是 {q,r,terrain} 对象数组（combat.ts 用 `${c.q},${c.r}` 构建 cellSet），
+//       严禁 dict / 下划线 key。
+// ============================================
+function migrateCells(cells: any, width = 100, height = 100): any[] {
+  const arr = Array.isArray(cells) ? cells : [];
+  if (arr.length === 0 && width && height) {
+    const filled: any[] = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) {
+        filled.push({ q, r, terrain: 'void' });
+      }
+    }
+    return filled;
+  }
+  return arr;
+}
+
+// ========================================
+// 阶段 B·1：前端编辑器以 dict {"q,r": terrainId|object} 形式提交地形；
+// 后端统一转换为 cells 数组 [{q,r,terrain}] 存储（combat.ts 按此结构消费）。
+// 同时兼容直接提交 cells 数组的旧调用方。
+// ========================================
+function resolveTerrainId(val: any): string | null {
+  if (!val) return null
+  if (typeof val === 'string') return val
+  if (val && typeof val === 'object') {
+    if (val.terrain_id) return val.terrain_id
+    if (val.terrain) return val.terrain
+    if (val.id) return val.id
+    if (val.type) return val.type
+  }
+  return null
+}
+
+function terrainDictToCells(dict: any): any[] {
+  const cells: any[] = []
+  if (!dict || typeof dict !== 'object') return cells
+  for (const [key, val] of Object.entries(dict)) {
+    const parts = String(key).split(',')
+    const q = Number(parts[0])
+    const r = Number(parts[1])
+    if (Number.isNaN(q) || Number.isNaN(r)) continue
+    const tid = resolveTerrainId(val)
+    if (!tid) continue
+    cells.push({ q, r, terrain: tid })
+  }
+  return cells
+}
+
+// 优先用 body.cells；否则用 body.terrain(dict) 转换；两者皆无则回退 fallback
+function resolveCellsFromBody(body: any, fallback: any): any {
+  if (body.cells !== undefined && body.cells !== null) return body.cells
+  if (body.terrain !== undefined && body.terrain !== null) return terrainDictToCells(body.terrain)
+  return fallback
+}
+
 // ========================================
 // Phase 29-DataSecurity 纠偏: /api/map/list — 地图文件列表 (兼容旧前端调用)
 // 与 /battlefields 共用同一流水线，支持 ?id=xxx 单文件查询
@@ -48,10 +108,10 @@ router.get('/api/map/list', authenticate, (req, res) => {
         name: map.name,
         filename: map.id,
         terrainCount: JSON.parse(map.cells || '[]').length,
-        width: map.width,
-        height: map.height,
+        width: 100,
+        height: 100,
         terrain: map.cells,
-        cells: JSON.parse(map.cells || '[]'),
+        cells: migrateCells(JSON.parse(map.cells || '[]')),
         spawn_points: JSON.parse(map.spawn_points || '[]'),
         attributes: JSON.parse(map.attributes || '{}'),
         is_public: map.is_public,
@@ -99,7 +159,7 @@ router.get('/api/map/battlefields', authenticate, (req, res) => {
       const maps = all('SELECT * FROM maps ORDER BY updated_at DESC');
       const parsed = maps.map(m => ({
         ...m,
-        cells: JSON.parse(m.cells || '[]'),
+        width: 100, height: 100, cells: migrateCells(JSON.parse(m.cells || '[]')),
         spawn_points: JSON.parse(m.spawn_points || '[]'),
         attributes: JSON.parse(m.attributes || '{}'),
       }));
@@ -111,7 +171,7 @@ router.get('/api/map/battlefields', authenticate, (req, res) => {
       );
       const parsed = maps.map(m => ({
         ...m,
-        cells: JSON.parse(m.cells || '[]'),
+        width: 100, height: 100, cells: migrateCells(JSON.parse(m.cells || '[]')),
         spawn_points: JSON.parse(m.spawn_points || '[]'),
         attributes: JSON.parse(m.attributes || '{}'),
       }));
@@ -135,7 +195,7 @@ router.get('/api/map/battlefields/:id', authenticate, (req, res) => {
     }
     const result = {
       ...map,
-      cells: JSON.parse(map.cells || '[]'),
+      width: 100, height: 100, cells: migrateCells(JSON.parse(map.cells || '[]')),
       spawn_points: JSON.parse(map.spawn_points || '[]'),
       attributes: JSON.parse(map.attributes || '{}'),
     };
@@ -152,9 +212,14 @@ router.get('/api/map/battlefields/:id', authenticate, (req, res) => {
 router.post('/api/map/battlefields', authenticate, requireAuth, (req, res) => {
   try {
     const {
-      name, width = 20, height = 30, cells = [],
+      name,
       spawn_points = [], is_public_copy = false, is_public = false, attributes = {},
     } = req.body;
+    // 兼容前端以 dict {"q,r": terrainId} 提交的地形；无 cells 时由 terrain 转换
+    const cells = resolveCellsFromBody(req.body as any, []);
+    // ★ 阶段 A·2：固定画布 100×100，忽略前端传入的 width/height
+    const width = 100;
+    const height = 100;
 
     if (!name) {
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '战场名称为必填项' });
@@ -194,7 +259,12 @@ router.put('/api/map/battlefields/:id', authenticate, requireAuth, (req, res) =>
       return;
     }
 
-    const { name, width, height, cells, spawn_points, is_public_copy, is_public, attributes } = req.body;
+    const { name, spawn_points, is_public_copy, is_public, attributes } = req.body;
+    // 优先用前端提交的 cells；否则由 terrain(dict) 转换；再否则保留旧 cells
+    const cells = resolveCellsFromBody(req.body as any, JSON.parse(map.cells));
+    // ★ 阶段 A·2：固定画布 100×100，忽略前端传入的 width/height
+    const width = 100;
+    const height = 100;
 
     // Phase 29-DataSecurity: 审核状态机卡口
     const userRole = req.auth!.role || 'user';
@@ -207,8 +277,8 @@ router.put('/api/map/battlefields/:id', authenticate, requireAuth, (req, res) =>
        WHERE id = ?`,
       [
         name ?? map.name,
-        width ?? map.width,
-        height ?? map.height,
+        100,
+        100,
         JSON.stringify(cells ?? JSON.parse(map.cells)),
         JSON.stringify(spawn_points ?? JSON.parse(map.spawn_points)),
         (is_public_copy ?? map.is_public_copy) ? 1 : 0,

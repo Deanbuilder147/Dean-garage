@@ -83,7 +83,11 @@ export const HexUtils = {
    * 计算两六角格距离
    */
   hexDistance(q1, r1, q2, r2) {
-    return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
+    // ★ 阶段 B：Even-R offset 语义统一（offset→axial 后取 cube 距离）
+    const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+    const a = offToAx(q1, r1), b = offToAx(q2, r2);
+    const dq = Math.abs(a.q - b.q), dr = Math.abs(a.r - b.r), ds = Math.abs(a.q + a.r - b.q - b.r);
+    return Math.max(dq, dr, ds);
   },
 
   /**
@@ -92,11 +96,11 @@ export const HexUtils = {
    * @param {number} r - 行坐标
    */
   getNeighbors(q, r) {
-    const directions = [
-      { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
-      { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }
-    ];
-    return directions.map(d => ({ q: q + d.q, r: r + d.r }));
+    // ★ 阶段 B：Even-R offset 邻居（与前端 hexUtils.getHexNeighbors 一致，含奇偶行分支）
+    const dirs = (r % 2 === 0)
+      ? [{ q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 1, r: 1 }]
+      : [{ q: 1, r: 0 }, { q: 0, r: -1 }, { q: -1, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }];
+    return dirs.map(d => ({ q: q + d.q, r: r + d.r }));
   },
 
   /**

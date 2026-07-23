@@ -74,14 +74,15 @@ export function normalizeParsedData(parsed: ParsedResult): NormalizedPreview {
     throw new Error('主机体数据缺失，无法完成归一化');
   }
 
-  // 累加所有部件的四维值（主机体 + 装备部件）
-  const totalMelee = sumPartStat(parsed.units, '格斗');
-  const totalShooting = sumPartStat(parsed.units, '射击');
-  const totalStructure = sumPartStat(parsed.units, '结构');
-  const totalMobility = sumPartStat(parsed.units, '机动');
+  // —— 阶段二新规：格斗/射击仅来自 机体 + 武器；移动范围 = 机体机动 + 载具/背包机动 ——
+  const bodyStructure = typeof mainUnit.结构 === 'number' ? mainUnit.结构 : 0;
+  const bodyMobility = typeof mainUnit.机动 === 'number' ? mainUnit.机动 : 0;
+  const totalMelee = sumPartStat(parsed.units, '格斗', ['机体', '武器']);
+  const totalShooting = sumPartStat(parsed.units, '射击', ['机体', '武器']);
+  const carrierMobility = sumPartStat(parsed.units, '机动', ['载具', '背包']);
 
-  // 归一化映射
-  const stats = mapToUnitStats(totalMelee, totalShooting, totalStructure, totalMobility);
+  // 归一化映射（defense 废弃→0；speed=移动格子数；mobility=仅机体机动）
+  const stats = mapToUnitStats(totalMelee, totalShooting, bodyStructure, bodyMobility, carrierMobility);
 
   // 转换技能
   const skills = mapSkills(parsed.skills);
@@ -134,16 +135,24 @@ export function normalizeParsedData(parsed: ParsedResult): NormalizedPreview {
 // 四维 → UnitStats 映射（宪法红线）
 // ============================================
 
-function mapToUnitStats(melee: number, shooting: number, structure: number, mobility: number): UnitStats {
-  const hp = structure * 5 + 20;
+function mapToUnitStats(
+  melee: number,
+  shooting: number,
+  bodyStructure: number,
+  bodyMobility: number,
+  carrierMobility: number
+): UnitStats {
+  const hp = bodyStructure * 5 + 20;
+  const moveRange = bodyMobility + carrierMobility; // 移动力 = 实际可走格子数（废除 /20 公式）
   return {
     hp,
     maxHp: hp,
-    armor: Math.floor(structure * 0.25),
-    shield: 0,
+    armor: Math.floor(bodyStructure * 0.25), // 减伤：护甲 = 机体结构 * 0.25
+    shield: 0, // 防具/背包独立 hp 承担（见 attributes.parts）
     attack: melee * 2 + 5,
-    defense: Math.floor(mobility * 0.3),
-    speed: 2 + Math.floor(mobility / 20),
+    defense: 0, // 防御力彻底废弃，减伤由 armor + 伤害分担接管
+    speed: moveRange, // 移动格子数
+    mobility: bodyMobility, // 仅机体机动（机动差额基准）
     range: 1 + Math.floor(shooting / 25),
   };
 }
@@ -202,12 +211,28 @@ function buildAttributes(
   const partOrder = ['主机体', '跟随', '左手', '右手', '其它'];
   for (const name of partOrder) {
     if (units[name]) {
+      const t = normalizePartType(units[name].type);
+      const isShield = t === '防具' || t === '背包';
+      const pStruct = typeof units[name].结构 === 'number' ? units[name].结构 : 0;
+      const hp = isShield ? pStruct * 2 : 0; // 防具/背包独立 HP = 结构 * 2
+      const durability =
+        t === '武器' || t === '载具' ? pStruct : // 武器/载具耐久 = 结构值
+        t === '防具' || t === '背包' ? 5 :       // 防具/背包基础耐久 = 5
+        0;
       parts[name] = {
         type: units[name].type,
+        normalizedType: t,
+        slot: name,
         格斗: units[name].格斗,
         射击: units[name].射击,
         结构: units[name].结构,
         机动: units[name].机动,
+        hp,
+        maxHp: hp,
+        durability,
+        maxDurability: durability,
+        destroyed: false,
+        isShield,
         skillSlots: units[name].skillSlots,
       };
     }
@@ -247,14 +272,36 @@ function buildAttributes(
 // 辅助函数
 // ============================================
 
-/** 累加所有部件的指定属性值 */
-function sumPartStat(units: Record<string, ParsedUnit>, field: string): number {
+/** 按 type 过滤后累加部件的指定属性值；allowedTypes 缺省则累加全部 */
+function sumPartStat(
+  units: Record<string, ParsedUnit>,
+  field: string,
+  allowedTypes?: string[]
+): number {
   let total = 0;
   for (const unit of Object.values(units)) {
+    if (allowedTypes && !allowedTypes.includes(normalizePartType(unit.type))) continue;
     const val = (unit as any)[field];
     if (typeof val === 'number') total += val;
   }
   return total;
+}
+
+/** 部件 type 归一（机体/武器/防具/载具/背包/跟随） */
+function normalizePartType(t: string | undefined): string {
+  if (!t) return '未知';
+  const s = String(t).trim();
+  const ALIAS: Record<string, string> = {
+    '机体': '机体', '主机体': '机体', '本体': '机体', '机甲': '机体', 'mech': '机体',
+    '武器': '武器', '枪': '武器', '炮': '武器', '剑': '武器', '刃': '武器', 'weapon': '武器',
+    '防具': '防具', '盾': '防具', '装甲': '防具', '护甲': '防具', 'armor': '防具',
+    '载具': '载具', '车': '载具', '推进器': '载具', '飞行器': '载具', 'vehicle': '载具',
+    '背包': '背包', '包': '背包', 'backpack': '背包',
+    '跟随': '跟随', 'royroy': '跟随', '随从': '跟随', '辅机': '跟随', 'follower': '跟随',
+  };
+  if (ALIAS[s]) return ALIAS[s];
+  const lower = s.toLowerCase();
+  return ALIAS[lower] || s;
 }
 
 export default normalizeParsedData;

@@ -33,41 +33,63 @@ class EquipmentDurability {
      * @param {Object} unit - 战斗单位
      */
     register(unit) {
-        if (!unit || !unit.id && !unit.unit_id) return;
+        if (!unit || !(unit.id || unit.unit_id)) return;
         const uid = unit.id || unit.unit_id;
 
-        this._state[uid] = {
-            // 装备槽位耐久度
-            left_hand: {
-                type: unit.left_hand_type,
-                durability: unit.left_hand_durability || 0,
-                melee: unit.left_hand_melee || 0,
-                ranged: unit.left_hand_ranged || 0,
-                defense: unit.left_hand_defense || 0,
-                resistance: unit.left_hand_resistance || null
-            },
-            right_hand: {
-                type: unit.right_hand_type,
-                durability: unit.right_hand_durability || 0,
-                melee: unit.right_hand_melee || 0,
-                ranged: unit.right_hand_ranged || 0,
-                defense: unit.right_hand_defense || 0,
-                resistance: unit.right_hand_resistance || null
-            },
-            extra: {
-                type: unit.extra_type,
-                durability: unit.extra_durability || 0,
-                melee: unit.extra_melee || 0,
-                ranged: unit.extra_ranged || 0,
-                defense: unit.extra_defense || 0,
-                resistance: unit.extra_resistance || null
-            },
+        const slots = ['left_hand', 'right_hand', 'extra'];
+        const state = {
+            left_hand: { type: null, durability: 0, melee: 0, ranged: 0, defense: 0, resistance: null, hp: 0, maxHp: 0, broken: false },
+            right_hand: { type: null, durability: 0, melee: 0, ranged: 0, defense: 0, resistance: null, hp: 0, maxHp: 0, broken: false },
+            extra: { type: null, durability: 0, melee: 0, ranged: 0, defense: 0, resistance: null, hp: 0, maxHp: 0, broken: false },
             // 特殊装备耐久度
             special_full_armor: (unit.equipment && unit.equipment.full_armor) ? 5 : 0,
             special_coating: (unit.equipment && unit.equipment.coating) ? 5 : 0,
             special_shield_gen: (unit.equipment && unit.equipment.shield_gen) ? 5 : 0,
             special_reactive_armor: (unit.equipment && unit.equipment.reactive_armor) ? 5 : 0
         };
+
+        // 阶段二：优先从新模型 unit.equipState（数组）构建装备槽
+        const eq = (unit.equipState && Array.isArray(unit.equipState)) ? unit.equipState : null;
+        if (eq) {
+            const TYPE_MAP = { '武器': 'weapon', '防具': 'armor', '载具': 'thruster', '背包': 'support' };
+            eq.forEach((e, i) => {
+                const slot = slots[i % slots.length];
+                const t = TYPE_MAP[e.type] || 'weapon';
+                state[slot] = {
+                    type: t,
+                    durability: e.durability ?? 0,
+                    maxDurability: e.maxDurability ?? e.durability ?? 0,
+                    melee: e.melee || 0,
+                    ranged: e.ranged || 0,
+                    defense: e.defense || 0,
+                    resistance: e.resistance || null,
+                    hp: e.hp ?? 0,
+                    maxHp: e.maxHp ?? e.hp ?? 0,
+                    broken: !!e.destroyed,
+                    _idx: i,
+                };
+            });
+        } else {
+            // 兼容旧字段（left_hand_* 等）
+            ['left_hand', 'right_hand', 'extra'].forEach((slot) => {
+                const type = unit[`${slot}_type`];
+                if (!type) return;
+                state[slot] = {
+                    type,
+                    durability: unit[`${slot}_durability`] ?? 0,
+                    melee: unit[`${slot}_melee`] ?? 0,
+                    ranged: unit[`${slot}_ranged`] ?? 0,
+                    defense: unit[`${slot}_defense`] ?? 0,
+                    resistance: unit[`${slot}_resistance`] ?? null,
+                    hp: unit[`${slot}_hp`] ?? 0,
+                    maxHp: unit[`${slot}_hp`] ?? 0,
+                    broken: false,
+                    _idx: -1,
+                };
+            });
+        }
+
+        this._state[uid] = state;
     }
 
     /**
@@ -98,29 +120,31 @@ class EquipmentDurability {
         let absorbed = 0;
         const changes = [];
 
-        // 1. 防具抵消伤害（装甲/盾牌）
+        // 阶段二：防具/背包作为独立伤害吸收槽，每次分担 3 点（扣减独立 HP 与耐久）
         const armorSlots = ['left_hand', 'right_hand', 'extra'].filter(
-            slot => state[slot].type === 'armor' && state[slot].durability > 0
+            slot => state[slot].type === 'armor' && !state[slot].broken
         );
 
         for (const slot of armorSlots) {
             if (remaining <= 0) break;
             const armor = state[slot];
-            const absorbAmount = Math.min(remaining, 3);
+            const absorbAmount = Math.min(remaining, 3); // 每个吸收槽每次最多分担 3 点伤害
             remaining -= absorbAmount;
             absorbed += absorbAmount;
             armor.durability -= 1;
+            armor.hp -= absorbAmount; // 扣减独立 HP（规则3）
 
             changes.push({
                 type: 'armor_absorb',
                 slot,
                 absorbed: absorbAmount,
-                durability_after: armor.durability,
-                broken: armor.durability <= 0
+                durability_after: Math.max(0, armor.durability),
+                hp_after: Math.max(0, armor.hp),
+                broken: armor.durability <= 0 || armor.hp <= 0
             });
 
-            // 耐久归零 → 移除加成
-            if (armor.durability <= 0) {
+            // HP 或耐久任一归零 → 标记损坏/丢弃
+            if (armor.durability <= 0 || armor.hp <= 0) {
                 this._onEquipmentBroken(unit, slot, armor);
             }
         }
@@ -231,6 +255,13 @@ class EquipmentDurability {
      */
     _onEquipmentBroken(unit, slot, equipData) {
         equipData.broken = true;
+
+        // 阶段二：同步回写新模型 unit.equipState（供序列化/HUD 展示损坏状态）
+        if (equipData._idx != null && equipData._idx >= 0 && unit.equipState && unit.equipState[equipData._idx]) {
+            unit.equipState[equipData._idx].destroyed = true;
+            unit.equipState[equipData._idx].hp = 0;
+            unit.equipState[equipData._idx].durability = 0;
+        }
 
         switch (equipData.type) {
             case 'weapon':

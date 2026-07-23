@@ -55,6 +55,7 @@ export type {
   CreateRoomRequest,
   JoinRoomRequest,
   BattleUnit,
+  RoyroyState,
   StatusEffect,
   BattleState,
   BattleLogEntry,

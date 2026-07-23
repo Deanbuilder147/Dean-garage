@@ -11,11 +11,16 @@
     <div class="hex-engine-container" ref="engineContainer">
       <canvas ref="mainCanvas"></canvas>
     </div>
-    <!-- 双轴平移滑槽 -->
+    <!-- 双轴平移滑槽（界面右侧角落：纵轴=立直滑轮，横轴=横向滑轮） -->
     <div class="slider-panel" @mousedown.stop @click.stop>
-      <input type="range" class="slider-track slider-h" min="0" max="100" :value="hSlider" @input="onHSlider" title="水平平移">
-      <span class="slider-divider">|</span>
-      <input type="range" class="slider-track slider-v" min="0" max="100" :value="vSlider" @input="onVSlider" title="垂直平移">
+      <div class="pan-axis pan-axis-v">
+        <span class="pan-axis-label">纵轴</span>
+        <input type="range" class="slider-track slider-v" min="0" max="100" :value="vSlider" @input="onVSlider" title="垂直平移（纵轴）">
+      </div>
+      <div class="pan-axis pan-axis-h">
+        <span class="pan-axis-label">横轴</span>
+        <input type="range" class="slider-track slider-h" min="0" max="100" :value="hSlider" @input="onHSlider" title="水平平移（横轴）">
+      </div>
     </div>
     <div class="cursor-hint" v-if="hoverLabel">{{ hoverLabel }}</div>
   </div>
@@ -51,16 +56,18 @@
  *  - 数据持久化
  * ================================================================
  */
-import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import {
+  drawHexPath, drawHexPathDeformed,
+  drawIsoHexPath, drawIsoHexPathDeformed, drawIsoHexColumn,
+} from '../utils/hexDraw.js'
 import {
   HEX_WIDTH, HEX_HEIGHT, HEX_RADIUS,
   DEFAULT_SPACING_H, DEFAULT_SPACING_V,
   pointyTopCenter, pointyTopToHex,
-  drawHexPath, drawHexPathDeformed,
-  drawIsoHexPath, drawIsoHexPathDeformed,
   isoTransformPoint, isoInverseTransformPoint,
   UNIVERSAL_TERRAIN_MAP,
-  ISO_DEFAULTS,
+  ISO_DEFAULTS, PLANAR_CONFIG,
 } from '../utils/hexUtils.js'
 
 // ================================================================
@@ -102,12 +109,42 @@ const props = defineProps({
   drawFn: { type: Function, default: null },
 
   /**
+   * 是否在网格中高亮画布中心点
+   * 编辑器 50×50 时，中心 = floor((50-1)/2)=24 起的 2×2 块 (q24-25, r24-25)
+   * 即坐标标签的 Y25/Z25/Y26/Z26（"y25:z26" 四个格子）
+   */
+  showCenterMarker: { type: Boolean, default: false },
+
+  /**
    * 等距视角配置
    * { shearX, shearY, scaleX, scaleY, rotation, topFlat, bottomFlat }
    */
   isoConfig: {
     type: Object,
     default: () => ({ ...ISO_DEFAULTS })
+  },
+
+  /**
+   * 渲染模式
+   * 'planar' — 顶视平面（强制 PLANAR_CONFIG，用于地图编辑器，需求①）
+   * 'iso'    — 伪 3D 等距（沿用传入 isoConfig，用于战场）
+   */
+  mode: {
+    type: String,
+    default: 'iso',
+    validator: (v) => v === 'planar' || v === 'iso',
+  },
+
+  /** 是否启用 2.5D 挤出立柱（需求③）；渲染分支在阶段 3 接入 */
+  extrude: {
+    type: Boolean,
+    default: false,
+  },
+
+  /** 需求④ 全局地形素材库：terrainId → 材质图 url（CanvasPattern 平铺，纯色回退） */
+  terrainMaterials: {
+    type: Object,
+    default: () => ({}),
   },
 
   /** 是否显示坐标标签 */
@@ -138,16 +175,58 @@ const engineWrapper = ref(null)
 const engineContainer = ref(null)
 const mainCanvas = ref(null)
 
-const scale = ref(1)
-const offsetX = ref(60)
-const offsetY = ref(60)
+// ================================================================
+//  Camera 对象（§3.2g 收拢：offsetX/offsetY/scale/ISO 单一真相源）
+//  外部/内部仍通过 offsetX.value / scale.value / ISO.xxx 访问（零回归）
+// ================================================================
+const camera = reactive({
+  offsetX: 60,
+  offsetY: 60,
+  scale: 1,
+  iso: { ...ISO_DEFAULTS, ...props.isoConfig }, // 平顶化前的默认 ISO
+  viewport: { width: 0, height: 0 },            // 供略缩图栏读取（§3.5）
+})
+
+// 模式切换：planar 强制 PLANAR_CONFIG（顶视）；iso 沿用传入 isoConfig
+const effectiveIso = computed(() =>
+  props.mode === 'planar'
+    ? PLANAR_CONFIG
+    : { ...ISO_DEFAULTS, ...props.isoConfig }
+)
+watch(effectiveIso, (v) => { Object.assign(camera.iso, v) }, { immediate: true })
+// ISO / 挤出开关变化 → 地形缓存失效并重绘（§3.2d）
+watch(effectiveIso, () => { invalidateTerrain() })
+watch(() => props.extrude, () => { invalidateTerrain() })
+// 需求④ 材质变化：预加载图片并重绘（异步加载完成由 onload 再次触发）
+watch(() => props.terrainMaterials, (m) => {
+  if (m && typeof m === 'object') Object.values(m).forEach((url) => ensureMaterialImage(url))
+  invalidateTerrain()
+}, { immediate: true, deep: true })
+
+// 兼容访问器：维持组件内 offsetX.value / scale.value / ISO.xxx 原用法不变
+const scale = computed({ get: () => camera.scale, set: (v) => { camera.scale = v } })
+const offsetX = computed({ get: () => camera.offsetX, set: (v) => { camera.offsetX = v } })
+const offsetY = computed({ get: () => camera.offsetY, set: (v) => { camera.offsetY = v } })
+const ISO = camera.iso
+
+// 需求④ 材质图片缓存（异步加载，onload 触发重绘；失败缓存避免反复请求）
+const materialImageCache = new Map()
+function ensureMaterialImage(url) {
+  if (!url) return null
+  const cached = materialImageCache.get(url)
+  if (cached) return cached
+  const img = new Image()
+  img.onload = () => { materialImageCache.set(url, img); invalidateTerrain() }
+  img.onerror = () => { materialImageCache.set(url, { complete: true, __failed: true }); invalidateTerrain() }
+  img.src = url
+  materialImageCache.set(url, img)
+  return img
+}
+
 const hSlider = ref(50)
 const vSlider = ref(50)
 const hoverLabel = ref('')
 const frameClock = ref(0)
-
-// ISO 矩阵参数
-const ISO = reactive({ ...ISO_DEFAULTS, ...props.isoConfig })
 
 // 视口裁剪可见范围
 const visibleRange = reactive({ minQ: 0, maxQ: 0, minR: 0, maxR: 0 })
@@ -224,7 +303,12 @@ function canvasPosToHex(cx, cy) {
   const worldX = (cx - offsetX.value) / scale.value
   const worldY = (cy - offsetY.value) / scale.value
 
-  const { x: flatX, y: flatY } = isoInverseTransformPoint(worldX, worldY, ISO)
+  // planar(编辑器)：世界坐标即纯净 2D 坐标（worldOf 恒等），无需 ISO 逆变换
+  // iso(战场)：需 isoInverseTransformPoint 逆解回 2D
+  const flat = props.mode === 'planar'
+    ? { x: worldX, y: worldY }
+    : isoInverseTransformPoint(worldX, worldY, ISO)
+  const flatX = flat.x, flatY = flat.y
 
   const r = Math.round(flatY / (1.5 * HEX_RADIUS * v))
 
@@ -240,8 +324,11 @@ function canvasPosToWorld(cx, cy) {
   const relY = cy - offsetY.value
   const worldX = relX / scale.value
   const worldY = relY / scale.value
-  const { x: flatX, y: flatY } = isoInverseTransformPoint(worldX, worldY, ISO)
-  return { x: flatX, y: flatY, wx: worldX, wy: worldY }
+  // planar(编辑器)：世界坐标即纯净 2D 坐标（worldOf 恒等），无需 ISO 逆变换
+  const flat = props.mode === 'planar'
+    ? { x: worldX, y: worldY }
+    : isoInverseTransformPoint(worldX, worldY, ISO)
+  return { x: flat.x, y: flat.y, wx: worldX, wy: worldY }
 }
 
 /** 鼠标事件 → 六角格 (q,r)
@@ -323,10 +410,17 @@ function initTerrainCache() {
   const worldW2D = lastCell.x + HEX_WIDTH * 1.5
   const worldH2D = lastCell.y + HEX_HEIGHT * 1.5
 
-  // CTM: x' = x*scaleX + y*shearX,  y' = x*shearY + y*scaleY
-  // Phase 30-Fix: 缓存高度补上 shearY 对 Y 轴的贡献（之前遗漏导致底部裁剪）
-  const cacheW = Math.ceil(worldW2D * ISO.scaleX + worldH2D * Math.abs(ISO.shearX) + HEX_WIDTH * 4)
-  const cacheH = Math.ceil(worldH2D * ISO.scaleY + worldW2D * Math.abs(ISO.shearY) + HEX_HEIGHT * 4)
+  let cacheW, cacheH
+  if (props.mode === 'planar') {
+    // 编辑器：纯净 2D 世界坐标（无 ISO 变形），缓存按真实 2D 尺寸扩展，避免被 scaleY 压扁裁切
+    cacheW = Math.ceil(worldW2D + HEX_WIDTH * 4)
+    cacheH = Math.ceil(worldH2D + HEX_HEIGHT * 4)
+  } else {
+    // 战场：CTM: x' = x*scaleX + y*shearX,  y' = x*shearY + y*scaleY
+    // Phase 30-Fix: 缓存高度补上 shearY 对 Y 轴的贡献（之前遗漏导致底部裁剪）
+    cacheW = Math.ceil(worldW2D * ISO.scaleX + worldH2D * Math.abs(ISO.shearX) + HEX_WIDTH * 4)
+    cacheH = Math.ceil(worldH2D * ISO.scaleY + worldW2D * Math.abs(ISO.shearY) + HEX_HEIGHT * 4)
+  }
   terrainCache.width = Math.max(cacheW, 100)
   terrainCache.height = Math.max(cacheH, 100)
 }
@@ -357,26 +451,65 @@ function renderTerrainCache() {
     for (let q = 0; q < data.width; q++) {
       const key = `${q},${r}`
       const cell = cellMap.get(key)
-      const terrainId = cell?.terrain || 'moon'
-      const terrainInfo = UNIVERSAL_TERRAIN_MAP[terrainId] || UNIVERSAL_TERRAIN_MAP.moon
-
+      const terrainId = cell?.terrain || 'void'
+      const terrainInfo = UNIVERSAL_TERRAIN_MAP[terrainId] || UNIVERSAL_TERRAIN_MAP.void
       const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
 
-      // Phase 30-Fix: 使用 ISO 逐顶点变换绘制，Canvas 保持纯净 2D
-      if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+      // 留白(void)地形：透明填充，但保留极淡边线使网格结构可见（编辑器与战场均画）。
+      if (terrainId === 'void') {
+        if (props.mode === 'planar') {
+          drawHexPath(tctx, flatX, flatY)
+          tctx.strokeStyle = 'rgba(255,255,255,0.25)'
+          tctx.lineWidth = 0.5
+          tctx.stroke()
+        } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+          drawIsoHexPathDeformed(tctx, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+          tctx.strokeStyle = 'rgba(255,255,255,0.10)'
+          tctx.lineWidth = 0.5
+          tctx.stroke()
+        } else {
+          drawIsoHexPath(tctx, flatX, flatY, ISO)
+          tctx.strokeStyle = 'rgba(255,255,255,0.10)'
+          tctx.lineWidth = 0.5
+          tctx.stroke()
+        }
+        continue
+      }
+
+      // 需求④ 材质：命中 material_url 且已加载 → CanvasPattern 平铺；否则纯色回退
+      const matUrl = props.terrainMaterials ? props.terrainMaterials[terrainId] : null
+      const matImg = matUrl ? ensureMaterialImage(matUrl) : null
+      const matPattern = (matImg && matImg.complete && !matImg.__failed) ? tctx.createPattern(matImg, 'repeat') : null
+
+      // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：挤出/等距绘制。
+      if (props.mode === 'planar') {
+        drawHexPath(tctx, flatX, flatY)
+        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fill()
+        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.lineWidth = 0.5
+        tctx.stroke()
+      } else if (props.extrude && (terrainInfo.height || 0) > 0) {
+        drawIsoHexColumn(tctx, flatX, flatY, ISO, terrainInfo.height, terrainInfo.color, matPattern || terrainInfo.color)
+      } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
         drawIsoHexPathDeformed(tctx, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fill()
+        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.lineWidth = 0.5
+        tctx.stroke()
       } else {
         drawIsoHexPath(tctx, flatX, flatY, ISO)
+        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fill()
+        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.lineWidth = 0.5
+        tctx.stroke()
       }
-      tctx.fillStyle = terrainInfo.color
-      tctx.fill()
-      tctx.strokeStyle = 'rgba(255,255,255,0.08)'
-      tctx.lineWidth = 0.5
-      tctx.stroke()
 
-      // 坐标标签 — 应用 ISO 变换到文本位置
+      // 坐标标签 — planar 用纯净 2D，iso 用 ISO 变换
       if (props.showCoords) {
-        const textPos = isoTransformPoint(flatX, flatY, ISO)
+        const textPos = props.mode === 'planar' ? { x: flatX, y: flatY } : isoTransformPoint(flatX, flatY, ISO)
         tctx.fillStyle = 'rgba(255,255,255,0.35)'
         tctx.font = '9px "Fira Code", monospace'
         tctx.textAlign = 'center'
@@ -392,6 +525,13 @@ function renderTerrainCache() {
 //  棋盘居中
 // ================================================================
 
+// planar(编辑器)：忽略 ISO 等距变换，使用纯净 2D 世界坐标（标准正六边形）。
+// iso(战场)：沿用 isoTransformPoint 统一等距变换。
+function worldOf(flatX, flatY) {
+  if (props.mode === 'planar') return { x: flatX, y: flatY }
+  return isoTransformPoint(flatX, flatY, ISO)
+}
+
 function centerGrid() {
   const canvas = mainCanvas.value
   if (!canvas || !props.gridData) return
@@ -404,11 +544,28 @@ function centerGrid() {
     hexToPixel(0, data.height - 1),
     hexToPixel(data.width - 1, data.height - 1)
   ]
-  const midGrid = hexToPixel(Math.floor(data.width / 2), Math.floor(data.height / 2))
 
-  // Phase 30-Fix: 使用 hexUtils.isoTransformPoint 统一 ISO 变换
-  const transformedCorners = corners.map(p => isoTransformPoint(p.x, p.y, ISO))
-  // 计算ISO变换后的AABB边界（含边距）
+  // 居中锚点：默认画布几何中心。
+  // 战场模式(iso)：改为"画"(实际非 void 留白地形)的包围盒中心，使地图在 100×100 画布中居中、留白环绕。
+  // 编辑器(planar)保持原行为，避免用户涂在角落的画被平移走。
+  let midGrid = hexToPixel(Math.floor(data.width / 2), Math.floor(data.height / 2))
+  if (props.mode === 'iso' && data.cells && data.cells.length) {
+    let minQ = Infinity, maxQ = -Infinity, minR = Infinity, maxR = -Infinity
+    for (const c of data.cells) {
+      if (!c || c.terrain === 'void') continue
+      if (c.q < minQ) minQ = c.q
+      if (c.q > maxQ) maxQ = c.q
+      if (c.r < minR) minR = c.r
+      if (c.r > maxR) maxR = c.r
+    }
+    if (minQ !== Infinity) {
+      midGrid = hexToPixel((minQ + maxQ) / 2, (minR + maxR) / 2)
+    }
+  }
+
+  // Phase 30-Fix: 使用统一 worldOf 变换（planar=恒等，iso=等距）
+  const transformedCorners = corners.map(p => worldOf(p.x, p.y))
+  // 计算变换后的AABB边界（含边距）
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   for (const c of transformedCorners) {
     if (c.x < minX) minX = c.x
@@ -421,22 +578,120 @@ function centerGrid() {
 
   const worldW = maxX - minX
   const worldH = maxY - minY
-  // 变换后的中心点（纯ISO）
-  const isoMid = isoTransformPoint(midGrid.x, midGrid.y, ISO)
+  // 变换后的中心点
+  const isoMid = worldOf(midGrid.x, midGrid.y)
 
   // fit-to-view 逻辑确保完整棋盘可见
   const viewW = canvas.width / scale.value
   const viewH = canvas.height / scale.value
 
   if (worldW > viewW || worldH > viewH) {
-    // 棋盘比视图大，居中显示中心点
+    // 棋盘比视图大，居中显示"画"的中心点
     offsetX.value = canvas.width / 2 - isoMid.x * scale.value
     offsetY.value = canvas.height / 2 - isoMid.y * scale.value
   } else {
-    // 棋盘比视图小，完全居中
-    offsetX.value = (canvas.width - worldW * scale.value) / 2 - minX * scale.value
-    offsetY.value = (canvas.height - worldH * scale.value) / 2 - minY * scale.value
+    // 棋盘比视图小，以"画"的中心为锚点居中（留白=空白画布环绕）
+    offsetX.value = canvas.width / 2 - isoMid.x * scale.value
+    offsetY.value = canvas.height / 2 - isoMid.y * scale.value
   }
+}
+
+// 需求② 略缩图点击跳转：把视图中心移到指定格 (q, r)
+function centerOn(q, r) {
+  const canvas = mainCanvas.value
+  if (!canvas || !props.gridData) return
+  const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, getSpacingH(), getSpacingV())
+  const isoMid = worldOf(flatX, flatY)
+  offsetX.value = canvas.width / 2 - isoMid.x * scale.value
+  offsetY.value = canvas.height / 2 - isoMid.y * scale.value
+  invalidateTerrain()
+  redraw()
+}
+
+// 计算"整张网格完整落入视口"所需的最小缩放（用户需求：缩到最小即整图可见，不再继续缩小）
+function computeFitScale() {
+  const canvas = mainCanvas.value
+  const data = props.gridData
+  if (!canvas || !data) return 0.2
+  const corners = [
+    hexToPixel(0, 0), hexToPixel(data.width - 1, 0),
+    hexToPixel(0, data.height - 1), hexToPixel(data.width - 1, data.height - 1),
+  ].map(p => worldOf(p.x, p.y))
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x
+    if (c.x > maxX) maxX = c.x
+    if (c.y < minY) minY = c.y
+    if (c.y > maxY) maxY = c.y
+  }
+  const pad = HEX_WIDTH
+  minX -= pad; maxX += pad; minY -= pad; maxY += pad
+  const regionW = Math.max(1, maxX - minX)
+  const regionH = Math.max(1, maxY - minY)
+  const margin = 0.95
+  const fitW = (canvas.width / regionW) * margin
+  const fitH = (canvas.height / regionH) * margin
+  return Math.max(0.05, Math.min(4, Math.min(fitW, fitH)))
+}
+
+// 战场默认视角：聚焦"画"正中 sideN×sideN 格（默认 10×10），其余靠玩家缩放/平移
+// 计算"画"(非 void)包围盒中心，取 N×N 区域的 ISO 世界 AABB，按视图缩放并居中。
+function focusCentralGrid(sideN = 10) {
+  const canvas = mainCanvas.value
+  const data = props.gridData
+  if (!canvas || !data) return
+
+  // 1) 求"画"的中心 (非 void 包围盒中心)
+  let cq = Math.floor(data.width / 2), cr = Math.floor(data.height / 2)
+  let minQ = Infinity, maxQ = -Infinity, minR = Infinity, maxR = -Infinity
+  if (data.cells && data.cells.length) {
+    for (const c of data.cells) {
+      if (!c || c.terrain === 'void') continue
+      if (c.q < minQ) minQ = c.q
+      if (c.q > maxQ) maxQ = c.q
+      if (c.r < minR) minR = c.r
+      if (c.r > maxR) maxR = c.r
+    }
+    if (minQ !== Infinity) {
+      cq = (minQ + maxQ) / 2
+      cr = (minR + maxR) / 2
+    } else {
+      minQ = 0; maxQ = data.width - 1; minR = 0; maxR = data.height - 1
+    }
+  } else {
+    minQ = 0; maxQ = data.width - 1; minR = 0; maxR = data.height - 1
+  }
+
+  // 2) 取 N×N 区域的 ISO 世界 AABB（夹紧到地图实际范围，避免小图过度缩小）
+  const half = Math.min(sideN / 2, Math.max(0, (maxQ - minQ) / 2), Math.max(0, (maxR - minR) / 2))
+  const qs = [cq - half, cq + half]
+  const rs = [cr - half, cr + half]
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const q of qs) for (const r of rs) {
+    const p = hexToPixel(q, r)
+    const iso = isoTransformPoint(p.x, p.y, ISO)
+    if (iso.x < minX) minX = iso.x
+    if (iso.x > maxX) maxX = iso.x
+    if (iso.y < minY) minY = iso.y
+    if (iso.y > maxY) maxY = iso.y
+  }
+  // 加半格边距，让 10×10 块四周留一点呼吸空间
+  minX -= HEX_WIDTH / 2; maxX += HEX_WIDTH / 2
+  minY -= HEX_HEIGHT / 2; maxY += HEX_HEIGHT / 2
+  const regionW = maxX - minX
+  const regionH = maxY - minY
+  const margin = 0.9
+  const fitW = (canvas.width / regionW) * margin
+  const fitH = (canvas.height / regionH) * margin
+  let ns = Math.min(fitW, fitH)
+  ns = Math.max(computeFitScale(), Math.min(4, ns))
+  scale.value = ns
+
+  // 3) 居中该区域
+  const center = isoTransformPoint(hexToPixel(cq, cr).x, hexToPixel(cq, cr).y, ISO)
+  offsetX.value = canvas.width / 2 - center.x * ns
+  offsetY.value = canvas.height / 2 - center.y * ns
+  updateVisibleRange()
 }
 
 // ================================================================
@@ -453,15 +708,20 @@ function initCanvas() {
   canvas.width = container.clientWidth
   canvas.height = container.clientHeight
   canvas.style.display = 'block'
+  camera.viewport.width = canvas.width
+  camera.viewport.height = canvas.height
 
-  // 大网格自动缩放到 0.5x
-  if (props.gridData.width > 30 || props.gridData.height > 30) {
+  // 战场(iso)：进入默认聚焦地图正中 10×10 格，其余靠玩家缩放/平移。
+  // 编辑器(planar)：大网格自动缩放到整图可见的 0.5x。
+  if (props.mode === 'iso') {
+    focusCentralGrid(10)
+  } else if (props.gridData.width > 30 || props.gridData.height > 30) {
     scale.value = 0.5
   }
 
   initTerrainCache()
   renderTerrainCache()
-  centerGrid()
+  if (props.mode !== 'iso') centerGrid()
   updateVisibleRange()
   isFirstDraw = false
   draw()
@@ -474,13 +734,15 @@ function initCanvas() {
 function draw() {
   const canvas = mainCanvas.value
   if (!canvas || !ctx) return
+  camera.viewport.width = canvas.width
+  camera.viewport.height = canvas.height
 
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.save()
 
   // === 纯净 2D 视口矩阵：仅 scale + translate，零 ISO 参数 ===
   // 严禁在此处传入 shearX/shearY/scaleX/scaleY！
-  // ISO 等距变换由 hexUtils.js 的 drawIsoHexPath/drawIsoHexPathDeformed
+  // ISO 等距变换由 hexDraw.js 的 drawIsoHexPath/drawIsoHexPathDeformed
   // 在逐顶点层面精确施加，Canvas 只负责视口缩放与平移。
   ctx.setTransform(
     scale.value,     // a: 水平缩放（仅限视口放大缩小）
@@ -501,6 +763,11 @@ function draw() {
 
   // === 第二层：高亮格子覆盖 ===
   renderHighlights(ctx)
+
+  // === 第二层半：画布中心点高亮（编辑器） ===
+  if (props.showCenterMarker) {
+    renderCenterMarker(ctx)
+  }
 
   // === 第三层：父层追加 (单位/范围/特效) ===
   //  通过局部 save/transform/restore 临时施加 ISO 以保持向后兼容
@@ -536,12 +803,35 @@ function renderTerrainInline(ctx2d) {
     for (let q = visibleRange.minQ; q <= visibleRange.maxQ; q++) {
       const key = `${q},${r}`
       const cell = cellMap.get(key)
-      const terrainId = cell?.terrain || 'moon'
-      const terrainInfo = UNIVERSAL_TERRAIN_MAP[terrainId] || UNIVERSAL_TERRAIN_MAP.moon
+      const terrainId = cell?.terrain || 'void'
+      const terrainInfo = UNIVERSAL_TERRAIN_MAP[terrainId] || UNIVERSAL_TERRAIN_MAP.void
       const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
 
-      // Phase 30-Fix: ISO 逐顶点变换绘制，Canvas 纯净 2D
-      if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+      // 留白(void)地形：透明填充，但保留极淡边线使网格结构可见（编辑器与战场均画）。
+      if (terrainId === 'void') {
+        if (props.mode === 'planar') {
+          drawHexPath(ctx2d, flatX, flatY)
+          ctx2d.strokeStyle = 'rgba(255,255,255,0.25)'
+          ctx2d.lineWidth = 0.5
+          ctx2d.stroke()
+        } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+          drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+          ctx2d.strokeStyle = 'rgba(255,255,255,0.10)'
+          ctx2d.lineWidth = 0.5
+          ctx2d.stroke()
+        } else {
+          drawIsoHexPath(ctx2d, flatX, flatY, ISO)
+          ctx2d.strokeStyle = 'rgba(255,255,255,0.10)'
+          ctx2d.lineWidth = 0.5
+          ctx2d.stroke()
+        }
+        continue
+      }
+
+      // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：等距逐顶点绘制。
+      if (props.mode === 'planar') {
+        drawHexPath(ctx2d, flatX, flatY)
+      } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
         drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
       } else {
         drawIsoHexPath(ctx2d, flatX, flatY, ISO)
@@ -553,7 +843,7 @@ function renderTerrainInline(ctx2d) {
       ctx2d.stroke()
 
       if (props.showCoords) {
-        const textPos = isoTransformPoint(flatX, flatY, ISO)
+        const textPos = props.mode === 'planar' ? { x: flatX, y: flatY } : isoTransformPoint(flatX, flatY, ISO)
         ctx2d.fillStyle = 'rgba(255,255,255,0.35)'
         ctx2d.font = '9px "Fira Code", monospace'
         ctx2d.textAlign = 'center'
@@ -584,8 +874,10 @@ function renderHighlights(ctx2d) {
       ? { fill: hc.color, stroke: hc.color }
       : (styleColors[hc.style] || styleColors.select)
 
-    // Phase 30-Fix: ISO 逐顶点变换绘制
-    if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+    // 编辑器(planar)：标准正六边形；战场(iso)：等距
+    if (props.mode === 'planar') {
+      drawHexPath(ctx2d, flatX, flatY)
+    } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
       drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
     } else {
       drawIsoHexPath(ctx2d, flatX, flatY, ISO)
@@ -598,7 +890,7 @@ function renderHighlights(ctx2d) {
     ctx2d.lineWidth = 1
 
     if (hc.label) {
-      const textPos = isoTransformPoint(flatX, flatY + 16, ISO)
+      const textPos = props.mode === 'planar' ? { x: flatX, y: flatY + 16 } : isoTransformPoint(flatX, flatY + 16, ISO)
       ctx2d.fillStyle = '#fff'
       ctx2d.font = 'bold 11px "Fira Code", monospace'
       ctx2d.textAlign = 'center'
@@ -610,8 +902,10 @@ function renderHighlights(ctx2d) {
   // === 鼠标悬停高亮边框 (hlQ/hlR 复活) ===
   if (props.showHover && hlQ >= 0 && hlR >= 0 && isInViewport(hlQ, hlR)) {
     const { flatX, flatY } = pointyTopCenter(hlQ, hlR, HEX_RADIUS, h, v)
-    // Phase 30-Fix: ISO 逐顶点变换绘制
-    if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+    // 编辑器(planar)：标准正六边形；战场(iso)：等距
+    if (props.mode === 'planar') {
+      drawHexPath(ctx2d, flatX, flatY)
+    } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
       drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
     } else {
       drawIsoHexPath(ctx2d, flatX, flatY, ISO)
@@ -621,6 +915,65 @@ function renderHighlights(ctx2d) {
     ctx2d.stroke()
     ctx2d.lineWidth = 1
   }
+}
+
+// ================================================================
+//  画布中心点高亮（编辑器 50×50 → y25:z26 这 2×2 格）
+// ================================================================
+function renderCenterMarker(ctx2d) {
+  const data = props.gridData
+  if (!data) return
+  const gw = data.width || 50
+  const gh = data.height || 50
+  // 中心 2×2 块：floor((n-1)/2) 起的相邻两格
+  const cq = Math.floor((gw - 1) / 2)
+  const cr = Math.floor((gh - 1) / 2)
+  const block = [
+    { q: cq, r: cr }, { q: cq + 1, r: cr },
+    { q: cq, r: cr + 1 }, { q: cq + 1, r: cr + 1 },
+  ]
+  const sh = getSpacingH()
+  const sv = getSpacingV()
+
+  ctx2d.save()
+  // 1) 四格金色描边 + 淡填充
+  for (const c of block) {
+    if (!isInViewport(c.q, c.r)) continue
+    const { flatX, flatY } = pointyTopCenter(c.q, c.r, HEX_RADIUS, sh, sv)
+    if (props.mode === 'planar') {
+      drawHexPath(ctx2d, flatX, flatY)
+    } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
+      drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+    } else {
+      drawIsoHexPath(ctx2d, flatX, flatY, ISO)
+    }
+    ctx2d.fillStyle = 'rgba(255, 176, 0, 0.18)'
+    ctx2d.fill()
+    ctx2d.strokeStyle = 'rgba(255, 176, 0, 0.95)'
+    ctx2d.lineWidth = 2.5
+    ctx2d.stroke()
+  }
+
+  // 2) 中心十字（金线）定位 2×2 块几何中心
+  const a = pointyTopCenter(cq, cr, HEX_RADIUS, sh, sv)
+  const b = pointyTopCenter(cq + 1, cr + 1, HEX_RADIUS, sh, sv)
+  const cx0 = (a.flatX + b.flatX) / 2
+  const cy0 = (a.flatY + b.flatY) / 2
+  ctx2d.strokeStyle = 'rgba(255, 215, 0, 0.9)'
+  ctx2d.lineWidth = 1.5
+  ctx2d.beginPath()
+  ctx2d.moveTo(cx0 - 18, cy0); ctx2d.lineTo(cx0 + 18, cy0)
+  ctx2d.moveTo(cx0, cy0 - 14); ctx2d.lineTo(cx0, cy0 + 14)
+  ctx2d.stroke()
+  ctx2d.lineWidth = 1
+
+  // 3) 标注文字 "中心"
+  ctx2d.fillStyle = 'rgba(255, 215, 0, 0.95)'
+  ctx2d.font = '11px "Fira Code", monospace'
+  ctx2d.textAlign = 'center'
+  ctx2d.textBaseline = 'middle'
+  ctx2d.fillText('中心 CENTER', cx0, cy0 - 22)
+  ctx2d.restore()
 }
 
 // ================================================================
@@ -659,8 +1012,8 @@ function getGridDims() {
   // 取棋盘右下角在 ISO 空间中的位置
   const lastCell = hexToPixel(data.width - 1, data.height - 1)
   const originCell = hexToPixel(0, 0)
-  const isoLast = isoTransformPoint(lastCell.x + HEX_RADIUS * 2, lastCell.y + HEX_RADIUS * 2, ISO)
-  const isoOrigin = isoTransformPoint(originCell.x - HEX_RADIUS, originCell.y - HEX_RADIUS, ISO)
+  const isoLast = worldOf(lastCell.x + HEX_RADIUS * 2, lastCell.y + HEX_RADIUS * 2)
+  const isoOrigin = worldOf(originCell.x - HEX_RADIUS, originCell.y - HEX_RADIUS)
   const gridW = isoLast.x - isoOrigin.x
   const gridH = isoLast.y - isoOrigin.y
   return { gridW: Math.max(gridW, 200), gridH: Math.max(gridH, 200) }
@@ -722,7 +1075,7 @@ function setupEvents() {
     if (isDragging) return
     const hex = getHexAtEvent(e)
     const data = props.gridData
-    if (hex.q >= 0 && hex.q < data.width && hex.r >= 0 && hex.r < data.height) {
+    if (hex.q >= 0 && hex.q < (data.width || 100) && hex.r >= 0 && hex.r < (data.height || 100)) {
       emit('cell-clicked', { q: hex.q, r: hex.r })
     }
   })
@@ -768,7 +1121,7 @@ function setupEvents() {
 
     const hex = getHexAtEvent(e)
     const data = props.gridData
-    if (hex.q >= 0 && hex.q < data.width && hex.r >= 0 && hex.r < data.height) {
+    if (hex.q >= 0 && hex.q < (data.width || 100) && hex.r >= 0 && hex.r < (data.height || 100)) {
       hlQ = hex.q; hlR = hex.r
       if (props.showHover) hoverLabel.value = formatCoord(hex.q, hex.r)
     } else {
@@ -788,7 +1141,7 @@ function setupEvents() {
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1
-    const ns = Math.max(0.2, Math.min(3, scale.value * delta))
+    const ns = Math.max(computeFitScale(), Math.min(3, scale.value * delta))
     const worldPos = getWorldPos(e)
     offsetX.value += (scale.value - ns) * worldPos.wx
     offsetY.value += (scale.value - ns) * worldPos.wy
@@ -819,7 +1172,7 @@ function zoomIn() {
 function zoomOut() {
   const canvas = mainCanvas.value
   if (!canvas) return
-  const ns = Math.max(0.2, scale.value / 1.2)
+  const ns = Math.max(computeFitScale(), scale.value / 1.2)
   const wc = canvasPosToWorld(canvas.width / 2, canvas.height / 2)
   offsetX.value += (scale.value - ns) * wc.wx
   offsetY.value += (scale.value - ns) * wc.wy
@@ -835,7 +1188,7 @@ function zoomReset() {
   const data = props.gridData
   // Phase 30-Fix: 使用 isoTransformPoint 计算精确 ISO 视觉边界
   const lastCell = hexToPixel(data.width - 1, data.height - 1)
-  const isoLast = isoTransformPoint(lastCell.x + HEX_RADIUS * 2, lastCell.y + HEX_RADIUS * 2, ISO)
+  const isoLast = worldOf(lastCell.x + HEX_RADIUS * 2, lastCell.y + HEX_RADIUS * 2)
   const cw = isoLast.x + 200
   const ch = isoLast.y + 200
   const viewW = wrapper.clientWidth
@@ -867,12 +1220,12 @@ function getVisibleRange() {
 
 defineExpose({
   mainCanvas, engineWrapper, engineContainer,
-  ctx, scale, offsetX, offsetY, ISO,
+  ctx, scale, offsetX, offsetY, ISO, camera,
   hexToPixel, pixelToHex, getWorldPos, canvasPosToWorld,
   getHexAtEvent,
   zoomIn, zoomOut, zoomReset, redraw, invalidateTerrain, centerGrid,
   getVisibleRange, isInViewport,
-  draw,
+  draw, centerOn, focusCentralGrid,
 })
 
 // ================================================================
@@ -951,7 +1304,9 @@ onMounted(async () => {
       if (!canvas || !container) return
       canvas.width = container.clientWidth
       canvas.height = container.clientHeight
-      centerGrid()
+      // 战场(iso)保持 focusCentralGrid 的 10×10 默认视角；编辑器回到整图居中
+      if (props.mode === 'iso') focusCentralGrid(10)
+      else centerGrid()
       updateVisibleRange()
       draw()
     }, 150)
@@ -1012,50 +1367,73 @@ onUnmounted(() => {
   z-index: 10;
 }
 
-/* 双轴平移滑槽 */
+/* 双轴平移滑槽（界面右侧角落） */
 .slider-panel {
   position: absolute;
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 14px;
+  bottom: 14px;
   z-index: 20;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 10px;
   background: rgba(6, 18, 24, 0.82);
   border: 1px solid rgba(255, 176, 0, 0.18);
-  border-radius: 6px;
-  padding: 3px 10px;
+  border-radius: 8px;
+  padding: 10px 12px;
   backdrop-filter: blur(4px);
+}
+
+.pan-axis {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.pan-axis-label {
+  color: rgba(255, 176, 0, 0.75);
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  letter-spacing: 1px;
+  user-select: none;
 }
 
 .slider-track {
   -webkit-appearance: none;
   appearance: none;
-  height: 3px;
   background: rgba(255, 176, 0, 0.12);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
 }
 
-.slider-h { width: 140px; }
-.slider-v { width: 100px; }
+/* 横轴：横向滑轮 */
+.slider-h { width: 140px; height: 4px; }
+
+/* 纵轴：立直滑轮（垂直方向） */
+.slider-v {
+  width: 4px;
+  height: 130px;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: slider-vertical;
+}
 
 .slider-track::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 11px; height: 11px;
+  width: 13px; height: 13px;
   border-radius: 50%;
   background: #ffb000;
   border: 1.5px solid #0d1f2d;
   cursor: grab;
 }
-
-.slider-divider {
-  color: rgba(255, 176, 0, 0.25);
-  font-size: 10px;
-  margin: 0 4px;
-  user-select: none;
+.slider-track::-moz-range-thumb {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #ffb000;
+  border: 1.5px solid #0d1f2d;
+  cursor: grab;
 }
 </style>

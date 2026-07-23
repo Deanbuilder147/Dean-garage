@@ -23,7 +23,7 @@
           <p class="bf-desc">{{ bf.description || '战略要地，适合各类机甲编队展开作战。' }}</p>
           <div class="bf-footer">
             <div class="bf-stats">
-              <span>尺寸: {{ bf.columns || bf.width || 20 }}列 × {{ bf.rows || bf.height || 20 }}行</span>
+              <span>尺寸: {{ bf.columns || bf.width || 100 }}列 × {{ bf.rows || bf.height || 100 }}行</span>
               <span>|</span>
               <span>难度: {{ bf.difficulty || '标准' }}</span>
             </div>

@@ -145,9 +145,9 @@ export class ExcelValidator {
       return;
     }
 
-    // 统计各单位技能数量
+    // 统计各单位技能数量（键统一为中文口径，与解析器/落库一致）
     const skillCounts = {
-      main: 0, royroy: 0, left: 0, right: 0, extra: 0
+      主机体: 0, 跟随: 0, 左手: 0, 右手: 0, 其它: 0
     };
 
     for (let i = 0; i < skills.length; i++) {
@@ -187,11 +187,11 @@ export class ExcelValidator {
     // 检查技能数量是否超过限制
     const limits = this.config.sheets.skills.slots;
     const maxSlots = {
-      main: limits.main.length,
-      royroy: limits.royroy.length,
-      left: limits.left.length,
-      right: limits.right.length,
-      extra: limits.extra.length
+      主机体: limits.main.length,
+      跟随: limits.royroy.length,
+      左手: limits.left.length,
+      右手: limits.right.length,
+      其它: limits.extra.length
     };
 
     for (const [owner, count] of Object.entries(skillCounts)) {
@@ -205,17 +205,17 @@ export class ExcelValidator {
   }
 
   /**
-   * 根据插槽号获取技能所属单位
+   * 根据插槽号获取技能所属单位（统一返回中文口径，与解析器一致）
    */
   getSkillOwner(slot) {
     if (!slot) return null;
-    
+
     const slots = this.config.sheets.skills.slots;
-    if (slots.main.includes(slot)) return 'main';
-    if (slots.royroy.includes(slot)) return 'royroy';
-    if (slots.left.includes(slot)) return 'left';
-    if (slots.right.includes(slot)) return 'right';
-    if (slots.extra.includes(slot)) return 'extra';
+    if (slots.main.includes(slot)) return '主机体';
+    if (slots.royroy.includes(slot)) return '跟随';
+    if (slots.left.includes(slot)) return '左手';
+    if (slots.right.includes(slot)) return '右手';
+    if (slots.extra.includes(slot)) return '其它';
     return null;
   }
 }

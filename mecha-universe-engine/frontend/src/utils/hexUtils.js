@@ -1,6 +1,9 @@
-// ============= 六角格公共工具模块 =============
+// ============= 六角格公共工具模块（纯数学 · 坐标/邻居/ISO 变换/地形表） =============
 // 供 BattlefieldView（地图编辑器）和 NewBattleView（战场指挥）共同使用
 // 修改此文件即可同步影响所有使用六角格的页面
+//
+// ⚠️ Canvas 绘制函数（drawHexPath / drawHexPathDeformed / drawIsoHexPath / drawIsoHexPathDeformed）
+//    已迁至 hexDraw.js（阶段 1 · §3.1g）。本文件只保留"数学真理"，严禁在此新增绘制逻辑。
 
 // ---- 六角格尺寸 ----
 export const HEX_WIDTH = 64
@@ -274,19 +277,37 @@ export function getHexNeighbors(q, r) {
 }
 
 /**
- * 绘制六边形路径
+ * 平顶六边形邻居（Even-Q Offset）— 与 flatTopCenter / flatTopToHex 配套（阶段 1 · §3.1c）。
+ * 平顶与尖顶的相邻关系不同；引擎在阶段 3 切换到平顶渲染时，
+ * 所有"相邻格"逻辑（移动范围 / 命中 / 寻路）必须同步改用本函数。
+ * 数学保证：flatTopToHex(flatTopCenter(neighbor)) === neighbor（axial round-trip 精确）。
+ * @param {number} q
+ * @param {number} r
+ * @returns {Array<{q:number, r:number}>} 6 个相邻格
  */
-export function drawHexPath(ctx, cx, cy) {
-  ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 2
-    const hx = cx + HEX_RADIUS * Math.cos(angle)
-    const hy = cy + HEX_RADIUS * Math.sin(angle)
-    if (i === 0) ctx.moveTo(hx, hy)
-    else ctx.lineTo(hx, hy)
+export function getHexNeighborsFlatTop(q, r) {
+  if (q % 2 === 0) {
+    return [
+      { q: q + 1, r },
+      { q: q + 1, r: r - 1 },
+      { q, r: r - 1 },
+      { q: q - 1, r: r - 1 },
+      { q: q - 1, r },
+      { q, r: r + 1 }
+    ]
+  } else {
+    return [
+      { q: q + 1, r: r + 1 },
+      { q: q + 1, r },
+      { q, r: r - 1 },
+      { q: q - 1, r },
+      { q: q - 1, r: r + 1 },
+      { q, r: r + 1 }
+    ]
   }
-  ctx.closePath()
 }
+
+// ⚠️ drawHexPath 已迁至 hexDraw.js（阶段 1 · §3.1g）。本模块仅保留纯数学。
 
 // ---- 地形配色 ----
 export const TERRAIN_COLORS = {
@@ -294,6 +315,9 @@ export const TERRAIN_COLORS = {
   moon:        { name: '月面',     color: '#888888' },
   lunar:       { name: '月面',     color: '#888888' },
   empty:       { name: '月面',     color: '#888888' },
+  // ★ 留白地形：透明（引擎跳过绘制，露出画布背景）、移动消耗 999 不可通行。
+  // 作为 100×100 画布对"画"之外的填充物，替代原 moon 填充。
+  void:        { name: '留白',     color: 'rgba(120,140,180,0.06)' },
   fortress:    { name: '防御圈',   color: '#9c27b0' },
   base:        { name: '基地',     color: '#4caf50' },
   mothership:  { name: '母舰',     color: '#2196f3' },
@@ -321,28 +345,29 @@ export const TERRAIN_COLORS = {
 //  新增或修改地形时，只需改此处与 TERRAIN_COLORS 即可。
 // ================================================================
 export const UNIVERSAL_TERRAIN_MAP = {
-  space:       { ...TERRAIN_COLORS.space, cost: 1 },
-  moon:        { ...TERRAIN_COLORS.moon, cost: 1 },
-  lunar:       { ...TERRAIN_COLORS.lunar, cost: 1 },
-  empty:       { ...TERRAIN_COLORS.empty, cost: 1 },
-  fortress:    { ...TERRAIN_COLORS.fortress, cost: 5 },
-  base:        { ...TERRAIN_COLORS.base, cost: 1 },
-  mothership:  { ...TERRAIN_COLORS.mothership, cost: 1 },
-  forest:      { ...TERRAIN_COLORS.forest, cost: 2 },
-  desert:      { ...TERRAIN_COLORS.desert, cost: 1.5 },
-  water:       { ...TERRAIN_COLORS.water, cost: 2.5 },
-  mountain:    { ...TERRAIN_COLORS.mountain, cost: 3 },
-  wall:        { ...TERRAIN_COLORS.wall, cost: 99 },
-  repair_station: { ...TERRAIN_COLORS.repair_station, cost: 1 },
-  spawn_earth:  { ...TERRAIN_COLORS.spawn_earth, cost: 0 },
-  spawn_maxion: { ...TERRAIN_COLORS.spawn_maxion, cost: 0 },
-  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0 },
+  space:       { ...TERRAIN_COLORS.space, cost: 1, height: 6 },
+  moon:        { ...TERRAIN_COLORS.moon, cost: 1, height: 8 },
+  lunar:       { ...TERRAIN_COLORS.lunar, cost: 1, height: 8 },
+  empty:       { ...TERRAIN_COLORS.empty, cost: 1, height: 6 },
+  void:        { ...TERRAIN_COLORS.void, cost: 999, height: 0 }, // 留白：不可通行
+  fortress:    { ...TERRAIN_COLORS.fortress, cost: 5, height: 16 },
+  base:        { ...TERRAIN_COLORS.base, cost: 1, height: 8 },
+  mothership:  { ...TERRAIN_COLORS.mothership, cost: 1, height: 10 },
+  forest:      { ...TERRAIN_COLORS.forest, cost: 2, height: 10 },
+  desert:      { ...TERRAIN_COLORS.desert, cost: 1.5, height: 6 },
+  water:       { ...TERRAIN_COLORS.water, cost: 2.5, height: 0 },   // 贴地水面，不挤出
+  mountain:    { ...TERRAIN_COLORS.mountain, cost: 3, height: 22 },
+  wall:        { ...TERRAIN_COLORS.wall, cost: 99, height: 24 },
+  repair_station: { ...TERRAIN_COLORS.repair_station, cost: 1, height: 8 },
+  spawn_earth:  { ...TERRAIN_COLORS.spawn_earth, cost: 0, height: 6 },
+  spawn_maxion: { ...TERRAIN_COLORS.spawn_maxion, cost: 0, height: 6 },
+  spawn:        { ...TERRAIN_COLORS.spawn, cost: 0, height: 6 },
   // Phase 29-GlossaryMerge: 词条库复活地形 — 与 glossary-skill-config.json terrains 100% 对齐
-  plain:        { ...TERRAIN_COLORS.plain, cost: 1 },
-  ruins:        { ...TERRAIN_COLORS.ruins, cost: 2 },
-  crystal:      { ...TERRAIN_COLORS.crystal, cost: 2 },
-  rubble:       { ...TERRAIN_COLORS.rubble, cost: 2 },
-  city_building:{ ...TERRAIN_COLORS.city_building, cost: 1 }
+  plain:        { ...TERRAIN_COLORS.plain, cost: 1, height: 8 },
+  ruins:        { ...TERRAIN_COLORS.ruins, cost: 2, height: 10 },
+  crystal:      { ...TERRAIN_COLORS.crystal, cost: 2, height: 12 },
+  rubble:       { ...TERRAIN_COLORS.rubble, cost: 2, height: 6 },
+  city_building:{ ...TERRAIN_COLORS.city_building, cost: 1, height: 14 }
 }
 
 /**
@@ -388,32 +413,7 @@ export function convertMapFormat(data, direction) {
   throw new Error('convertMapFormat: unknown direction "' + direction + '", use "to-array" or "to-map"')
 }
 
-// ---- 单元格变形绘制 ----
-
-/**
- * 绘制可变形六边形路径（支持顶角/底角扁平度调整）
- * @param ctx Canvas 2D context
- * @param cx 中心 x
- * @param cy 中心 y
- * @param cellW 单元格宽度
- * @param cellH 单元格高度
- * @param topFlat 顶角扁平度 (0=尖顶, 0.5=全平)
- * @param bottomFlat 底角扁平度 (0=尖底, 0.5=全平)
- */
-export function drawHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFlat) {
-  const hw = cellW / 2;
-  const hh = cellH / 2;
-  const sideTopY = cy - hh + topFlat * cellH;     // 顶侧角 Y (topFlat↑ → Y↓)
-  const sideBotY = cy + hh - bottomFlat * cellH;  // 底侧角 Y (bottomFlat↑ → Y↑)
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - hh);           // 顶点 (固定)
-  ctx.lineTo(cx + hw, sideTopY);     // 右上 (Y 可调)
-  ctx.lineTo(cx + hw, sideBotY);     // 右下 (Y 可调)
-  ctx.lineTo(cx, cy + hh);           // 底点 (固定)
-  ctx.lineTo(cx - hw, sideBotY);     // 左下 (Y 可调)
-  ctx.lineTo(cx - hw, sideTopY);     // 左上 (Y 可调)
-  ctx.closePath();
-}
+// ⚠️ drawHexPathDeformed 已迁至 hexDraw.js（阶段 1 · §3.1g）。
 
 // ---- 等距视角坐标转换 ----
 
@@ -448,61 +448,8 @@ export function isoInverseTransformPoint(px, py, iso) {
   }
 }
 
-/**
- * 绘制等距六边形路径（对 6 个顶点逐点施加 ISO 变换）
- * 在纯净 2D Canvas 上直接 lineTo，无需 ctx.transform
- * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
- * @param {number} cx 2D 中心 X
- * @param {number} cy 2D 中心 Y
- * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
- */
-export function drawIsoHexPath(ctx, cx, cy, iso) {
-  ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 2
-    const hx = cx + HEX_RADIUS * Math.cos(angle)
-    const hy = cy + HEX_RADIUS * Math.sin(angle)
-    const pt = isoTransformPoint(hx, hy, iso)
-    if (i === 0) ctx.moveTo(pt.x, pt.y)
-    else ctx.lineTo(pt.x, pt.y)
-  }
-  ctx.closePath()
-}
-
-/**
- * 绘制等距扁六边形路径（顶角/底角扁平化 + ISO 逐顶点变换）
- * @param {CanvasRenderingContext2D} ctx Canvas 2D 上下文（必须为纯净 2D）
- * @param {number} cx 2D 中心 X
- * @param {number} cy 2D 中心 Y
- * @param {number} cellW 单元格宽度
- * @param {number} cellH 单元格高度
- * @param {number} topFlat 顶角扁平度 (0=尖顶, 0.5=全平)
- * @param {number} bottomFlat 底角扁平度 (0=尖底, 0.5=全平)
- * @param {{ shearX, shearY, scaleX, scaleY }} iso ISO 参数
- */
-export function drawIsoHexPathDeformed(ctx, cx, cy, cellW, cellH, topFlat, bottomFlat, iso) {
-  const hw = cellW / 2
-  const hh = cellH / 2
-  const sideTopY = cy - hh + topFlat * cellH
-  const sideBotY = cy + hh - bottomFlat * cellH
-
-  const vertices = [
-    { x: cx, y: cy - hh },              // 顶点
-    { x: cx + hw, y: sideTopY },        // 右上
-    { x: cx + hw, y: sideBotY },        // 右下
-    { x: cx, y: cy + hh },              // 底点
-    { x: cx - hw, y: sideBotY },        // 左下
-    { x: cx - hw, y: sideTopY }         // 左上
-  ]
-
-  ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const pt = isoTransformPoint(vertices[i].x, vertices[i].y, iso)
-    if (i === 0) ctx.moveTo(pt.x, pt.y)
-    else ctx.lineTo(pt.x, pt.y)
-  }
-  ctx.closePath()
-}
+// ⚠️ drawIsoHexPath / drawIsoHexPathDeformed 已迁至 hexDraw.js（阶段 1 · §3.1g）。
+// 纯数学 isoTransformPoint / isoInverseTransformPoint 保留在下方（引擎与 hexDraw 共用）。
 
 // ================================================================
 //  旧版坐标变换（向后兼容，已在 Phase 30 中弃用）
@@ -591,6 +538,12 @@ export const ISO_DEFAULTS = {
   rotation: -24,   // 旋转°（已校准）
   topFlat: 0.25,   // 顶角扁平度 (0=尖, 0.5=全平)
   bottomFlat: 0.25 // 底角扁平度 (0=尖, 0.5=全平)
+};
+
+// 平面视图配置（顶视，恒等变换）— 编辑器默认平面化用（阶段 2 · §3.1c）
+// shearX/shearY/scaleX/scaleY/rotation/topFlat/bottomFlat 全 0/1 → drawIsoHexPath 退化为恒等，六边形呈顶视平面
+export const PLANAR_CONFIG = {
+  shearX: 0, shearY: 0, scaleX: 1, scaleY: 1, rotation: 0, topFlat: 0, bottomFlat: 0,
 };
 
 // ---- 等距视角预设 ----

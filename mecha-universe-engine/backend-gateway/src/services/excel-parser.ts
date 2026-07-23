@@ -175,7 +175,12 @@ export class ExcelParser {
   /**
    * 解析单位属性区域 (旧版: 行4-8)
    *
-   * A=名称, B=类型, C=总点数(忽略), D=格斗, E=射击, F=结构, G=机动, H=插槽
+   * ★ 改造点 (Phase 29 动态归属):
+   *   单位归属由 A 列内容判定，而非写死的行号/name。
+   *   A=名称(单位归属来源), B=类型, C=总点数(忽略),
+   *   D=格斗, E=射击, F=结构, G=机动, H=插槽。
+   *   A 列内容经 resolveUnitKey 归一为标准 key (主机体/跟随/左手/右手/其它)，
+   *   命中别名/标准名则存标准 key，否则存 A 列原文。A 列为空则跳过该行。
    */
   private parseUnits(sheet: XLSX.WorkSheet): Record<string, ParsedUnit> {
     const units: Record<string, ParsedUnit> = {};
@@ -183,8 +188,18 @@ export class ExcelParser {
     const columns = unitsConfig.columns;
 
     for (const rowConfig of unitsConfig.rows) {
+      // A 列内容 = 单位归属来源
+      const nameCell = sheet[columns.name + String(rowConfig.row)];
+      const aText = nameCell?.v ? String(nameCell.v).trim() : '';
+      if (!aText) continue; // A 列为空 → 跳过该行
+
+      const unitKey = this.resolveUnitKey(aText) || aText;
+      if (units[unitKey]) {
+        console.warn(`[ExcelParser v2.1] 单位 "${unitKey}" 在行 ${rowConfig.row} 重复出现，后者覆盖前者`);
+      }
+
       const unitData: ParsedUnit = {
-        name: rowConfig.name,
+        name: aText,
         type: 'none',
         格斗: 0,
         射击: 0,
@@ -194,29 +209,53 @@ export class ExcelParser {
       };
 
       for (const field of rowConfig.fields) {
+        if (field === 'name') continue; // name 已取自 A 列
         const col = columns[field];
         if (!col) continue;
 
         const cellRef = col + String(rowConfig.row);
         const cell = sheet[cellRef];
+        const val = cell?.v;
 
         if (field === 'type') {
-          unitData.type = cell?.v ? String(cell.v).trim() : 'none';
+          unitData.type = val ? String(val).trim() : 'none';
         } else if (field === 'skillSlots') {
-          unitData.skillSlots = this.parseNumber(cell?.v);
+          unitData.skillSlots = this.parseNumber(val);
         } else {
-          (unitData as any)[field] = this.parseNumber(cell?.v);
+          (unitData as any)[field] = this.parseNumber(val);
         }
       }
 
-      // 仅当单位名称列(A列)有内容时保留 (与旧版一致: if (!unitName) continue)
-      const nameCell = sheet[columns.name + String(rowConfig.row)];
-      if (nameCell?.v && String(nameCell.v).trim() !== '') {
-        units[rowConfig.name] = unitData;
-      }
+      units[unitKey] = unitData;
+      console.log(`[ExcelParser v2.1] 行 ${rowConfig.row}: A="${aText}" → key="${unitKey}"`);
     }
 
     return units;
+  }
+
+  /**
+   * 将 A 列填写的单位名归一为标准 key (主机体/跟随/左手/右手/其它)。
+   * 精确匹配标准名或别名 → 返回标准 key；否则返回 null (交由调用方使用原文)。
+   */
+  private resolveUnitKey(aText: string): string | null {
+    const ALIASES: Record<string, string[]> = {
+      '主机体': ['主机体', '主机', '本体', '主体', 'main', 'mech', '机体'],
+      '跟随':   ['跟随', '随从', '辅机', '支援机', 'royroy', 'sub'],
+      '左手':   ['左手', '左臂', '左武器', 'left', 'l'],
+      '右手':   ['右手', '右臂', '右武器', 'right', 'r'],
+      '其它':   ['其它', '其他', '配件', '装备', 'extra'],
+    };
+    const norm = aText.trim().toLowerCase();
+    // 1) 精确匹配（标准名 + 别名）
+    for (const [key, aliases] of Object.entries(ALIASES)) {
+      if (key.toLowerCase() === norm) return key;
+      if (aliases.some((a) => a.toLowerCase() === norm)) return key;
+    }
+    // 2) 包含匹配兜底（如 "主机-α" → 主机体）
+    for (const [key, aliases] of Object.entries(ALIASES)) {
+      if (aliases.some((a) => norm.includes(a.toLowerCase()))) return key;
+    }
+    return null;
   }
 
   /**

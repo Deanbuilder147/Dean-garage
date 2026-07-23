@@ -7,6 +7,14 @@
 
 'use strict';
 
+// ★ 阶段 B：Even-R offset 邻居方向表（与前端 hexUtils.getHexNeighbors 一致，含奇偶行分支）
+function evenROffsetDirs(q, r) {
+  if (r % 2 === 0) {
+    return [{ q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 1, r: 1 }];
+  }
+  return [{ q: 1, r: 0 }, { q: 0, r: -1 }, { q: -1, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }];
+}
+
 class TerrainMovement {
   // 模块级缓存：从 Map Service 加载的地形数据
   static _terrainData = null;
@@ -20,7 +28,7 @@ class TerrainMovement {
     plain:     { name: '平原',     cost: 1,  defense: 0,  can_spawn: true,  color: '#AAFFAA', is_destructible: false, max_hp: 0, destroyed_transform_to: 'plain' },
     forest:    { name: '森林',     cost: 2,  defense: 10, can_spawn: true,  color: '#228822', is_destructible: true,  max_hp: 3, destroyed_transform_to: 'plain' },
     mountain:  { name: '山地',     cost: 3,  defense: 20, can_spawn: false, color: '#886644', is_destructible: false, max_hp: 0, destroyed_transform_to: 'mountain' },
-    water:     { name: '水域',     cost: 99, defense: 0,  can_spawn: false, color: '#4488FF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'water' },
+    water:     { name: '水域',     cost: 2.5, defense: 0,  can_spawn: false, color: '#4488FF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'water' },
     base:      { name: '基地',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FF4444', is_destructible: true,  max_hp: 5, destroyed_transform_to: 'ruin' },
     mothership:{ name: '母舰',     cost: 1,  defense: 0,  can_spawn: true,  color: '#FFD700', is_destructible: true,  max_hp: 8, destroyed_transform_to: 'ruin' },
     ruin:      { name: '废墟',     cost: 2,  defense: 15, can_spawn: true,  color: '#998866', is_destructible: false, max_hp: 0, destroyed_transform_to: 'ruin' },
@@ -29,6 +37,22 @@ class TerrainMovement {
     crater:    { name: '陨石坑',   cost: 2,  defense: 5,  can_spawn: true,  color: '#777766', is_destructible: false, max_hp: 0, destroyed_transform_to: 'crater' },
     city_building: { name: '城市建筑', cost: 1, defense: 25, can_spawn: false, color: '#b8860b', is_destructible: true,  max_hp: 4, destroyed_transform_to: 'ruin' },
     rubble:    { name: '残骸',     cost: 2,  defense: 10, can_spawn: true,  color: '#8b7d6b', is_destructible: false, max_hp: 0, destroyed_transform_to: 'rubble' },
+
+    // ===== 阶段 B·对齐补丁：补齐网关/前端地形表缺失项（与 terrainCosts.ts 对齐）=====
+    // 原 FALLBACK 缺这些键，getMoveCost 会兜底成 1（void 可被穿越、ruins/crystal 代价偏低）。
+    space:          { name: '太空',      cost: 1,   defense: 0,  can_spawn: false, color: '#0a0a1a', is_destructible: false, max_hp: 0, destroyed_transform_to: 'space' },
+    moon:           { name: '月面',      cost: 1,   defense: 0,  can_spawn: true,  color: '#CCCCCC', is_destructible: false, max_hp: 0, destroyed_transform_to: 'moon' },
+    void:           { name: '留白',      cost: 999, defense: 0,  can_spawn: false, color: '#000000', is_destructible: false, max_hp: 0, destroyed_transform_to: 'void' },
+    desert:         { name: '沙漠',      cost: 1.5, defense: 0,  can_spawn: true,  color: '#EDC9AF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'desert' },
+    crystal:        { name: '晶体',      cost: 2,   defense: 10, can_spawn: true,  color: '#88CCFF', is_destructible: true,  max_hp: 3, destroyed_transform_to: 'plain' },
+    fortress:       { name: '堡垒',      cost: 5,   defense: 30, can_spawn: false, color: '#666666', is_destructible: false, max_hp: 0, destroyed_transform_to: 'fortress' },
+    wall:           { name: '墙',        cost: 99,  defense: 0,  can_spawn: false, color: '#555555', is_destructible: false, max_hp: 0, destroyed_transform_to: 'wall' },
+    repair_station: { name: '维修站',    cost: 1,   defense: 0,  can_spawn: true,  color: '#44FF44', is_destructible: true,  max_hp: 5, destroyed_transform_to: 'rubble' },
+    spawn_earth:    { name: '地球出生点', cost: 0,  defense: 0,  can_spawn: true,  color: '#4488FF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn_earth' },
+    spawn_maxion:   { name: '火星出生点', cost: 0,  defense: 0,  can_spawn: true,  color: '#FF4444', is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn_maxion' },
+    spawn:          { name: '出生点',    cost: 0,  defense: 0,  can_spawn: true,  color: '#FFFFFF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn' },
+    // 前端地图用 'ruins'，原 FALLBACK 仅 'ruin'；加别名避免被兜底成 1
+    ruins:          { name: '废墟',      cost: 2,   defense: 15, can_spawn: true,  color: '#998866', is_destructible: false, max_hp: 0, destroyed_transform_to: 'ruin' },
   };
 
   // 地形描述回退
@@ -285,11 +309,6 @@ class TerrainMovement {
     const queue = [{ q: start.q, r: start.r, cost: 0 }];
     costMap.set(`${start.q},${start.r}`, 0);
 
-    const directions = [
-      { q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 },
-      { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 },
-    ];
-
     while (queue.length > 0) {
       queue.sort((a, b) => a.cost - b.cost);
       const current = queue.shift();
@@ -302,6 +321,7 @@ class TerrainMovement {
         reachable.push({ q: current.q, r: current.r, cost: current.cost });
 
         if (current.cost < movement) {
+          const directions = evenROffsetDirs(current.q, current.r);
           for (const dir of directions) {
             const nextQ = current.q + dir.q;
             const nextR = current.r + dir.r;

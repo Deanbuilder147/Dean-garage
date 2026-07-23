@@ -102,6 +102,14 @@ export class UnitImportService {
       }
     }
 
+    // 按各部位 skillSlots 补齐技能数组（空槽用 null 占位；转换器对 !skill||!skill.name 已兼容跳过）
+    const padSkills = (owner) => {
+      const slots = (units[owner] && units[owner].skillSlots) || skillsByOwner[owner].length;
+      const arr = skillsByOwner[owner];
+      while (arr.length < slots) arr.push(null);
+    };
+    ['主机体', '跟随', '左手', '右手', '其它'].forEach(padSkills);
+
     // 构建SQL（简化版，使用原有字段结构）
     const sql = `
       INSERT INTO units (
@@ -112,8 +120,9 @@ export class UnitImportService {
         left_type, left_格斗, left_射击, left_结构, left_机动, left_skills, left_image_url,
         right_type, right_格斗, right_射击, right_结构, right_机动, right_skills, right_image_url,
         extra_type, extra_格斗, extra_射击, extra_结构, extra_机动, extra_skills, extra_image_url,
+        total_points,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
     `;
 
     const params = [
@@ -167,7 +176,8 @@ export class UnitImportService {
       extraUnit.结构 || 0,
       extraUnit.机动 || 0,
       JSON.stringify(skillsByOwner['其它']),
-      null // extra_image_url
+      null, // extra_image_url
+      basic.totalPoints ?? 0 // total_points
     ];
 
     // 验证参数数量

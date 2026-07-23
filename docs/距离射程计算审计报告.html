@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>六角格距离/射程计算审计与修复方案</title>
+<style>
+  :root {
+    --bg: #0f111a;
+    --card: #1a1d2e;
+    --border: #2a2d3e;
+    --text: #c8ccd8;
+    --head: #e8ecf4;
+    --accent: #5b9bd5;
+    --danger: #e0556a;
+    --warn: #d4a02e;
+    --ok: #4caf84;
+    --dim: #6a6e7a;
+    --code-bg: #161822;
+    --tag-bg: #262b38;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+    line-height: 1.7;
+    padding: 0;
+  }
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  h1 {
+    font-size: 2.4em; font-weight: 800; color: var(--head);
+    margin-bottom: 6px; letter-spacing: -0.5px;
+  }
+  h2 {
+    font-size: 1.55em; font-weight: 700; color: var(--head);
+    margin: 52px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--border);
+  }
+  h3 {
+    font-size: 1.2em; font-weight: 700; color: var(--head);
+    margin: 28px 0 10px;
+  }
+  h4 { font-size: 1.0em; font-weight: 700; color: var(--accent); margin: 16px 0 8px; }
+
+  .subtitle {
+    font-size: 1.05em; color: var(--dim); margin-bottom: 32px;
+  }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 28px 30px; margin: 18px 0;
+  }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--head); font-weight: 700; background: #1e2138; font-size: 0.9em; }
+  td { vertical-align: top; }
+
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 0.78em; font-weight: 700; letter-spacing: 0.3px;
+  }
+  .badge-crit { background: rgba(224,85,106,.18); color: var(--danger); }
+  .badge-med  { background: rgba(212,160,46,.18); color: var(--warn); }
+  .badge-ok   { background: rgba(76,175,132,.18); color: var(--ok); }
+
+  .code-block {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; margin: 12px 0;
+    overflow-x: auto; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.85em; line-height: 1.65; white-space: pre;
+  }
+  .code-block .k  { color: #c678dd; }
+  .code-block .s  { color: #98c379; }
+  .code-block .c  { color: #5c6370; font-style: italic; }
+  .code-block .n  { color: #e5c07b; }
+  .code-block .fn { color: #61afef; }
+  .code-block .hl { background: rgba(224,85,106,.18); display: inline-block; border-radius: 3px; padding: 0 2px; }
+
+  .diff-add { color: var(--ok); }
+  .diff-del { color: var(--danger); }
+
+  .svg-chart { display: block; max-width: 100%; margin: 20px auto; }
+
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px; margin: 20px 0;
+  }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px 24px; text-align: center;
+  }
+  .stat-num { font-size: 2.6em; font-weight: 800; color: var(--head); }
+  .stat-label { font-size: 0.88em; color: var(--dim); margin-top: 4px; }
+
+  .flow-row { display: flex; gap: 12px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .flow-box {
+    background: var(--tag-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 14px; font-size: 0.85em;
+    white-space: nowrap;
+  }
+  .flow-arrow { color: var(--dim); font-size: 1.1em; }
+
+  .annot {
+    font-size: 0.82em; color: var(--dim); margin-top: 4px;
+  }
+
+  ul { margin: 8px 0 8px 20px; }
+  li { margin: 4px 0; }
+
+  .check-pass { color: var(--ok); }
+  .check-fail { color: var(--danger); }
+  .check-warn { color: var(--warn); }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+  .toc { margin: 20px 0 30px; }
+  .toc a { color: var(--accent); text-decoration: none; display: block; padding: 3px 0; font-size: 0.95em; }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>六角格距离/射程计算审计报告</h1>
+<p class="subtitle">项目：mecha-universe-engine &nbsp;|&nbsp; 日期：2026-07-23 &nbsp;|&nbsp; 坐标系统：Even-R Offset (q,r)</p>
+
+<!-- ===================== SUMMARY ===================== -->
+<div class="summary-grid">
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--danger)">2</div>
+    <div class="stat-label">严重问题</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--warn)">2</div>
+    <div class="stat-label">中等问题</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--ok)">5</div>
+    <div class="stat-label">已验证正确的模块</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color:var(--head)">4</div>
+    <div class="stat-label">独立计算系统</div>
+  </div>
+</div>
+
+<!-- ===================== VERIFICATION ===================== -->
+<div class="card" id="verify" style="border-color:#4caf8460;">
+  <span class="badge badge-ok">核验通过</span>
+  <span style="margin-left:10px;font-size:0.85em;color:var(--dim)">对照标准距离环示意图（中心 0，环 1/2/3 标号）二次核验 · 2026-07-23</span>
+
+  <h3 style="margin-top:14px;">图中的距离模型</h3>
+  <p>中心 "0" 为起点，每格数字 = 与起点的距离（最少相邻步数）。环 1 恰 6 格（绿）、环 2 恰 12 格（米）、环 3 恰 18 格（黄），满足六边形网格标准性质：<strong>环 n 恰有 6n 格；距离 n 内总格数 = 1 + 3n(n+1)</strong>（n=3 时为 37 格，与图一致）。</p>
+
+  <svg class="svg-chart" viewBox="0 0 380 250" xmlns="http://www.w3.org/2000/svg" style="max-width:520px">
+    <!-- ring 3 yellow -->
+    <g fill="#e8b931" stroke="#12141d" stroke-width="1.2">
+      <polygon points="283.5,112 299.1,121 299.1,139 283.5,148 267.9,139 267.9,121"/>
+      <polygon points="268,139 283.6,148 283.6,166 268,175 252.4,166 252.4,148"/>
+      <polygon points="252.4,166 268,175 268,193 252.4,202 236.8,193 236.8,175"/>
+      <polygon points="236.8,193 252.4,202 252.4,220 236.8,229 221.2,220 221.2,202"/>
+      <polygon points="205.6,193 221.2,202 221.2,220 205.6,229 190,220 190,202"/>
+      <polygon points="174.4,193 190,202 190,220 174.4,229 158.8,220 158.8,202"/>
+      <polygon points="143.2,193 158.8,202 158.8,220 143.2,229 127.6,220 127.6,202"/>
+      <polygon points="127.6,166 143.2,175 143.2,193 127.6,202 112,193 112,175"/>
+      <polygon points="112.1,139 127.7,148 127.7,166 112.1,175 96.5,166 96.5,148"/>
+      <polygon points="96.5,112 112.1,121 112.1,139 96.5,148 80.9,139 80.9,121"/>
+      <polygon points="112.1,85 127.7,94 127.7,112 112.1,121 96.5,112 96.5,94"/>
+      <polygon points="127.6,58 143.2,67 143.2,85 127.6,94 112,85 112,67"/>
+      <polygon points="143.2,31 158.8,40 158.8,58 143.2,67 127.6,58 127.6,40"/>
+      <polygon points="174.4,31 190,40 190,58 174.4,67 158.8,58 158.8,40"/>
+      <polygon points="205.6,31 221.2,40 221.2,58 205.6,67 190,58 190,40"/>
+      <polygon points="236.8,31 252.4,40 252.4,58 236.8,67 221.2,58 221.2,40"/>
+      <polygon points="252.4,58 268,67 268,85 252.4,94 236.8,85 236.8,67"/>
+      <polygon points="268,85 283.6,94 283.6,112 268,121 252.4,112 252.4,94"/>
+    </g>
+    <!-- ring 2 beige -->
+    <g fill="#e8e0b8" stroke="#12141d" stroke-width="1.2">
+      <polygon points="252.4,112 268,121 268,139 252.4,148 236.8,139 236.8,121"/>
+      <polygon points="236.8,139 252.4,148 252.4,166 236.8,175 221.2,166 221.2,148"/>
+      <polygon points="221.2,166 236.8,175 236.8,193 221.2,202 205.6,193 205.6,175"/>
+      <polygon points="190,166 205.6,175 205.6,193 190,202 174.4,193 174.4,175"/>
+      <polygon points="158.8,166 174.4,175 174.4,193 158.8,202 143.2,193 143.2,175"/>
+      <polygon points="143.2,139 158.8,148 158.8,166 143.2,175 127.6,166 127.6,148"/>
+      <polygon points="127.6,112 143.2,121 143.2,139 127.6,148 112,139 112,121"/>
+      <polygon points="143.2,85 158.8,94 158.8,112 143.2,121 127.6,112 127.6,94"/>
+      <polygon points="158.8,58 174.4,67 174.4,85 158.8,94 143.2,85 143.2,67"/>
+      <polygon points="190,58 205.6,67 205.6,85 190,94 174.4,85 174.4,67"/>
+      <polygon points="221.2,58 236.8,67 236.8,85 221.2,94 205.6,85 205.6,67"/>
+      <polygon points="236.8,85 252.4,94 252.4,112 236.8,121 221.2,112 221.2,94"/>
+    </g>
+    <!-- ring 1 green -->
+    <g fill="#8fd14f" stroke="#12141d" stroke-width="1.2">
+      <polygon points="221.2,112 236.8,121 236.8,139 221.2,148 205.6,139 205.6,121"/>
+      <polygon points="205.6,85 221.2,94 221.2,112 205.6,121 190,112 190,94"/>
+      <polygon points="174.4,85 190,94 190,112 174.4,121 158.8,112 158.8,94"/>
+      <polygon points="158.8,112 174.4,121 174.4,139 158.8,148 143.2,139 143.2,121"/>
+      <polygon points="174.4,139 190,148 190,166 174.4,175 158.8,166 158.8,148"/>
+      <polygon points="205.6,139 221.2,148 221.2,166 205.6,175 190,166 190,148"/>
+    </g>
+    <!-- center black -->
+    <polygon points="190,112 205.6,121 205.6,139 190,148 174.4,139 174.4,121" fill="#0a0a0f" stroke="#12141d" stroke-width="1.2"/>
+    <!-- numbers -->
+    <g font-size="13" font-weight="700" text-anchor="middle">
+      <text x="190" y="135" fill="#fff">0</text>
+      <text x="221.2" y="135" fill="#1a2a10">1</text>
+      <text x="205.6" y="108" fill="#1a2a10">1</text>
+      <text x="174.4" y="108" fill="#1a2a10">1</text>
+      <text x="158.8" y="135" fill="#1a2a10">1</text>
+      <text x="174.4" y="162" fill="#1a2a10">1</text>
+      <text x="205.6" y="162" fill="#1a2a10">1</text>
+      <text x="252.4" y="135" fill="#3a3520">2</text>
+      <text x="236.8" y="162" fill="#3a3520">2</text>
+      <text x="221.2" y="189" fill="#3a3520">2</text>
+      <text x="190" y="189" fill="#3a3520">2</text>
+      <text x="158.8" y="189" fill="#3a3520">2</text>
+      <text x="143.2" y="162" fill="#3a3520">2</text>
+      <text x="127.6" y="135" fill="#3a3520">2</text>
+      <text x="143.2" y="108" fill="#3a3520">2</text>
+      <text x="158.8" y="81" fill="#3a3520">2</text>
+      <text x="190" y="81" fill="#3a3520">2</text>
+      <text x="221.2" y="81" fill="#3a3520">2</text>
+      <text x="236.8" y="108" fill="#3a3520">2</text>
+      <text x="283.5" y="135" fill="#4a3800">3</text>
+      <text x="268" y="162" fill="#4a3800">3</text>
+      <text x="252.4" y="189" fill="#4a3800">3</text>
+      <text x="236.8" y="216" fill="#4a3800">3</text>
+      <text x="205.6" y="216" fill="#4a3800">3</text>
+      <text x="174.4" y="216" fill="#4a3800">3</text>
+      <text x="143.2" y="216" fill="#4a3800">3</text>
+      <text x="127.6" y="189" fill="#4a3800">3</text>
+      <text x="112.1" y="162" fill="#4a3800">3</text>
+      <text x="96.5" y="135" fill="#4a3800">3</text>
+      <text x="112.1" y="108" fill="#4a3800">3</text>
+      <text x="127.6" y="81" fill="#4a3800">3</text>
+      <text x="143.2" y="54" fill="#4a3800">3</text>
+      <text x="174.4" y="54" fill="#4a3800">3</text>
+      <text x="205.6" y="54" fill="#4a3800">3</text>
+      <text x="236.8" y="54" fill="#4a3800">3</text>
+      <text x="252.4" y="81" fill="#4a3800">3</text>
+      <text x="268" y="108" fill="#4a3800">3</text>
+    </g>
+  </svg>
+
+  <h3>逐点核验结果</h3>
+  <table>
+    <tr><th>核验点</th><th>图中模型</th><th>本系统实现</th><th>结论</th></tr>
+    <tr>
+      <td>邻居数</td><td>每格恒 6 邻居（环 1 = 6 格）</td>
+      <td><code>getHexNeighbors</code> / <code>getEvenROffsetDirs</code> 均返回恰 6 邻居（奇偶行双表）</td>
+      <td class="check-pass">✅ 一致</td>
+    </tr>
+    <tr>
+      <td>距离 = 1 判定</td><td>中心 6 个相邻格均为 1</td>
+      <td><code>hexDistanceOffset</code> 对 2 种行奇偶 × 6 方向共 12 组邻居逐一代入 cube 公式，结果全 = 1</td>
+      <td class="check-pass">✅ 一致</td>
+    </tr>
+    <tr>
+      <td>环形扩散</td><td>环 2 = 12、环 3 = 18</td>
+      <td>前端 <code>skillRangeHexes</code> / <code>moveRangeHexes</code> 为 BFS 逐环扩散，环大小天然 6n</td>
+      <td class="check-pass">✅ 一致</td>
+    </tr>
+    <tr>
+      <td>min/max 射程语义</td><td>「数字落在 [min,max] 内」的格有效</td>
+      <td>#3/#4 修复均按环距离过滤（<code>dist ≥ min 且 ≤ max</code>）</td>
+      <td class="check-pass">✅ 一致</td>
+    </tr>
+    <tr>
+      <td>布局朝向</td><td>尖顶（pointy-top）+ 行交错偏移</td>
+      <td><code>pointyTopCenter</code> 渲染 + Even-R 行交错，视觉与本图相同</td>
+      <td class="check-pass">✅ 一致</td>
+    </tr>
+  </table>
+
+  <h3>核验中修正的细节（非冲突）</h3>
+  <ul>
+    <li>报告 #2 示例 A(5,10)→B(9,12) 的距离原写「≈5」，经 offset→axial→cube 精确计算为<strong>恰好 = 5</strong>（axial: (0,10)→(3,12)，(3+2+5)/2 = 5），已订正为精确值。</li>
+    <li>图中的菱形邻域（行格数 4-5-6-7-6-5-4）在 Even-R offset 坐标中<strong>不是矩形</strong>——这正是「Offset 坐标不能用矩形边界遍历范围，必须 BFS / cube 距离」的原因之一，与本报告 §6 对 BFS 方案的肯定结论互相印证。</li>
+  </ul>
+
+  <p style="margin-top:10px;color:var(--head);"><strong>总结论：图中距离模型与本报告全部距离相关结论（#2 距离校验、#3 最小射程、#4 预览过滤、§6 已验证模块）完全吻合，无冲突。</strong></p>
+</div>
+
+<!-- ===================== TOC ===================== -->
+<div class="toc card">
+  <strong style="color:var(--head)">目录</strong>
+  <a href="#verify">0. 图例核验：标准距离环模型（0→1→2→3）✅ 无冲突</a>
+  <a href="#arch">1. 系统架构总览（四层距离计算）</a>
+  <a href="#issue1">2. 🔴 严重问题 #1：combat-service 地形消耗表遗漏 6 种地形</a>
+  <a href="#issue2">3. 🔴 严重问题 #2：/skill 路由完全没有距离校验</a>
+  <a href="#issue3">4. 🟡 中等问题 #3：min_cast_range 仅展示不校验</a>
+  <a href="#issue4">5. 🟡 中等问题 #4：前端技能范围预览不含最小距离过滤</a>
+  <a href="#good">6. 🟢 已验证正确的部分</a>
+  <a href="#fixplan">7. 修复方案与优先级</a>
+</div>
+
+<!-- ==================== SECTION 1: ARCHITECTURE ==================== -->
+<h2 id="arch">1. 系统架构总览</h2>
+
+<div class="card">
+  <p>项目中存在 <strong>4 个独立计算距离/移动/范围的系统</strong>，各自维护一套邻居表/距离逻辑/地形消耗表。当其中任何一层与另外三层不一致时，就会出现「客户端显示可到达，但服务端拒绝」或「范围显示包含某格，但使用时服务端不阻止」的不可达错位。</p>
+</div>
+
+<svg class="svg-chart" viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5b9bd580"/>
+    </marker>
+    <filter id="glow"><feGaussianBlur stdDeviation="2"/></filter>
+  </defs>
+
+  <!-- Layer backgrounds -->
+  <rect x="30" y="20" width="920" height="70" rx="8" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="50" y="48" fill="#e8ecf4" font-size="14" font-weight="700">🖥️ 前端 UI 层</text>
+  <text x="50" y="70" fill="#6a6e7a" font-size="12">NewBattleView.vue — moveRangeHexes BFS / skillRangeHexes BFS</text>
+
+  <rect x="30" y="110" width="920" height="70" rx="8" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="50" y="138" fill="#e8ecf4" font-size="14" font-weight="700">🔀 网关 API 层</text>
+  <text x="50" y="160" fill="#6a6e7a" font-size="12">combat.ts — /move → tsFindPath (Dijkstra) &nbsp;|&nbsp; /skill 无距离校验 ❌</text>
+
+  <rect x="30" y="200" width="920" height="70" rx="8" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="50" y="228" fill="#e8ecf4" font-size="14" font-weight="700">⚙️ 战斗内核层</text>
+  <text x="50" y="250" fill="#6a6e7a" font-size="12">combat-service/battleState.js — getReachableHexes / canMoveTo / findPath</text>
+
+  <rect x="30" y="290" width="920" height="70" rx="8" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="50" y="318" fill="#e8ecf4" font-size="14" font-weight="700">🧮 共享数学层</text>
+  <text x="50" y="340" fill="#6a6e7a" font-size="12">terrainCosts.ts (网关) / hexUtils.js (前端 UNIVERSAL_TERRAIN_MAP)</text>
+
+  <!-- Arrows -->
+  <line x1="490" y1="90" x2="490" y2="110" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="490" y1="180" x2="490" y2="200" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="490" y1="270" x2="490" y2="290" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Peer dependency arrows -->
+  <path d="M950,145 L980,145 L980,260 L960,260" stroke="#5b9bd540" stroke-width="1.5" fill="none" stroke-dasharray="5,3" marker-end="url(#arr)"/>
+  <text x="982" y="208" fill="#6a6e7a" font-size="10" transform="rotate(90,982,208)">共享邻居表</text>
+
+  <!-- Checklist boxes -->
+  <rect x="320" y="368" width="160" height="28" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="400" y="387" fill="#4caf84" font-size="11" text-anchor="middle">✅ 邻居表一致</text>
+
+  <rect x="500" y="368" width="160" height="28" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="580" y="387" fill="#e0556a" font-size="11" text-anchor="middle">❌ 地形表不一致</text>
+
+  <rect x="680" y="368" width="160" height="28" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+  <text x="760" y="387" fill="#e0556a" font-size="11" text-anchor="middle">❌ /skill 无距离校验</text>
+</svg>
+
+<!-- ==================== SECTION 2: ISSUE 1 ==================== -->
+<h2 id="issue1">2. 🔴 严重问题 #1：combat-service 地形消耗表遗漏 6 种地形</h2>
+
+<div class="card">
+  <span class="badge badge-crit">严重</span>
+  <span style="margin-left:10px;font-size:0.85em;color:var(--dim)">文件：services/combat-service/src/state/battleState.js 第 9–14 行</span>
+
+  <h3>现象</h3>
+  <p>战斗内核 <code>battleState.js</code> 的 <code>TERRAIN_COST_MAP</code> 只定义了 <strong>14 种地形</strong>，而词条库系统中已存在 <strong>21 种地形</strong>（前端 <code>UNIVERSAL_TERRAIN_MAP</code> 含完整 21 种）。缺失的 6 种地形全部以默认值 <code>1</code> 处理，导致移动消耗严重失准。</p>
+
+  <h3>地形消耗对比</h3>
+  <table>
+    <tr>
+      <th>地形 ID</th><th>中文名</th>
+      <th>应消耗（UNIVERSAL_TERRAIN_MAP）</th>
+      <th>实际消耗（TERRAIN_COST_MAP）</th>
+      <th>偏差</th>
+    </tr>
+    <tr>
+      <td><code>void</code></td><td>留白</td>
+      <td><span class="badge badge-crit">999</span></td>
+      <td><span class="badge badge-crit">1</span>（默认值回退）</td>
+      <td style="color:var(--danger)">可通行 vs 应阻断 ⚠️</td>
+    </tr>
+    <tr>
+      <td><code>plain</code></td><td>平原</td>
+      <td>1</td><td>1（默认值）</td>
+      <td style="color:var(--ok)">无偏差 ✓</td>
+    </tr>
+    <tr>
+      <td><code>ruins</code></td><td>废墟</td>
+      <td><span class="badge badge-crit">2</span></td>
+      <td><span class="badge badge-med">1</span></td>
+      <td style="color:var(--danger)">移动消耗减半</td>
+    </tr>
+    <tr>
+      <td><code>crystal</code></td><td>晶矿</td>
+      <td><span class="badge badge-crit">2</span></td>
+      <td><span class="badge badge-med">1</span></td>
+      <td style="color:var(--danger)">移动消耗减半</td>
+    </tr>
+    <tr>
+      <td><code>rubble</code></td><td>残骸</td>
+      <td><span class="badge badge-crit">2</span></td>
+      <td><span class="badge badge-med">1</span></td>
+      <td style="color:var(--danger)">移动消耗减半</td>
+    </tr>
+    <tr>
+      <td><code>city_building</code></td><td>城市建筑</td>
+      <td>1</td><td>1（默认值）</td>
+      <td style="color:var(--ok)">无偏差 ✓</td>
+    </tr>
+  </table>
+
+  <h3>影响范围</h3>
+  <ul>
+    <li><code>void</code> 消耗 1 → 单位可穿越「留白」区域（画布外不可通行区），与前端 999 消耗彻底矛盾</li>
+    <li><code>ruins</code>/<code>crystal</code>/<code>rubble</code> 消耗 1 而非 2 → 复杂地形无代价，移动范围虚增 2×</li>
+    <li>受影响函数：<code>getReachableHexes</code>、<code>canMoveTo</code>、<code>findPath</code>、所有使用 <code>terrainCost</code> 的逻辑</li>
+  </ul>
+
+  <h3>如何发现</h3>
+  <p>对 <code>battleState.js</code> 第 8–14 行计数：定义了 14 个 key。对 <code>hexUtils.js</code> 第 347–371 行计数：定义了 21 个 key。差值 7 个 → 其中 <code>void</code> 在 battleState.js 不存在，其余 6 个（plain/ruins/crystal/rubble/city_building + void）共 6 个缺失（lunar/empty 已存在）。</p>
+
+  <h3>修复方案</h3>
+  <div class="code-block"><span class="k">const</span> <span class="n">TERRAIN_COST_MAP</span> = {
+    <span class="n">space</span>: 1, <span class="n">moon</span>: 1, <span class="n">lunar</span>: 1, <span class="n">empty</span>: 1,
+    <span class="n">base</span>: 1, <span class="n">mothership</span>: 1,
+    <span class="n">repair_station</span>: 1,
+    <span class="n">spawn_earth</span>: 0, <span class="n">spawn_maxion</span>: 0, <span class="n">spawn</span>: 0,
+    <span class="n">desert</span>: 1.5, <span class="n n">forest</span>: 2, <span class="n">water</span>: 2.5, <span class="n">mountain</span>: 3, <span class="n">fortress</span>: 5,
+    <span class="n">wall</span>: 99,
+    <span class="diff-add">// ★ Phase 29-GlossaryMerge: 新增 6 种词条库地形，与前端 UNIVERSAL_TERRAIN_MAP 对齐
+    void:          999,   // 留白：不可通行
+    plain:         1,     // 平原
+    ruins:         2,     // 废墟
+    crystal:       2,     // 晶矿
+    rubble:        2,     // 残骸
+    city_building: 1,     // 城市建筑</span>
+  };</div>
+</div>
+
+<!-- ==================== SECTION 3: ISSUE 2 ==================== -->
+<h2 id="issue2">3. 🔴 严重问题 #2：/skill 路由完全没有距离校验</h2>
+
+<div class="card">
+  <span class="badge badge-crit">严重</span>
+  <span style="margin-left:10px;font-size:0.85em;color:var(--dim)">文件：backend-gateway/src/routes/combat.ts 第 616–698 行</span>
+
+  <h3>现象</h3>
+  <p><code>POST /api/combat/:battleId/skill</code> 接收 <code>casterUnitId</code>、<code>targetUnitId</code> 后直接调用 <code>executor.executeUniversalSkill()</code>，<strong>全程没有验证 caster 与 target 之间的 hex 距离是否在技能范围内</strong>。</p>
+
+  <h3>攻击流程对比（当前 vs 应有）</h3>
+
+  <svg class="svg-chart" viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+    <!-- Current flow -->
+    <text x="30" y="36" fill="#e8ecf4" font-size="15" font-weight="700">当前流程（有问题）</text>
+    <rect x="30" y="48" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="90" y="76" fill="#c8ccd8" font-size="12" text-anchor="middle">cast/target 解析</text>
+    <line x1="150" y1="71" x2="190" y2="71" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="190" y="48" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="250" y="76" fill="#c8ccd8" font-size="12" text-anchor="middle">executeUniversalSkill</text>
+    <line x1="310" y1="71" x2="350" y2="71" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="350" y="48" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#e0556a"/>
+    <text x="410" y="72" fill="#e0556a" font-size="11" text-anchor="middle">回写伤害 → 响应</text>
+    <text x="410" y="86" fill="#e0556a" font-size="10" text-anchor="middle">❌ 无距离校验</text>
+
+    <!-- Ideal flow -->
+    <text x="30" y="136" fill="#4caf84" font-size="15" font-weight="700">应有流程（修复后）</text>
+    <rect x="30" y="148" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="90" y="176" fill="#c8ccd8" font-size="12" text-anchor="middle">cast/target 解析</text>
+    <line x1="150" y1="171" x2="190" y2="171" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="190" y="148" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#4caf84"/>
+    <text x="250" y="170" fill="#4caf84" font-size="11" text-anchor="middle">✅ 距离校验</text>
+    <text x="250" y="184" fill="#4caf84" font-size="10" text-anchor="middle">hexDist ≤ range_max</text>
+    <line x1="310" y1="171" x2="350" y2="171" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="350" y="148" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="410" y="176" fill="#c8ccd8" font-size="12" text-anchor="middle">executeUniversalSkill</text>
+    <line x1="470" y1="171" x2="510" y2="171" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="510" y="148" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="570" y="176" fill="#c8ccd8" font-size="12" text-anchor="middle">回写伤害 → 响应</text>
+
+    <!-- Minimum range -->
+    <text x="30" y="234" fill="#4caf84" font-size="15" font-weight="700">扩展（同时修复 #3）</text>
+    <rect x="30" y="246" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="90" y="274" fill="#c8ccd8" font-size="12" text-anchor="middle">cast/target 解析</text>
+    <line x1="150" y1="269" x2="190" y2="269" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="190" y="246" width="240" height="46" rx="6" fill="#1a1d2e" stroke="#4caf84"/>
+    <text x="310" y="268" fill="#4caf84" font-size="11" text-anchor="middle">✅ 完整距离校验</text>
+    <text x="310" y="282" fill="#4caf84" font-size="10" text-anchor="middle">range_min ≤ hexDist ≤ range_max</text>
+    <line x1="430" y1="269" x2="470" y2="269" stroke="#5b9bd550" stroke-width="2" marker-end="url(#arr)"/>
+
+    <rect x="470" y="246" width="120" height="46" rx="6" fill="#1a1d2e" stroke="#2a2d3e"/>
+    <text x="530" y="274" fill="#c8ccd8" font-size="12" text-anchor="middle">execute → 回写</text>
+  </svg>
+
+  <h3>具体攻击场景示例</h3>
+  <p>假设单位 A（坐标 q=5,r=10）持 range=1 的剑，攻击目标 B（坐标 q=9,r=12）：</p>
+  <p style="margin:8px 0;"><strong>hex 距离：</strong>用 Even-R offset→axial→cube 转换计算：A(5,10)→axial(0,10)，B(9,12)→axial(3,12)，距离 = (3+2+5)/2 = <strong>恰好 5 格</strong>。但剑的 range=1。</p>
+  <p>当前行为：<span style="color:var(--danger)">直接命中，造成伤害</span>（因为无校验）。<br/>
+     应有行为：<span style="color:var(--ok)">返回 400 OUT_OF_RANGE，禁止攻击</span>。</p>
+
+  <h3>SVG 图例：距离计算原理</h3>
+  <!-- Hex grid showing distance = 5 between two hexes with range=1 skill -->
+  <svg class="svg-chart" viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+    <defs>
+      <clipPath id="cp1"><rect x="0" y="0" width="720" height="280"/></clipPath>
+    </defs>
+    <!-- Background -->
+    <rect x="0" y="0" width="720" height="280" rx="8" fill="#0f111a"/>
+
+    <!-- Legend -->
+    <text x="130" y="260" fill="#acb6c8" font-size="12" text-anchor="middle">🎯 攻击方 (r=1)</text>
+    <text x="570" y="260" fill="#acb6c8" font-size="12" text-anchor="middle">🎯 目标 (距离=5)</text>
+    <text x="370" y="40" fill="#e0556a" font-size="13" text-anchor="middle" font-weight="700">技能范围 r=1，但实际距离=5 → 应拦截</text>
+
+    <!-- Caster hex at center-left area -->
+    <polygon points="130,100 166,80 202,100 202,140 166,160 130,140" fill="#2a3a60" stroke="#4caf84" stroke-width="2.5"/>
+    <text x="166" y="120" fill="#4caf84" font-size="11" text-anchor="middle" font-weight="700">A</text>
+    <text x="166" y="100" fill="#4caf84" font-size="9" text-anchor="middle">5,10</text>
+
+    <!-- Path markers (step by step) -->
+    <polygon points="166,80 202,60 238,80 238,120 202,140 166,120" fill="#1a1d2e" stroke="#2a2d3e" stroke-width="1"/>
+    <text x="202" y="104" fill="#5c6370" font-size="11" text-anchor="middle">1</text>
+
+    <polygon points="238,80 274,60 310,80 310,120 274,140 238,120" fill="#1a1d2e" stroke="#2a2d3e" stroke-width="1"/>
+    <text x="274" y="104" fill="#5c6370" font-size="11" text-anchor="middle">2</text>
+
+    <polygon points="310,80 346,60 382,80 382,120 346,140 310,120" fill="#1a1d2e" stroke="#2a2d3e" stroke-width="1"/>
+    <text x="346" y="104" fill="#5c6370" font-size="11" text-anchor="middle">3</text>
+
+    <polygon points="382,80 418,60 454,80 454,120 418,140 382,120" fill="#1a1d2e" stroke="#2a2d3e" stroke-width="1"/>
+    <text x="418" y="104" fill="#5c6370" font-size="11" text-anchor="middle">4</text>
+
+    <!-- Target hex -->
+    <polygon points="454,80 490,60 526,80 526,120 490,140 454,120" fill="#3a2020" stroke="#e0556a" stroke-width="2.5"/>
+    <text x="490" y="114" fill="#e0556a" font-size="11" text-anchor="middle" font-weight="700">B</text>
+    <text x="490" y="130" fill="#e0556a" font-size="9" text-anchor="middle">9,12</text>
+
+    <!-- Distance label -->
+    <text x="320" y="170" fill="#e0556a" font-size="16" text-anchor="middle" font-weight="800">hex 距离 = 5 > range=1 ❌</text>
+
+    <!-- Range circle around A -->
+    <circle cx="166" cy="120" r="55" fill="none" stroke="#4caf84" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.5"/>
+    <text x="166" y="50" fill="#4caf84" font-size="10" text-anchor="middle">r=1 有效范围</text>
+  </svg>
+
+  <h3>修复方案</h3>
+  <p>在 <code>/skill</code> 路由中，调用 <code>executeUniversalSkill</code> <strong>之前</strong>插入距离校验步骤：</p>
+  <div class="code-block"><span class="c">// ★ 在 combat.ts /skill 路由中，第 661 行之前插入：</span>
+
+  <span class="c">// ===== 距离校验（Even-R Offset 坐标） =====</span>
+  <span class="k">if</span> (exeCaster?.position && exeTarget?.position) {
+    <span class="k">const</span> <span class="n">dist</span> = <span class="fn">hexDistanceOffset</span>(exeCaster.position.q, exeCaster.position.r,
+                                   exeTarget.position.q, exeTarget.position.r);
+    <span class="c">// 读取技能定义的范围</span>
+    <span class="k">const</span> <span class="n">skillDef</span> = skillDefinition ||
+                      (context?.glossarySkillMap||{})[skillType] ||
+                      <span class="k">null</span>;
+    <span class="k">const</span> <span class="n">skillRangeMax</span> = skillDef?.range_max ?? skillDef?.range ?? 1;
+    <span class="k">const</span> <span class="n">skillRangeMin</span> = skillDef?.min_cast_range ?? 0;
+
+    <span class="k">if</span> (dist > skillRangeMax) {
+      res.status(400).json({ success: <span class="k">false</span>,
+        error: <span class="s">'OUT_OF_RANGE'</span>,
+        message: <span class="s">`距离 ${dist} 超出技能最大范围 ${skillRangeMax}`</span> });
+      <span class="k">return</span>;
+    }
+    <span class="k">if</span> (dist < skillRangeMin) {
+      res.status(400).json({ success: <span class="k">false</span>,
+        error: <span class="s">'TOO_CLOSE'</span>,
+        message: <span class="s">`距离 ${dist} 小于技能最小范围 ${skillRangeMin}`</span> });
+      <span class="k">return</span>;
+    }
+  }</div>
+  <p class="annot">注意：hexDistanceOffset 已在 combat.ts 上方定义（基于 offset→axial 转换的 Even-R 距离函数），可直接复用。</p>
+</div>
+
+<!-- ==================== SECTION 4: ISSUE 3 ==================== -->
+<h2 id="issue3">4. 🟡 中等问题 #3：min_cast_range 仅展示不校验</h2>
+
+<div class="card">
+  <span class="badge badge-med">中等</span>
+  <span style="margin-left:10px;font-size:0.85em;color:var(--dim)">文件：combat.ts + frontend/src/views/NewBattleView.vue</span>
+
+  <h3>现象</h3>
+  <p>词条库 <code>glossary-skill-config.json</code> 中定义了 <code>min_cast_range</code> 字段（例如狙击枪 "最小 3 格"），前端也在技能卡片显示 <code>≥N格</code> 标签。但服务端完全不校验最小距离，导致狙击枪可以贴脸射击。</p>
+
+  <table>
+    <tr><th>位置</th><th>代码</th><th>状态</th></tr>
+    <tr>
+      <td>词条库 <code>glossary-skill-config.json</code></td>
+      <td><code>"min_cast_range": 3</code></td>
+      <td><span class="check-ok">✅ 已定义</span></td>
+    </tr>
+    <tr>
+      <td>前端技能卡片 <code>NewBattleView.vue:788</code></td>
+      <td><code>tags.push({ label: `≥${gs.min_cast_range}格` })</code></td>
+      <td><span class="check-ok">✅ 已显示</span></td>
+    </tr>
+    <tr>
+      <td>前端技能范围预览 <code>getSkillRange:2334</code></td>
+      <td><code>return Math.max(skill.range_min, skill.range_max)</code></td>
+      <td><span class="check-warn">⚠️ 用了 range_min 但不排除过近格</span></td>
+    </tr>
+    <tr>
+      <td>网关 /skill 路由 <code>combat.ts:661</code></td>
+      <td><code>executor.executeUniversalSkill(...)</code></td>
+      <td><span class="check-fail">❌ 完全不校验</span></td>
+    </tr>
+  </table>
+
+  <h3>SVG 图例：min_range 的效果</h3>
+  <svg class="svg-chart" viewBox="0 0 800 260" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+    <!-- Title -->
+    <text x="400" y="30" fill="#e8ecf4" font-size="14" text-anchor="middle" font-weight="700">狙击技能：range = 3~6，min_cast_range = 3</text>
+
+    <!-- Left: invalid (too close) -->
+    <text x="180" y="60" fill="#e0556a" font-size="12" text-anchor="middle">❌ 贴脸射击 (dist=1，应拦截)</text>
+    <!-- Caster -->
+    <polygon points="180,90 216,70 252,90 252,130 216,150 180,130" fill="#2a3a60" stroke="#4caf84" stroke-width="2"/>
+    <text x="216" y="114" fill="#4caf84" font-size="10" text-anchor="middle">我</text>
+    <!-- Adjacent target -->
+    <polygon points="252,90 288,70 324,90 324,130 288,150 252,130" fill="#3a2020" stroke="#e0556a" stroke-width="2"/>
+    <text x="288" y="114" fill="#e0556a" font-size="10" text-anchor="middle">敌</text>
+    <text x="288" y="80" fill="#e0556a" font-size="10" text-anchor="middle">dist=1</text>
+
+    <!-- Arrow from caster to target -->
+    <line x1="252" y1="110" x2="324" y2="110" stroke="#e0556a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="288" y="170" fill="#e0556a" font-size="12" text-anchor="middle">dist=1 &lt; min_range=3 → REJECT</text>
+
+    <!-- Right: valid -->
+    <text x="550" y="60" fill="#4caf84" font-size="12" text-anchor="middle">✅ 远距离射击 (dist=5，在范围内)</text>
+    <polygon points="550,90 586,70 622,90 622,130 586,150 550,130" fill="#2a3a60" stroke="#4caf84" stroke-width="2"/>
+    <text x="586" y="114" fill="#4caf84" font-size="10" text-anchor="middle">我</text>
+    <!-- Far target (dist=5) -->
+    <polygon points="802,60 838,80 802,100" fill="#1a3a1a" stroke="#4caf84" stroke-width="1" opacity="0"/>
+    <polygon points="766,90 802,70 838,90 838,130 802,150 766,130" fill="#1a3a1a" stroke="#4caf84" stroke-width="2"/>
+    <text x="802" y="114" fill="#4caf84" font-size="10" text-anchor="middle">敌</text>
+    <text x="802" y="80" fill="#4caf84" font-size="10" text-anchor="middle">dist=5</text>
+
+    <!-- Range rings -->
+    <circle cx="216" cy="110" r="28" fill="rgba(224,85,106,0.1)" stroke="#e0556a" stroke-width="1.5" stroke-dasharray="4,2"/>
+    <text x="216" y="200" fill="#e0556a" font-size="11" text-anchor="middle">禁止区域 (dist&lt;3)</text>
+
+    <circle cx="586" cy="110" r="105" fill="rgba(76,175,132,0.05)" stroke="#4caf84" stroke-width="1.5" stroke-dasharray="4,2"/>
+    <circle cx="586" cy="110" r="52" fill="none" stroke="#4caf84" stroke-width="1" stroke-dasharray="2,3"/>
+    <text x="586" y="238" fill="#4caf84" font-size="11" text-anchor="middle">有效区域 (3≤dist≤6)</text>
+  </svg>
+
+  <h3>修复方案</h3>
+  <p>与 #2 合并修复（见上节 <code>/skill</code> 路由修复代码），在距离校验中同时检查 <code>dist >= skillRangeMin</code>。这将自动覆盖 min_cast_range。</p>
+</div>
+
+<!-- ==================== SECTION 5: ISSUE 4 ==================== -->
+<h2 id="issue4">5. 🟡 中等问题 #4：前端技能范围预览不排除最小距离格</h2>
+
+<div class="card">
+  <span class="badge badge-med">中等</span>
+  <span style="margin-left:10px;font-size:0.85em;color:var(--dim)">文件：frontend/src/views/NewBattleView.vue 第 1666–1693 行</span>
+
+  <h3>现象</h3>
+  <p>当选择有最小距离的技能（如 <code>range_min=3, range_max=6</code>）时，前端 BFS 从 caster 扩散后<strong>添加所有 dist ≤ max 的六角格</strong>，没有过滤掉 dist &lt; min 的格。用户看到 self 周围的 hex 也高亮为「可攻击」，但实际这些格是不可用的。</p>
+
+  <h3>当前代码（问题处）</h3>
+  <div class="code-block"><span class="k">const</span> <span class="n">range</span> = <span class="fn">getSkillRange</span>(selectedAttackSkill.value)  <span class="c">// 只返回 max 值</span>
+  <span class="c">// BFS for hex range ring</span>
+  <span class="k">const</span> <span class="n">startKey</span> = <span class="s">`${su.q},${su.r}`</span>
+  <span class="k">const</span> <span class="n">visited</span> = <span class="k">new</span> Set([startKey])
+  <span class="k">const</span> <span class="n">queue</span> = [{ q: su.q, r: su.r, dist: 0 }]
+  <span class="k">while</span> (queue.length > 0) {
+    <span class="k">const</span> <span class="n">cur</span> = queue.shift()
+    <span class="k">if</span> (cur.dist >= range) <span class="k">continue</span>  <span class="c">// 只检查上限</span>
+    <span class="k">for</span> (<span class="k">const</span> <span class="n">n</span> <span class="k">of</span> <span class="fn">getHexNeighbors</span>(cur.q, cur.r)) {
+      <span class="k">const</span> <span class="n">nKey</span> = <span class="s">`${n.q},${n.r}`</span>
+      <span class="k">if</span> (visited.has(nKey)) <span class="k">continue</span>
+      <span class="c">// ... bounds check ...</span>
+      visited.add(nKey)
+      queue.push({ q: n.q, r: n.r, dist: cur.dist + 1 })
+      <span class="k">if</span> (cur.dist + 1 <= range) {
+        <span class="n hl">skillRangeHexes.add(nKey)</span>  <span class="c">// ← dist=1,2,3 全部加入！</span>
+      }
+    }
+  }</div>
+
+  <h3>修复方案</h3>
+  <div class="code-block"><span class="c">// 从技能定义中提取 range_min</span>
+<span class="k">const</span> <span class="n">skillRangeMin</span> = selectedAttackSkill.value
+  ? (selectedAttackSkill.value.range_min ?? 0)
+  : 0
+<span class="c">// BFS 循环内：</span>
+<span class="k">const</span> <span class="n">newDist</span> = cur.dist + 1
+<span class="k">if</span> (newDist <= range && <span class="diff-add">newDist >= skillRangeMin</span>) {
+  skillRangeHexes.add(nKey)
+}</div>
+
+  <h3>SVG 图例：修复前后对比</h3>
+  <svg class="svg-chart" viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" style="width:100%">
+    <text x="220" y="30" fill="#e0556a" font-size="14" text-anchor="middle" font-weight="700">修复前（全部显示）</text>
+    <text x="600" y="30" fill="#4caf84" font-size="14" text-anchor="middle" font-weight="700">修复后（排除距离 <3 的格）</text>
+
+    <!-- Caster center -->
+    <!-- LEFT: Before -->
+    <polygon points="220,100 256,80 292,100 292,140 256,160 220,140" fill="#2a3a60" stroke="#5b9bd5" stroke-width="2"/>
+    <text x="256" y="124" fill="#fff" font-size="10" text-anchor="middle">我</text>
+
+    <!-- ring dist=1 -->
+    <polygon points="292,60 328,80 364,60" fill="rgba(76,175,132,.15)" stroke="#4caf8450" opacity="0"/>
+    <polygon points="148,100 184,80 220,100 220,140 184,160 148,140" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+    <polygon points="148,60 184,40 220,60 220,100 184,120 148,100" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+    <polygon points="220,20 256,0 292,20 292,60 256,80 220,60" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+    <polygon points="292,60 328,40 364,60 364,100 328,120 292,100" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+    <polygon points="292,100 328,80 364,100 364,140 328,160 292,140" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+    <polygon points="220,140 256,120 292,140 292,180 256,200 220,180" fill="rgba(224,85,106,.12)" stroke="#e0556a80" stroke-width="1" stroke-dasharray="3,2"/>
+
+    <text x="256" y="230" fill="#e0556a" font-size="12" text-anchor="middle">❌ dist=1~2 也显示为可攻击</text>
+
+    <!-- RIGHT: After -->
+    <polygon points="600,100 636,80 672,100 672,140 636,160 600,140" fill="#2a3a60" stroke="#5b9bd5" stroke-width="2"/>
+    <text x="636" y="124" fill="#fff" font-size="10" text-anchor="middle">我</text>
+
+    <!-- ring dist=3 (inner boundary) -->
+    <!-- dist=3 hexes (outer ring of prohibited zone) -->
+    <circle cx="636" cy="120" r="52" fill="none" stroke="#4caf84" stroke-width="1.5" stroke-dasharray="6,3"/>
+    <text x="636" y="90" fill="#4caf84" font-size="11" text-anchor="middle">内圈 dist=3</text>
+
+    <!-- outer ring dist=6 -->
+    <circle cx="636" cy="120" r="100" fill="rgba(76,175,132,.06)" stroke="#4caf84" stroke-width="1" stroke-dasharray="4,2"/>
+
+    <text x="636" y="230" fill="#4caf84" font-size="12" text-anchor="middle">✅ 只显示 dist=3~6 的有效格</text>
+  </svg>
+</div>
+
+<!-- ==================== SECTION 6: VERIFIED GOOD ==================== -->
+<h2 id="good">6. 🟢 已验证正确的模块</h2>
+
+<div class="card">
+  <p>以下 5 个子系统经审计确认距离/邻居计算<strong>完全正确</strong>，无修改必要：</p>
+
+  <table>
+    <tr>
+      <th>模块</th><th>文件</th><th>验证点</th>
+    </tr>
+    <tr>
+      <td><span class="badge badge-ok">✅</span></td>
+      <td><code>frontend/src/utils/hexUtils.js</code></td>
+      <td>
+        <strong>getHexNeighbors</strong>（第 256 行）：Even-R 奇偶双表，6 方向均正确<br/>
+        <strong>UNIVERSAL_TERRAIN_MAP</strong>（第 347 行）：21 种地形各设正确 cost<br/>
+        <strong>无独立 distance 函数</strong>：移动/范围计算通过 BFS/Dijkstra 实现，符合 Even-R 对 Offset 坐标的正确处理方式
+      </td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-ok">✅</span></td>
+      <td><code>backend-gateway/src/routes/combat.ts</code></td>
+      <td>
+        <strong>getEvenROffsetDirs</strong>（内部函数）：与前端 getHexNeighbors 奇偶双表 100% 一致<br/>
+        <strong>hexDistanceOffset</strong>（内部函数）：offset→axial→cube 标准化距离，数学正确<br/>
+        <strong>tsFindPath</strong>：地形加权 Dijkstra，cost 来自 TERRAIN_COST 表（含全部 21 种地形），移动预算用 speed/moveRange
+      </td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-ok">✅</span></td>
+      <td><code>backend-gateway/src/routes/terrainCosts.ts</code></td>
+      <td>
+        <strong>TERRAIN_COST</strong> 包含全部 21 种地形，数值与 <code>UNIVERSAL_TERRAIN_MAP</code> 完全对齐
+      </td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-ok">✅</span></td>
+      <td><code>frontend/src/views/NewBattleView.vue</code> (移动部分)</td>
+      <td>
+        <strong>moveRangeHexes BFS</strong>（第 1577 行）：使用 <code>moveRange</code>（优先）或 <code>mobility</code>，地形加权走 <code>getTerrainDef(...).cost</code>，不再 /10
+      </td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-ok">✅</span></td>
+      <td><code>services/combat-service/src/state/battleState.js</code>（结构部分）</td>
+      <td>
+        <strong>getEvenROffsetDirs</strong>（第 23 行起）：Even-R 奇偶双表正确<br/>
+        <strong>offsetToAxial / hexDistanceOffset</strong>：公式正确<br/>
+        唯一缺陷：TERRAIN_COST_MAP 缺少 6 种地形（详见 #1）
+      </td>
+    </tr>
+  </table>
+</div>
+
+<!-- ==================== SECTION 7: FIX PLAN ==================== -->
+<h2 id="fixplan">7. 修复方案与优先级</h2>
+
+<div class="card">
+  <h3>修复清单（按优先级排序）</h3>
+
+  <table>
+    <tr>
+      <th style="width:50px">优先级</th>
+      <th>问题</th>
+      <th>文件</th>
+      <th>修改量</th>
+      <th>风险</th>
+    </tr>
+    <tr>
+      <td><span class="badge badge-crit">P0</span></td>
+      <td>#1 地形消耗表遗漏</td>
+      <td><code>battleState.js</code> 第 9–14 行</td>
+      <td>+6 行</td>
+      <td>极低（纯追加，仅填缺失条目）</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-crit">P0</span></td>
+      <td>#2 /skill 缺距离校验</td>
+      <td><code>combat.ts</code> 第 660 行前</td>
+      <td>+25 行</td>
+      <td>低（新增拦截，无破坏性）</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-med">P1</span></td>
+      <td>#3 min_cast_range 不校验</td>
+      <td><code>combat.ts</code> 同上</td>
+      <td>同上（合并修复）</td>
+      <td>低</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-med">P1</span></td>
+      <td>#4 前端范围预览不含最小距离</td>
+      <td><code>NewBattleView.vue</code> 第 1686–1692 行</td>
+      <td>~5 行</td>
+      <td>极低</td>
+    </tr>
+  </table>
+
+  <h3>预期效果</h3>
+  <ul>
+    <li>修复 #1 后：complex terrain（废墟/晶矿/残骸）在 combat-service 中移动消耗正确（2 而非 1），留白区域完全不可通行（999 而非 1）</li>
+    <li>修复 #2+#3 后：所有 /skill 请求均需通过距离校验，超出范围或过于靠近的攻击被 400 拦截</li>
+    <li>修复 #4 后：技能范围预览中，最小距离内的格子不再高亮，视觉与行为一致</li>
+  </ul>
+
+  <h3>不修改的部分</h3>
+  <ul>
+    <li>网关 <code>tsFindPath</code> — 已使用 Even-R 双表 + 地形加权，完全正确</li>
+    <li>前端 <code>getHexNeighbors</code> — Even-R 奇偶双表，渲染/交互均基于此，数学正确</li>
+    <li>整体坐标系统 — Even-R Offset 已确立为唯一标准，无需再次迁移</li>
+  </ul>
+
+  <h3>不推荐的修复方案</h3>
+  <ul>
+    <li><strong>将前端 getHexNeighbors 改为 axial 单表</strong>：会破坏所有基于 Even-R 的 hexToPixel/pixelToHex 对应关系，导致渲染偏移、点击错位，改动量极大且无收益</li>
+    <li><strong>将 /skill 范围校验放到 combat-service .cjs 内</strong>：service 层应保持无状态战斗引擎，校验应由网关层（唯一掌握 terrainMap、battle state、skill definitions 的层）完成</li>
+  </ul>
+</div>
+
+<!-- Footer -->
+<div style="text-align:center; margin-top:40px; padding-top:20px; border-top:1px solid var(--border); color:var(--dim); font-size:0.85em;">
+  mecha-universe-engine · 距离/射程计算审计报告 · 2026-07-23 · 坐标系统: Even-R Offset (q,r)
+</div>
+
+</div>
+</body>
+</html>
