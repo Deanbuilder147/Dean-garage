@@ -1,0 +1,54 @@
+name: Docker Build and Push
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_DB: mecha_battle_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: |
+          cd services/auth-service && npm install
+          cd ../hangar-service && npm install
+          cd ../map-service && npm install
+          cd ../combat-service && npm install
+          cd ../comm-service && npm install
+          
+      - name: Build Docker images
+        run: |
+          docker build -t mecha-battle:latest ./services/auth-service
+          docker build -t mecha-battle:latest ./services/hangar-service
+          docker build -t mecha-battle:latest ./services/map-service
+          docker build -t mecha-battle:latest ./services/combat-service
+          docker build -t mecha-battle:latest ./services/comm-service
+          
+      - name: Run tests
+        run: |
+          cd services/combat-service && npm test
