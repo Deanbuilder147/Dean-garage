@@ -200,7 +200,11 @@
           <div class="ap-stat-row"><span>类型</span><span class="ap-stat-val">{{ selectedDeployUnit.type || '?' }}</span></div>
           <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedDeployUnit.attack || '?' }}</span></div>
           <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedDeployUnit.defense || '?' }}</span></div>
-          <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ selectedDeployUnit.mobility || '?' }}</span></div>
+          <div class="ap-mobility-block">
+            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ deployMobilityBreakdown.total || selectedDeployUnit.mobility || '—' }}</span></div>
+            <div class="ap-stat-sub"><span>主机体移动力</span><span>{{ deployMobilityBreakdown.mainBody || 0 }}</span></div>
+            <div class="ap-stat-sub"><span>额外移动力{{ deployMobilityBreakdown.extraType ? '(' + mobTypeLabel(deployMobilityBreakdown.extraType) + ')' : '' }}</span><span>{{ deployMobilityBreakdown.extra || 0 }}</span></div>
+          </div>
           <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedDeployUnit.range || 1 }}</span></div>
         </div>
         <div class="ap-mode-hint deploy-hint" v-if="selectedDeployUnit">
@@ -237,7 +241,11 @@
           <div class="ap-stat-row"><span>护盾</span><span class="ap-stat-val">{{ selectedUnit.shield || 0 }}</span></div>
           <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedUnit.attack ?? '?' }}</span></div>
           <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedUnit.defense ?? '?' }}</span></div>
-          <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ selectedUnit.mobility || selectedUnit['机动'] || '?' }}</span></div>
+          <div class="ap-mobility-block">
+            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || '—' }}</span></div>
+            <div class="ap-stat-sub"><span>主机体移动力</span><span>{{ mobilityBreakdown.mainBody || 0 }}</span></div>
+            <div class="ap-stat-sub"><span>额外移动力{{ mobilityBreakdown.extraType ? '(' + mobTypeLabel(mobilityBreakdown.extraType) + ')' : '' }}</span><span>{{ mobilityBreakdown.extra || 0 }}</span></div>
+          </div>
           <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedUnit.range ?? 1 }}</span></div>
           <div class="ap-stat-row" v-if="selectedUnit.q !== undefined"><span>位置</span><span class="ap-stat-val">{{ formatCoord(selectedUnit.q, selectedUnit.r) }}</span></div>
         </div>
@@ -262,7 +270,7 @@
           >
             <span class="ap-action-icon">➤</span>
             <span class="ap-action-label">移动</span>
-            <span class="ap-action-hint">机动 {{ selectedUnit.mobility || selectedUnit['机动'] || 3 }}</span>
+            <span class="ap-action-hint">机动 {{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || 3 }}</span>
           </button>
 
           <button
@@ -883,6 +891,80 @@ function setUnitVisual(unitId, direction, actionState) {
 
 // === Phase 30-Cover: 战场状态规范化（前端从 position 取坐标；补全渲染所需字段） ===
 function safeParseJson(v) { try { return JSON.parse(v) } catch { return v } }
+
+// === 唯一的「机动 → 移动力」权威解析（系统性修复 · 2026-07-24 链路级修正） ===
+// 与后端 computeMobility 完全一致：机体 2:1（基础最低 5）；装备(载具/背包) 3:1；Royroy 等不计入。
+// 无部件时回退 stats.mobility / stats.speed / 顶层（旧语义，移动点即数值）。
+function resolveUnitMobility(raw) {
+  if (!raw || typeof raw !== 'object') return 0
+  const stats = (raw.stats && typeof raw.stats === 'object') ? raw.stats : {}
+  const toNum = (x) => (typeof x === 'number' && !isNaN(x) ? x : null)
+  const normType = (t) => String(t || '').trim()
+  // 分部位移动力（按规则换算）
+  let partsSum = 0
+  const parts = raw.attributes?.parts || (raw.parts && typeof raw.parts === 'object' ? raw.parts : null)
+  if (parts && typeof parts === 'object') {
+    for (const p of Object.values(parts)) {
+      if (p && typeof p === 'object') {
+        const type = normType(p.normalizedType || p.type)
+        const m = toNum(p['机动']) ?? toNum(p.mobility)
+        if (m == null) continue
+        if (type === '机体') partsSum += Math.max(5, Math.ceil(m / 2))
+        else if (type === '载具' || type === '背包') partsSum += Math.ceil(m / 3)
+        // 武器 / 防具 / 跟随(Royroy) 不计入
+      }
+    }
+  }
+  if (partsSum > 0) return partsSum
+  const candidates = [
+    toNum(stats.mobility),
+    toNum(stats.speed),
+    toNum(raw.mobility),
+    toNum(raw['机动']),
+    toNum(raw.main_机动),
+  ]
+  for (const c of candidates) if (c != null) return c
+  return 0
+}
+
+// === 机动拆解（行动面板专用，响应式）：主机体移动力 + 额外移动力（载具/背包）===
+// 来源：unit.parts / unit.attributes.parts（分部位中文「机动」）/ 兜底 unit.equipState。
+// 背包与载具互斥，故额外移动力只取一种；若部件被舍弃，依赖 selectedUnit 响应式重算。
+// 数值一律按规则换算（与后端 computeMobility 同源）：机体 2:1(最低5)、装备 3:1。
+function calcMobilityBreakdown(unit) {
+  const empty = { mainBody: 0, extra: 0, extraType: '', total: 0 }
+  if (!unit || typeof unit !== 'object') return empty
+  const parts = unit.parts || (unit.attributes && unit.attributes.parts) || null
+  let mainBody = 0
+  let extra = 0
+  let extraType = ''
+  const normType = (t) => String(t || '').trim()
+  const addPart = (p, key) => {
+    if (!p || typeof p !== 'object') return
+    const type = normType(p.normalizedType || p.type)
+    const m = typeof p['机动'] === 'number' ? p['机动'] : (typeof p.mobility === 'number' ? p.mobility : 0)
+    if (type === '机体' || key === '主机体') mainBody += Math.max(5, Math.ceil(m / 2))
+    else if (type === '载具' || type === '背包') { if (!extraType) extraType = type; extra += Math.ceil(m / 3) }
+  }
+  if (parts && typeof parts === 'object') {
+    for (const [k, p] of Object.entries(parts)) addPart(p, k)
+  }
+  // 装备状态兜底（武器/防具/载具/背包，不含主机体）
+  if (unit.equipState && Array.isArray(unit.equipState)) {
+    for (const e of unit.equipState) {
+      const type = normType(e.type)
+      const m = typeof e.mobility === 'number' ? e.mobility : 0
+      if (type === '机体') mainBody += Math.max(5, Math.ceil(m / 2))
+      else if (type === '载具' || type === '背包') { if (!extraType) extraType = type; extra += Math.ceil(m / 3) }
+    }
+  }
+  return { mainBody, extra, extraType, total: mainBody + extra }
+}
+function mobTypeLabel(t) {
+  if (t === '载具') return '载具'
+  if (t === '背包') return '背包'
+  return t || ''
+}
 function normalizeBattleState(state) {
   if (!state || !state.units) return state
   const units = Array.isArray(state.units) ? state.units : Object.values(state.units)
@@ -906,6 +988,10 @@ function normalizeBattleState(state) {
       if (u.armor === undefined && cs.armor !== undefined) u.armor = cs.armor
       if (u.maxHp === undefined && cs.maxHp !== undefined) u.maxHp = cs.maxHp
     }
+    // 阶段修复：统一解析「机动」，消除 ? 与错误的 0
+    // 兼容 stats.mobility / stats.speed / attributes.parts.*.机动（合计）/ 顶层 mobility / 机动 / main_机动
+    if (u.mobility === undefined) u.mobility = resolveUnitMobility(u)
+    if (u.moveRange === undefined || u.moveRange === 0) u.moveRange = u.mobility
     // 七视图兼容（view_urls 字符串 → viewUrls 对象）
     if (u.view_urls !== undefined && u.viewUrls === undefined) {
       u.viewUrls = typeof u.view_urls === 'string' ? safeParseJson(u.view_urls) : u.view_urls
@@ -1002,6 +1088,10 @@ const deploying = ref(false)
 const selectedUnit = ref(null)
 const actionMode = ref(null)  // 'move' | 'tactical' | 'defend' | 'wait'
 const selectedAttackSkill = ref(null)
+
+// 行动面板机动拆解（响应式：依赖 selectedUnit/selectedDeployUnit 的 parts，装备舍弃即重算）
+const mobilityBreakdown = computed(() => calcMobilityBreakdown(selectedUnit.value))
+const deployMobilityBreakdown = computed(() => calcMobilityBreakdown(selectedDeployUnit.value))
 // Phase8: 手动掷骰拦截状态机
 const diceRollState = reactive({
   active: false,
@@ -1490,7 +1580,7 @@ async function loadDeployPool() {
   try {
     const poolRes = await combatAPI.getDeployPool(route.params.id)
     if (poolRes.data.units && poolRes.data.units.length > 0) {
-      deployPool.value = poolRes.data.units
+      deployPool.value = poolRes.data.units.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
       console.log('[loadDeployPool] 后端部署池返回棋子数:', deployPool.value.length)
       return
     }
@@ -1505,9 +1595,9 @@ async function loadDeployPool() {
     try {
       const selectedIds = JSON.parse(localStorage.getItem('selectedUnitIds') || '[]')
       if (selectedIds.length > 0) {
-        deployPool.value = allUnits.filter(u => selectedIds.includes(u.id))
+        deployPool.value = allUnits.filter(u => selectedIds.includes(u.id)).map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
       } else {
-        deployPool.value = allUnits
+        deployPool.value = allUnits.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
       }
     } catch {
       deployPool.value = allUnits
@@ -1668,6 +1758,7 @@ function drawBattleScene(ctx, opts) {
   // Attack range highlight preview (Phase 16 fix)
   const attackRangeHexes = new Set()
   const skillRangeHexes = new Set()
+  const validTargets = new Set()
   if (actionMode.value === 'tactical' && selectedUnit.value && !royroyDeployMode.value) {
     const su = selectedUnit.value
     const range = getSkillRange(selectedAttackSkill.value)
@@ -1696,7 +1787,7 @@ function drawBattleScene(ctx, opts) {
       }
     }
     // Highlight valid targets (enemy units in range)
-    const validTargets = new Set()
+    validTargets.clear()
     allUnits.value.forEach(u => {
       if (u.q === undefined || u.id === su.id) return
       // Check if target is in range
@@ -3576,6 +3667,46 @@ function onDiceKeyDown(e) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* 纵向侧滑轮：内容溢出时可滚动 */
+  max-height: calc(100vh - 70px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,176,0,0.5) rgba(255,255,255,0.06);
+}
+.floating-action-panel .floating-card-body::-webkit-scrollbar {
+  width: 8px;
+}
+.floating-action-panel .floating-card-body::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+}
+.floating-action-panel .floating-card-body::-webkit-scrollbar-thumb {
+  background: rgba(255,176,0,0.5);
+  border-radius: 4px;
+}
+.floating-action-panel .floating-card-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,176,0,0.75);
+}
+
+/* 机动拆解区块 */
+.ap-mobility-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  border-bottom: 1px dashed rgba(255,255,255,0.1);
+}
+.ap-stat-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #9f8e78;
+  padding-left: 8px;
+}
+.ap-stat-sub span:last-child {
+  color: #ffd479;
+  font-weight: 600;
 }
 
 /* 阵营面板特定样式 */

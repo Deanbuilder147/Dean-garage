@@ -64,6 +64,43 @@ export interface CreateBattleUnitParams {
  * action_points 默认注入 { MOVE: 1, ATTACK: 1 }，
  * 天然兼容一切 TRPG 规则的多动/残余行动点/特殊行动机制。
  */
+/**
+ * 唯一的「移动力」权威函数（系统性修复 · 2026-07-24 链路级修正）。
+ *
+ * 规则（与前端 calcMobilityBreakdown / resolveUnitMobility / BFS / 后端 /move 全链路一致）：
+ *   1. 机体（机体 / 主机体）：移动力 = 机动值 / 2，向上取整；机体基础移动力最低 = 5。
+ *   2. 装备（载具 / 背包）：移动力 = 机动值 / 3，向上取整。
+ *   3. 武器 / 防具 / 跟随(Royroy) 等不计入移动力。
+ *
+ * 返回的「移动力」既是行动面板展示值，也是 moveRange 与后端寻路的预算（三者同源唯一）。
+ */
+function computeMobility(parts: any): number {
+  if (!parts || typeof parts !== 'object') return 0
+  const TYPE_ALIAS: Record<string, string> = {
+    '机体': '机体', '主机体': '机体',
+    '载具': '载具', '背包': '背包',
+    '武器': '武器', '防具': '防具', '跟随': '跟随',
+  }
+  const norm = (t: any) => TYPE_ALIAS[String(t || '').trim()] || String(t || '')
+  let total = 0
+  for (const p of Object.values(parts)) {
+    if (!p || typeof p !== 'object') continue
+    const part = p as any
+    const t = norm(part.normalizedType || part.type)
+    const raw = typeof part['机动'] === 'number' ? part['机动']
+      : (typeof part.mobility === 'number' ? part.mobility : 0)
+    if (t === '机体') {
+      // 机体：2:1，基础移动力最低 5
+      total += Math.max(5, Math.ceil(raw / 2))
+    } else if (t === '载具' || t === '背包') {
+      // 装备：3:1
+      total += Math.ceil(raw / 3)
+    }
+    // 武器 / 防具 / 跟随(Royroy) 不计入移动力
+  }
+  return total
+}
+
 export function createBattleUnit(params: CreateBattleUnitParams): BattleUnit {
   return {
     unitId: params.unitId,
@@ -85,8 +122,12 @@ export function createBattleUnit(params: CreateBattleUnitParams): BattleUnit {
     viewUrls: params.viewUrls,
     // 阶段二：从部件构建装备状态；移动范围与基准机动取自 stats
     equipState: buildEquipmentFromParts(params.parts),
-    moveRange: params.currentStats?.speed ?? 0,
-    mobility: params.currentStats?.mobility ?? 0,
+    // 系统性修复（2026-07-24 链路级修正）：moveRange 与 mobility 同源唯一，均由 computeMobility 产出。
+    // 规则：机体 2:1（基础最低 5）；装备(载具/背包) 3:1；Royroy 等不计入。
+    // 无部件数据时回退 stats.mobility / stats.speed（旧语义，移动点即数值）。
+    parts: params.parts || null,
+    mobility: (params.parts ? computeMobility(params.parts) : 0) || (params.currentStats?.mobility ?? params.currentStats?.speed ?? 0),
+    moveRange: (params.parts ? computeMobility(params.parts) : 0) || (params.currentStats?.mobility ?? params.currentStats?.speed ?? 0),
     // 阶段二规则6：从「跟随」部件抽取 Royroy 属性模型（非独立单位）
     royroy: buildRoyroyState(params.parts),
   };
