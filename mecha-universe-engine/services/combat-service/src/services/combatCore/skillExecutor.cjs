@@ -263,8 +263,31 @@ class SkillExecutor {
     _executeAttackSkill(skillType, unit, target, uf, cfg, dice, heightBonus, heightDiff, context) {
         const baseDamage = uf.base_damage || uf.damage_modifier_precise || 0;
         const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
-        const finalDamage = baseDamage + diceBonus + heightBonus;
         const attackType = uf.attack_stat === 'ranged' ? 'ranged' : 'melee';
+
+        // ── 防御/闪避结算：防御方 evasion_mod 抵消攻击方 accuracy_mod（默认 0 → 不改变既有平衡）──
+        const defenderEvasion = Number(target?.evasion_mod ?? 0);
+        const attackerAccuracy = Number(unit?.accuracy_mod ?? 0);
+        const netDodge = Math.max(0, defenderEvasion - attackerAccuracy);
+        let dodged = false;
+        if (netDodge > 0) {
+            const dodgeRoll = 1 + Math.floor(Math.random() * 6); // 1d6
+            dodged = dodgeRoll <= netDodge;
+        }
+
+        let finalDamage = baseDamage + diceBonus + heightBonus;
+        if (dodged) finalDamage = 0;
+
+        // ── 反击结算：受击方在反击射程内自动反击（仅当 glossary 配置 'counter' 技能时启用）──
+        let counterTriggered = false;
+        let counterDamage = 0;
+        if (target && target.hp > 0 && getSkillConfig('counter')) {
+            const counterRes = this.executeCounter(target, unit, uf.max_range || uf.cast_range || 1);
+            if (counterRes && counterRes.triggered) {
+                counterTriggered = true;
+                counterDamage = counterRes.bonus || 0;
+            }
+        }
 
         const result = {
             triggered: true,
@@ -280,6 +303,9 @@ class SkillExecutor {
             height_diff: heightDiff,
             final_damage: finalDamage,
             bonus_value: finalDamage,
+            dodged,
+            counter_triggered: counterTriggered,
+            counter_damage: counterDamage,
             accuracy_mod: uf.accuracy_mod,
             evasion_mod: uf.evasion_mod,
             status_effects: uf.status_effects,
@@ -297,7 +323,12 @@ class SkillExecutor {
             }
         }
         if (heightBonus > 0) msgParts.push(`高地+${heightBonus}`);
-        msgParts.push(`伤害${finalDamage}`);
+        if (dodged) {
+            msgParts.push(`闪避(伤害0)`);
+        } else {
+            msgParts.push(`伤害${finalDamage}`);
+        }
+        if (counterTriggered) msgParts.push(`受反击${counterDamage}`);
         result.message = msgParts.join(', ');
 
         // 定语修正注入 context
@@ -616,7 +647,7 @@ class SkillExecutor {
     executeCounter(unit, attacker, skillRange) {
         const cfg = getSkillConfig('counter');
         const uf = this._getUniversalFields('counter');
-        const range = skillRange ?? uf.cast_range;
+        const range = skillRange ?? uf.cast_range ?? 1;
         const dist = this._hexDistance(unit, attacker);
         if (dist > range) return { triggered: false };
 

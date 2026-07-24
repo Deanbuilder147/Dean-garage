@@ -340,7 +340,7 @@
                 <span class="sk-name">{{ skill.name }}</span>
               </div>
               <div class="sk-meta">
-                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 范围{{ skill.rangeLabel || skill.range || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '1') }}</span>
+                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 范围{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || skill.range || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '1')) }}</span>
                 <span class="skill-type-badge" :class="'badge-' + (skill.category || 'special')">{{ skill.typeLabel || skill.type || skill.category }}</span>
                 <span class="sk-durability-label" v-if="group.durability !== undefined">耐久 <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b></span>
               </div>
@@ -1754,9 +1754,6 @@ function drawBattleScene(ctx, opts) {
   }
 
   // Skill/Tactical range preview
-
-  // Attack range highlight preview (Phase 16 fix)
-  const attackRangeHexes = new Set()
   const skillRangeHexes = new Set()
   const validTargets = new Set()
   if (actionMode.value === 'tactical' && selectedUnit.value && !royroyDeployMode.value) {
@@ -1823,17 +1820,6 @@ function drawBattleScene(ctx, opts) {
         drawHexPath(ctx, cx, cy)
         ctx.fill()
         ctx.strokeStyle = 'rgba(0,180,220,0.4)'
-        ctx.lineWidth = 2
-        drawHexPath(ctx, cx, cy)
-        ctx.stroke()
-      }
-
-      // Attack range highlight
-      if (attackRangeHexes.has(hexKey)) {
-        ctx.fillStyle = 'rgba(255,77,77,0.1)'
-        drawHexPath(ctx, cx, cy)
-        ctx.fill()
-        ctx.strokeStyle = 'rgba(255,77,77,0.3)'
         ctx.lineWidth = 2
         drawHexPath(ctx, cx, cy)
         ctx.stroke()
@@ -2410,11 +2396,21 @@ function getSkillRange(skill) {
     // 普通攻击：使用单位的 range 属性
     return selectedUnit.value?.range || 1
   }
-  // 有 range 字符串 "1-3" → 取 max
-  if (skill.range) {
-    const parts = String(skill.range).split(/[-~]/)
-    const nums = parts.map(Number).filter(n => !isNaN(n))
-    return nums.length > 1 ? Math.max(...nums) : (nums[0] || 1)
+  // 优先读取技能自身施加范围字段（与后端 resolveSkillRange 对齐：
+  // range / range_max / max_range / cast_range，支持数字、"1-3" 字符串、{min,max} 对象）
+  const maxFields = ['range', 'range_max', 'max_range', 'cast_range']
+  for (const f of maxFields) {
+    const v = skill[f]
+    if (v === undefined || v === null) continue
+    if (typeof v === 'number') return v
+    if (typeof v === 'string') {
+      const nums = String(v).split(/[-~]/).map(Number).filter(n => !isNaN(n))
+      if (nums.length) return Math.max(...nums)
+    }
+    if (typeof v === 'object') {
+      if (typeof v.max === 'number') return v.max
+      if (typeof v.min === 'number') return v.min
+    }
   }
   if (skill.range_min !== undefined) {
     return Math.max(skill.range_min, skill.range_max || skill.range_min)
@@ -2428,14 +2424,27 @@ function getSkillRange(skill) {
 // 获取技能的最小施放距离（hex距离）— 审计报告 #4 修复：范围预览需排除 min_range 内格
 function getSkillRangeMin(skill) {
   if (!skill) return 0 // 普通攻击无最小距离
-  // 范围字符串 "1-3" → 取 min
+  // 优先读取技能自身最小距离字段（与后端 resolveSkillRange 对齐：
+  // min_cast_range / min_range / range_min，支持数字或 "1-3" 字符串）
+  const minFields = ['min_cast_range', 'min_range', 'range_min']
+  for (const f of minFields) {
+    const v = skill[f]
+    if (v === undefined || v === null) continue
+    if (typeof v === 'number') return v
+    if (typeof v === 'string') {
+      const nums = String(v).split(/[-~]/).map(Number).filter(n => !isNaN(n))
+      if (nums.length) return Math.min(...nums)
+    }
+  }
+  // 范围字符串 "1-3" / {min,max} 对象 → 取 min
   if (skill.range) {
     const parts = String(skill.range).split(/[-~]/)
     const nums = parts.map(Number).filter(n => !isNaN(n))
     return nums.length ? (nums[0] || 0) : 0
   }
-  if (skill.min_cast_range !== undefined) return skill.min_cast_range
-  if (skill.range_min !== undefined) return skill.range_min
+  if (skill.cast_range && typeof skill.cast_range === 'object' && typeof skill.cast_range.min === 'number') {
+    return skill.cast_range.min
+  }
   return 0
 }
 

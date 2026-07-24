@@ -23,7 +23,7 @@
  */
 
 // ───────────────────────── 枚举常量 ─────────────────────────
-const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support'];
+const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
 const CATEGORY_LABELS = {
   melee: '近战',
   ranged: '远程',

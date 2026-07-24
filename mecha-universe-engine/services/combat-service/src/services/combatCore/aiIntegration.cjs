@@ -5,8 +5,10 @@
 
 const { AIEngine, AI_DIFFICULTY } = require('./aiEngine.cjs');
 const { bt } = require('./behaviorTree.cjs');
-const { createStrategy } = require('./aiStrategies.cjs');
+const { createStrategy, hexDistance } = require('./aiStrategies.cjs');
 const { getDifficultyConfig, AIDifficultyProxy, getAllDifficulties } = require('./aiDifficulty.cjs');
+
+// 六边形距离统一由 aiStrategies.hexDistance 提供（已对齐后端 hexDistanceOffset 的 Even-R offset 语义）。
 
 /**
  * AI战斗控制器
@@ -174,16 +176,18 @@ class AICombatController {
    * 检查是否在攻击范围内
    */
   isInRange(attacker, defender, gameState) {
-    const range = attacker.attack_range || 1;
+    const range = attacker.range || attacker.currentStats?.range || 1;
     const dist = this.getDistance(attacker.position, defender.position);
     return dist <= range;
   }
 
   /**
-   * 计算距离
+   * 计算六边形网格距离（偶行偏移坐标 → 立方距离）
+   * 偏移坐标上的曼哈顿距离是错的，必须用立方距离，与后端 hexDistanceOffset 保持一致。
    */
   getDistance(posA, posB) {
-    return Math.abs(posA.q - posB.q) + Math.abs(posA.r - posB.r);
+    // Even-R offset → axial → cube，复用 aiStrategies.hexDistance（与后端 hexDistanceOffset 完全一致）
+    return hexDistance(posA, posB);
   }
 
   /**

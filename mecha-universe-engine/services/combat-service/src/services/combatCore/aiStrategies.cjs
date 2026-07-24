@@ -5,9 +5,15 @@
 
 const { AI_DIFFICULTY } = require('./aiEngine.cjs');
 
-// 六边形网格距离计算
+// 六边形网格距离计算（Even-R offset → axial → cube 距离）
+// 注意：坐标本质是偶行偏移(offset)，必须先转轴向再用立方距离，
+// 否则直接对 offset 套轴向公式会得到错误距离。与后端 hexDistanceOffset / skillExecutor._hexDistance 完全一致。
 function hexDistance(a, b) {
-  return (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs((a.q + a.r) - (b.q + b.r))) / 2;
+  const ax = a.q - (a.r + (a.r & 1)) / 2;
+  const az = a.r;
+  const bx = b.q - (b.r + (b.r & 1)) / 2;
+  const bz = b.r;
+  return Math.max(Math.abs(ax - bx), Math.abs(az - bz), Math.abs(ax + az - bx - bz));
 }
 
 // 计算两点的曼哈顿距离（简化版）
@@ -77,9 +83,9 @@ class AggressiveStrategy extends AIStrategy {
   }
 
   findEnemiesInRange(unit, enemies, gameState) {
-    const range = unit.attack_range || 1;
+    const range = unit.range || unit.currentStats?.range || 1;
     return enemies.filter(enemy => {
-      const dist = manhattanDistance(unit.position, enemy.position);
+      const dist = hexDistance(unit.position, enemy.position);
       return dist <= range;
     });
   }
@@ -95,7 +101,7 @@ class AggressiveStrategy extends AIStrategy {
   findNearestEnemy(unit, enemies) {
     return enemies.reduce((nearest, enemy) => {
       if (!nearest) return enemy;
-      const distCurrent = manhattanDistance(unit.position, enemy.position);
+      const distCurrent = hexDistance(unit.position, enemy.position);
       const distNearest = manhattanDistance(unit.position, nearest.position);
       return distCurrent < distNearest ? enemy : nearest;
     }, null);
@@ -173,7 +179,7 @@ class DefensiveStrategy extends AIStrategy {
   }
 
   findEnemiesInRange(unit, enemies, gameState) {
-    const range = unit.attack_range || 1;
+    const range = unit.range || unit.currentStats?.range || 1;
     return enemies.filter(e => manhattanDistance(unit.position, e.position) <= range);
   }
 
@@ -241,7 +247,7 @@ class BalancedStrategy extends AIStrategy {
   }
 
   findEnemiesInRange(unit, enemies, gameState) {
-    const range = unit.attack_range || 1;
+    const range = unit.range || unit.currentStats?.range || 1;
     return enemies.filter(e => manhattanDistance(unit.position, e.position) <= range);
   }
 
@@ -257,14 +263,14 @@ class BalancedStrategy extends AIStrategy {
 
   findBestMoveTarget(unit, enemies, gameState) {
     const moveRange = unit.mobility || 3;
-    const attackRange = unit.attack_range || 1;
+    const attackRange = unit.range || unit.currentStats?.range || 1;
     
     // 找到可以攻击到敌人的最近位置
     let bestTarget = null;
     let bestScore = Infinity;
 
     for (const enemy of enemies) {
-      const dist = manhattanDistance(unit.position, enemy.position);
+      const dist = hexDistance(unit.position, enemy.position);
       if (dist <= moveRange + attackRange) {
         const movesNeeded = dist - attackRange;
         if (movesNeeded >= 0 && movesNeeded < bestScore) {

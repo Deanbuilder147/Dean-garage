@@ -165,6 +165,9 @@
             <select id="wiz-category" name="category" v-model="wizardForm.category" class="param-select">
               <option value="melee">近战 melee</option>
               <option value="ranged">远程 ranged</option>
+              <option value="automation">自动化 automation</option>
+              <option value="support">辅助 support</option>
+              <option value="auto">自动化(旧) auto</option>
               <option value="special">特殊 special</option>
               <option value="passive">被动 passive</option>
             </select></div>

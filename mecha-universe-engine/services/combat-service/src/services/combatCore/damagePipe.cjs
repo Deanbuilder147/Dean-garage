@@ -467,6 +467,21 @@ class DamagePipe {
             terrainDefs: terrainDefs || {}
         });
     }
+
+    /**
+     * 六边形距离（Even-R offset → axial → cube），与后端 hexDistanceOffset 完全一致。
+     * 供阵营技能 AoE 半径判定（factionSkillRegistry 调用）使用。
+     */
+    static calculateHexDistance(a, b) {
+        const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+        const ax = offToAx(a?.q || 0, a?.r || 0);
+        const bx = offToAx(b?.q || 0, b?.r || 0);
+        return Math.max(
+            Math.abs(ax.q - bx.q),
+            Math.abs(ax.r - bx.r),
+            Math.abs(ax.q + ax.r - bx.q - bx.r)
+        );
+    }
 }
 
 module.exports = DamagePipe;

@@ -589,6 +589,8 @@ function toExecutorUnit(u: any): any {
     shield: s.shield ?? 0,
     mobility: s.mobility ?? 0,
     faction: u?.ownerId ?? u?.faction ?? 'neutral',
+    evasion_mod: s.evasion_mod ?? 0,
+    accuracy_mod: s.accuracy_mod ?? 0,
     equipment: u?.equipment ?? {},
     equipState: u?.equipState ?? [],
     has_moved: u?.has_moved ?? false,
@@ -771,6 +773,12 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
       }
     }
 
+    // 反击伤害写回施法者（仅当施法者取自战局单位）
+    if (casterBattleUnit && result && result.counter_triggered && result.counter_damage > 0) {
+      const cst = casterBattleUnit.currentStats || (casterBattleUnit.currentStats = {});
+      cst.hp = Math.max(0, (cst.hp ?? 0) - result.counter_damage);
+    }
+
     res.json({
       success: true,
       battleId,
@@ -848,8 +856,8 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
       damage_kind: 'kinetic',
       cast_range: rangeVal,
       max_range: rangeVal,
-      min_cast_range: 0,
-      min_range: 0,
+      min_cast_range: casterUnit?.currentStats?.min_range ?? 0,
+      min_range: casterUnit?.currentStats?.min_range ?? 0,
       base_damage: at === 'ranged'
         ? (exeCaster.ranged || exeCaster.attack || 0)
         : (exeCaster.melee || exeCaster.attack || 0),
@@ -869,7 +877,7 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
     let range = resolveSkillRange(skillKey, skill_id, exeCaster, inlineDef);
     if (range === null && (skillKey === 'melee' || skillKey === 'ranged')) {
       const basic = casterUnit.currentStats?.range;
-      if (typeof basic === 'number') range = { max: basic, min: 0 };
+      if (typeof basic === 'number') range = { max: basic, min: casterUnit?.currentStats?.min_range ?? 0 };
     }
     if (range) {
       if (dist > range.max) {
@@ -915,12 +923,21 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
       }
     }
 
+    // 反击伤害写回攻击者（前端 refreshState 重新拉取生效）
+    if (casterUnit && result && result.counter_triggered && result.counter_damage > 0) {
+      const cst = casterUnit.currentStats || (casterUnit.currentStats = {} as any);
+      cst.hp = Math.max(0, (cst.hp ?? 0) - result.counter_damage);
+    }
+
     // 响应结构对齐前端消费（combat_result.final_damage / surprise_triggered）
     res.json({
       success: true,
       combat_result: {
         triggered: result?.triggered ?? true,
         final_damage: result?.final_damage ?? 0,
+        dodged: result?.dodged ?? false,
+        counter_triggered: result?.counter_triggered ?? false,
+        counter_damage: result?.counter_damage ?? 0,
         attack_type: result?.attack_type,
         attack_stat: result?.attack_stat,
         damage_kind: result?.damage_kind,

@@ -93,6 +93,7 @@ export interface UnitStats {
   speed: number;
   mobility: number;
   range: number;
+  min_range?: number;
 }
 
 export interface UnitSkill {
@@ -266,6 +267,8 @@ export interface BattleUnit {
   mobility?: number;
   /** 阶段二规则6 Royroy 浮游辅机（属性模型，非独立单位） */
   royroy?: RoyroyState;
+  /** 归一化部件（attributes.parts）：供前端拆解「主机体移动力 + 额外移动力」，装备舍弃时响应式重算 */
+  parts?: any;
 }
 
 /** Royroy 浮游辅机状态（随主机行动，非独立 BattleUnit） */

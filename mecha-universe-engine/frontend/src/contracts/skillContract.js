@@ -17,12 +17,14 @@
  */
 
 // ───────────────────────── 枚举常量 ─────────────────────────
-export const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support'];
+export const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
 export const CATEGORY_LABELS = {
   melee: '近战',
   ranged: '远程',
   automation: '自动化',
-  support: '辅助'
+  support: '辅助',
+  auto: '自动化(旧)',
+  special: '特殊(旧)'
 };
 
 export const TARGET_SCOPES = ['enemy', 'ally', 'enemy_equipment', 'ally_equipment'];

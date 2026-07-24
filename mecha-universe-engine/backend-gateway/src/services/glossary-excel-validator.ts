@@ -8,7 +8,7 @@
 
 import type { ParsedGlossaryExcel } from './glossary-excel-parser.js';
 
-const VALID_CATEGORIES = ['melee', 'ranged', 'automation', 'support'];
+const VALID_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
 const VALID_TARGET_SCOPE = ['enemy', 'ally', 'self', 'enemy_equipment', 'ally_equipment'];
 const VALID_SKILL_SHAPE = ['single', 'fan', 'linear', 'concentric'];
 const VALID_DAMAGE_KIND = ['kinetic', 'beam', 'explosive', 'corrosive', 'thermal'];
