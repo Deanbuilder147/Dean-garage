@@ -28,7 +28,14 @@ jobs:
           --exclude 'dist' \
           --exclude 'dist-dev' \
           --exclude '*.db' \
+          --exclude '.env' \
           ./ root@${{ secrets.HOST_IP }}:/root/mecha-universe-engine/
+
+      - name: Lint Gate (ESLint no-console 门禁)
+        run: |
+          cd backend-gateway
+          npm install --legacy-peer-deps
+          npm run lint
 
       - name: Build, Tag & Zero-Downtime Deploy
         run: |

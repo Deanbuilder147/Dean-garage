@@ -55,12 +55,18 @@ services:
       - BCRYPT_ROUNDS=10
       - DB_PATH=/data/mecha-universe.db
       - CORS_ORIGINS=${CORS_ORIGINS:-http://106.54.197.69:8081,http://localhost:8081,http://localhost:5173}
+      # 全局限流额度（/health 外所有 /api 计入）。本地 vite 预览直连公网 IP 会共用服务器 IP 桶，
+      # 故放宽到 2000/窗口，避免前端多请求场景被误伤。登录另有语义限流，可按需再收紧。
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-2000}
       # Phase 29-DataSecurity: PostgreSQL 双源桥接
       - PG_HOST=mecha-battle-db
       - PG_PORT=5432
       - PG_DATABASE=${PG_DATABASE:-mecha_battle}
       - PG_USER=${PG_USER:-mecha_user}
       - PG_PASSWORD=${PG_PASSWORD:-mecha_user_password}
+      # Meowa AI 素材生成密钥（在服务器 .env 中配置 MEOWART_API_KEY=ma_live_xxx）
+      - MEOWART_API_KEY=${MEOWART_API_KEY:-}
+      - MEOWA_API_BASE=${MEOWA_API_BASE:-https://api.meowa.ai}
     depends_on:
       mecha-battle-db:
         condition: service_healthy
@@ -90,6 +96,11 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3005
+      - JWT_SECRET=${JWT_SECRET}
+      # 大一统后端网关 (3006)：Combat/Map 数据主权已收归网关，legacy 上游端口 3003/3004 已废除。
+      # 若命中 comm 内残留的 map/combat 拉取逻辑，必须指向真实网关，否则 localhost:3003/3004 不存在 → 静默降级。
+      - COMBAT_SERVICE_URL=http://mecha-gateway:3006
+      - MAP_SERVICE_URL=http://mecha-gateway:3006
     networks:
       - mecha-net
     healthcheck:
