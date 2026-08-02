@@ -34,8 +34,21 @@
         <button type="button" class="delete-btn" @click="removeSkill(index)">×</button>
       </div>
       <div class="skill-extra-row">
-        <label :for="`skill-${index}-range`" class="sr-only">射程</label>
-        <input :id="`skill-${index}-range`" type="text" v-model="skill.range" class="skill-range-input" placeholder="射程" name="skill-range">
+        <span class="skill-range-readonly" :title="'射程由类型基准 + 词条射程加成自动计算，无需手填'">
+          射程：{{ skillRangeLabel(skill) }}
+        </span>
+        <label :for="`skill-${index}-bonus`" class="bonus-label">词条射程加成</label>
+        <el-input-number
+          :id="`skill-${index}-bonus`"
+          v-model.number="skill.bonus_range"
+          :min="0"
+          :max="10"
+          :step="1"
+          size="small"
+          controls-position="right"
+          class="skill-bonus-input"
+          placeholder="0"
+        />
         <label :for="`skill-${index}-special`" class="sr-only">特效说明</label>
         <input :id="`skill-${index}-special`" type="text" v-model="skill.special" class="skill-special-input" placeholder="特效说明" name="skill-special">
       </div>
@@ -53,12 +66,21 @@
 
 <script setup>
 import { computed } from 'vue'
+import { getSkillRangeFields } from '../utils/hexUtils.js'
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   maxSlots: { type: Number, default: 3 },
   title: { type: String, default: '技能' }
 })
+
+// ★ 射程只读派生：类型基准(近战1/远程3/自动化0) + 词条显式数值额外定义(可为0)。
+// 用户明确：射程是算法算出的展示值，不应手填；单位编辑器不再暴露射程录入框。
+const skillRangeLabel = (skill) => {
+  const { minRange, maxRange } = getSkillRangeFields(skill)
+  if (minRange >= maxRange) return `${maxRange} 格`
+  return `${minRange}~${maxRange} 格`
+}
 
 const emit = defineEmits(['update:modelValue'])
 

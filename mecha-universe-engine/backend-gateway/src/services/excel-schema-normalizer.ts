@@ -8,6 +8,9 @@
  *
  *   格斗(melee)    → UnitStats.attack   = 格斗 * 2 + 5        (0-99 → 5-203)
  *   射击(shooting) → UnitStats.range    = 1 + floor(射击/25)  (0-99 → 1-4)
+ *                                    ⚠️ 仅作"远程/近战分类"展示信号，
+ *                                       已废除其对战斗射程判定的影响（2026-08-02 归拢改造）。
+ *                                       射程一律由技能定义经 getSkillRangeFields（shared-kernel 真相源）决定。
  *   结构(structure)→ UnitStats.hp/maxHp = 结构 * 5 + 20       (0-99 → 20-515)
  *   机动(mobility) → UnitStats.speed    = 2 + floor(机动/20)  (0-99 → 2-6)
  *
@@ -24,6 +27,11 @@
 import { logger } from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { UnitStats, UnitSkill } from '@mecha/shared-kernel';
+// ★ Phase 31 治本：射程真相源统一从 shared-kernel 引入，禁止本地再写默认表（陷阱2：四头分化）
+import {
+  resolveSkillCategory,
+  getSkillRangeFields,
+} from '@mecha/shared-kernel';
 import type { ParsedResult, ParsedUnit, ParsedSkill } from './excel-parser.js';
 
 // ============================================
@@ -154,6 +162,8 @@ function mapToUnitStats(
     defense: 0, // 防御力彻底废弃，减伤由 armor + 伤害分担接管
     speed: moveRange, // 移动格子数
     mobility: bodyMobility, // 仅机体机动（机动差额基准）
+    // ⚠️ range 仅作"远程/近战分类"展示信号；已废除其射程判定用途。
+    // 战斗射程一律由技能定义经 getSkillRangeFields（shared-kernel 真相源）决定（2026-08-02 归拢改造）。
     range: 1 + Math.floor(shooting / 25),
   };
 }
@@ -165,7 +175,7 @@ function mapToUnitStats(
 function inferCategory(mainType: string, melee: number, shooting: number): string {
   const t = mainType.toLowerCase();
   if (t.includes('装甲') || t.includes('盾牌')) return 'tank';
-  if (t.includes('推进器') || t.includes('辅助')) return 'support';
+  if (t.includes('推进器') || t.includes('辅助')) return 'auto'; // 辅助/推进器→自动化类（类型真相仅 melee/ranged/auto）
 
   // 按属性倾向推断
   if (shooting > melee * 1.3) return 'ranged';
@@ -176,47 +186,54 @@ function inferCategory(mainType: string, melee: number, shooting: number): strin
 // 技能转换
 // ============================================
 
-// 解析 Excel 射程列（如 "1~2" / "3" / 2）→ 标准 { min, max }
-function parseRange(raw: any): { min: number; max: number } {
-  if (raw === undefined || raw === null || raw === '') return { min: 1, max: 1 };
-  if (typeof raw === 'number') return { min: 1, max: raw };
+// 解析 Excel 词条射程加成列（如 bonus_range: "2" / 2）→ 数字加成
+// ★ 射程数据归一（2026-08-03 用户裁定·严格收敛版）：
+//   1) 彻底停止解析 Excel 的"range 文本列"（"1~3格""周围两圈"等）——这是过去中文正则/解析报错污染源头，彻底失效。
+//   2) 只读取显式的【词条射程加成】字段 bonus_range / extra_range（纯数字 / 标准区间取 max）。
+//   3) 其它一切绝对射程字段（cast_range/range/max_range/...）一律透传为 undefined，
+//      由 shared-kernel 真相源按 类型基准 + bonusRange 计算。绝不写死。
+function parseBonusRange(raw: any): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw === 'number') return raw;
   if (typeof raw === 'object') {
-    const mn = (raw as any).min ?? (raw as any).min_range;
     const mx = (raw as any).max ?? (raw as any).max_range;
-    if (typeof mx === 'number') return { min: (typeof mn === 'number' && mn > 0) ? mn : 1, max: mx };
+    if (typeof mx === 'number') return mx;
+    const mn = (raw as any).min ?? (raw as any).min_range;
+    if (typeof mn === 'number') return mn;
+    return undefined;
   }
-  const nums = String(raw).split(/[-~]/).map(Number).filter((n) => !isNaN(n));
-  if (!nums.length) return { min: 1, max: 1 };
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
-  return { min: min || 1, max };
+  // 仅接受纯数字或标准区间(~/-)，取较大值作为加成；中文/混乱文本 → 不填（undefined）
+  const m = String(raw).match(/^\s*(\d+)\s*(?:[-~]\s*(\d+))?\s*$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = m[2] != null ? Number(m[2]) : a;
+    return Math.max(a, b);
+  }
+  return undefined; // 非数字文本：彻底忽略，不留污染
 }
 
 function mapSkills(rawSkills: ParsedSkill[]): UnitSkill[] {
   return rawSkills.map((s) => {
-    const { min, max } = parseRange((s as any).range);
-    const rangeLabel = min === max ? String(max) : `${min}~${max}`;
+    const cat = resolveSkillCategory(s as any);
+    // ★ 只读取显式词条加成字段 bonus_range / extra_range；Excel 的 range 文本列彻底失效。
+    const bonusRaw = (s as any).bonus_range ?? (s as any).extra_range;
+    const bonus = parseBonusRange(bonusRaw);
     return {
       id: uuidv4(),
       name: s.name,
       description: s.effect || s.special || '',
       effect: s.effect || '',
       type: s.type || '自动',
+      category: cat, // 唯一决定射程基准的字段
       script: '',
       cooldown: 0,
       currentCooldown: 0,
       energyCost: 0,
       damageType: inferDamageType(s.attribute),
-      // —— 关键修复：补上真实射程字段，使前端显示/高亮/网关校验/引擎结算同源一致 ——
-      range: max,
-      range_min: min,
-      range_max: max,
-      max_range: max,
-      min_range: min,
-      cast_range: max, // 标量，引擎与网关 resolveSkillRange 都认
-      min_cast_range: min,
-      rangeLabel,
-    };
+      // ⚠️ 严禁透传任何绝对射程字段(cast_range/range/max_range/...)；
+      // 以下仅暴露词条加成，供 shared-kernel getSkillRangeFields 加法派生。
+      ...(bonus != null ? { bonus_range: bonus } : {}),
+    } as unknown as UnitSkill;
   });
 }
 
@@ -333,5 +350,8 @@ function normalizePartType(t: string | undefined): string {
   const lower = s.toLowerCase();
   return ALIAS[lower] || s;
 }
+
+// 调试导出（无害，便于端到端验证射程分类）：mapSkills
+export { mapSkills };
 
 export default normalizeParsedData;

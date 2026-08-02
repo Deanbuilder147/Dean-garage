@@ -325,6 +325,69 @@ export function getHexesInRange(centerQ, centerR, range) {
   return results;
 }
 
+/**
+ * ★ Phase 31-RangeNormalize：射程校验纯函数（与 shared-kernel/hexMath.ts 同源镜像）。
+ * 三端（前端高亮 / 网关 /skill / executeUniversalSkill）共用同一套判定，杜绝口径分叉。
+ * 改一处须同步 shared-kernel/src/hexMath.ts。
+ * @param {number} sq,sr 施放者坐标
+ * @param {number} tq,tr 目标坐标
+ * @param {{minRange:number, maxRange:number}} fields 归一化射程字段
+ * @returns {boolean} true=在射程内
+ */
+export function isTargetInRange(sq, sr, tq, tr, fields) {
+  const dist = hexDistance(sq, sr, tq, tr);
+  return dist >= fields.minRange && dist <= fields.maxRange;
+}
+
+// ============================================================
+// ★ Phase 31-RangeNormalize 治本（前端侧真相源镜像）
+// ⚠️ 以下三段与 @mecha/shared-kernel/src/hexMath.ts 逐字一致，是前端唯一射程真相源。
+// shared-kernel 才是权威，本处仅因 frontend 未纳入 monorepo workspace（无法 import）
+// 而做镜像；改 shared-kernel 后须同步本处。禁止在 NewBattleView 等组件再写本地默认表（陷阱2）。
+// 远程唯一真相值 = 3（2026-08-02 裁定）。
+// ============================================================
+// 类型仅三种：melee（近战，1）/ ranged（远程，3）/ auto（自动化/辅助，0=自身格）。
+// special/support 不应作为类型（爆炸/范围伤害由词条设定）；automation 仅是 auto 录入别名。
+export const DEFAULT_RANGE_BY_CATEGORY = {
+  melee: 1, ranged: 3, auto: 0,
+};
+export const DEFAULT_MIN_RANGE_BY_CATEGORY = {
+  melee: 1, ranged: 1, auto: 0,
+};
+
+export function resolveSkillCategory(skill) {
+  if (!skill) return 'melee';
+  const type = (skill.type || '').toString().toLowerCase();
+  const typeLabel = (skill.typeLabel || '').toString().toLowerCase();
+  if (type === 'ranged' || type === '远程' || typeLabel === '远程') return 'ranged';
+  if (type === 'auto' || type === '自动化' || typeLabel === '自动化') return 'auto';
+  const atList = [];
+  const pushAt = (v) => { if (Array.isArray(v)) atList.push(...v); else if (typeof v === 'string') atList.push(v); };
+  pushAt(skill.attack_type); pushAt(skill.action_type);
+  if (atList.includes('ranged')) return 'ranged';
+  if (atList.includes('auto') || atList.includes('automation') || atList.includes('support')) return 'auto';
+  if (skill.category === 'ranged' || skill.category === 'auto' || skill.category === 'melee') return skill.category;
+  return 'melee';
+}
+
+// 由技能对象推导归一化射程字段（与 shared-kernel.getSkillRangeFields 逐字镜像）
+// ★ 加法模型（2026-08-03 用户裁定 · 严格收敛版）：
+//   range = 类型基准(近战1/远程3/auto0) + bonusRange
+//   bonusRange = Number(bonus_range || extra_range) || 0
+// ★★★ 彻底切断历史绝对射程字段：cast_range/range/max_range/range_max/rangeLabel/
+//     min_cast_range/min_range/range_min 一律不再读取（避免 range:2 语义歧义导致误算）。
+export function getSkillRangeFields(skill) {
+  const cat = resolveSkillCategory(skill);
+  const baseRange = DEFAULT_RANGE_BY_CATEGORY[cat];
+  const baseMin = DEFAULT_MIN_RANGE_BY_CATEGORY[cat];
+  if (!skill) return { minRange: baseMin, maxRange: baseRange };
+  const bonusRaw = skill.bonus_range ?? skill.extra_range;
+  const bonusRange = Number(bonusRaw) || 0;
+  const maxRange = baseRange + bonusRange;
+  const minRange = baseMin;
+  return { minRange, maxRange };
+}
+
 
 /**
  * 平顶六边形邻居（Even-Q Offset）— 与 flatTopCenter / flatTopToHex 配套（阶段 1 · §3.1c）。
