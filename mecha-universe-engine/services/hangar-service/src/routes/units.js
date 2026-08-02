@@ -277,7 +277,7 @@ router.post('/upload-view', auth, (req, res, next) => {
     }
     next();
   });
-}, (req, res) => {
+  }, (req, res) => {
   try {
     const unitCode = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
     const direction = String(req.body.direction || '0').replace(/[^0-6]/g, '0');
