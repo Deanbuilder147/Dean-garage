@@ -6,6 +6,7 @@
  *   - 不再依赖 slot 列数值
  */
 
+import { logger } from '../utils/logger.js';
 import { EXCEL_TEMPLATE, type ExcelTemplate } from './excel-template.js';
 import type { ParsedResult, ParsedUnit, ParsedSkill } from './excel-parser.js';
 
@@ -36,7 +37,7 @@ export class ExcelValidator {
     this.errors = [];
     this.warnings = [];
 
-    console.log('[ExcelValidator v2.1] 开始验证数据...');
+    logger.info({ msg: `[ExcelValidator v2.1] 开始验证数据...` });
 
     this.validateBasic(data.basic);
     this.validateUnits(data.units);
@@ -48,16 +49,12 @@ export class ExcelValidator {
       warnings: this.warnings,
     };
 
-    console.log(
-      `[ExcelValidator v2.1] 验证完成: ${result.valid ? '通过' : '失败'}, ` +
-      `错误=${this.errors.length}, 警告=${this.warnings.length}`
-    );
+    logger.info({ msg: `[ExcelValidator v2.1] 验证完成: ${result.valid ? '通过' : '失败'}, ` +
+      `错误=${this.errors.length}, 警告=${this.warnings.length}` });
 
     if (!result.valid) {
-      console.log(
-        `[ExcelValidator] 失败诊断: 实际单位key=[${data.units ? Object.keys(data.units).join(', ') : '无'}] ` +
-        `basic.name=${data.basic?.name || '(空)'}`
-      );
+      logger.info({ msg: `[ExcelValidator] 失败诊断: 实际单位key=[${data.units ? Object.keys(data.units).join(', ') : '无'}] ` +
+        `basic.name=${data.basic?.name || '(空)'}` });
     }
 
     return result;

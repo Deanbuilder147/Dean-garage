@@ -21,6 +21,7 @@
  * 行动点池 → attributes.action_points = { MOVE: 1, ATTACK: 1 }
  */
 
+import { logger } from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { UnitStats, UnitSkill } from '@mecha/shared-kernel';
 import type { ParsedResult, ParsedUnit, ParsedSkill } from './excel-parser.js';
@@ -67,7 +68,7 @@ export interface NormalizedPreview {
 // ============================================
 
 export function normalizeParsedData(parsed: ParsedResult): NormalizedPreview {
-  console.log('[SchemaNormalizer] 开始 Schema 归一化...');
+  logger.info({ msg: `[SchemaNormalizer] 开始 Schema 归一化...` });
 
   const mainUnit = parsed.units['主机体'];
   if (!mainUnit) {
@@ -120,13 +121,13 @@ export function normalizeParsedData(parsed: ParsedResult): NormalizedPreview {
     skills: parsed.skills,
   };
 
-  console.log('[SchemaNormalizer] 归一完成:', JSON.stringify({
+  logger.info({ msg: `[SchemaNormalizer] 归一完成: ${ JSON.stringify({
     name: normalized.name,
     faction: normalized.faction,
     category: normalized.category,
     stats,
     skillCount: skills.length,
-  }));
+  }) }` });
 
   return { normalized, legacy };
 }
@@ -175,19 +176,48 @@ function inferCategory(mainType: string, melee: number, shooting: number): strin
 // 技能转换
 // ============================================
 
+// 解析 Excel 射程列（如 "1~2" / "3" / 2）→ 标准 { min, max }
+function parseRange(raw: any): { min: number; max: number } {
+  if (raw === undefined || raw === null || raw === '') return { min: 1, max: 1 };
+  if (typeof raw === 'number') return { min: 1, max: raw };
+  if (typeof raw === 'object') {
+    const mn = (raw as any).min ?? (raw as any).min_range;
+    const mx = (raw as any).max ?? (raw as any).max_range;
+    if (typeof mx === 'number') return { min: (typeof mn === 'number' && mn > 0) ? mn : 1, max: mx };
+  }
+  const nums = String(raw).split(/[-~]/).map(Number).filter((n) => !isNaN(n));
+  if (!nums.length) return { min: 1, max: 1 };
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  return { min: min || 1, max };
+}
+
 function mapSkills(rawSkills: ParsedSkill[]): UnitSkill[] {
-  return rawSkills.map((s, idx) => ({
-    id: uuidv4(),
-    name: s.name,
-    description: s.effect || s.special || '',
-    effect: s.effect || '',
-    type: s.type || '自动',
-    script: '',
-    cooldown: 0,
-    currentCooldown: 0,
-    energyCost: 0,
-    damageType: inferDamageType(s.attribute),
-  }));
+  return rawSkills.map((s) => {
+    const { min, max } = parseRange((s as any).range);
+    const rangeLabel = min === max ? String(max) : `${min}~${max}`;
+    return {
+      id: uuidv4(),
+      name: s.name,
+      description: s.effect || s.special || '',
+      effect: s.effect || '',
+      type: s.type || '自动',
+      script: '',
+      cooldown: 0,
+      currentCooldown: 0,
+      energyCost: 0,
+      damageType: inferDamageType(s.attribute),
+      // —— 关键修复：补上真实射程字段，使前端显示/高亮/网关校验/引擎结算同源一致 ——
+      range: max,
+      range_min: min,
+      range_max: max,
+      max_range: max,
+      min_range: min,
+      cast_range: max, // 标量，引擎与网关 resolveSkillRange 都认
+      min_cast_range: min,
+      rangeLabel,
+    };
+  });
 }
 
 function inferDamageType(attribute: string): any {

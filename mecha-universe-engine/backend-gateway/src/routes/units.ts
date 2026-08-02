@@ -6,6 +6,7 @@
  * Excel 导入：parse-excel + create-from-json 完整归入大一统网关。
  */
 
+import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import multer from 'multer';
 import fs from 'fs';
@@ -18,6 +19,7 @@ import { ErrorCode, UserRole } from '@mecha/shared-kernel';
 import { ExcelParser } from '../services/excel-parser.js';
 import { ExcelValidator } from '../services/excel-validator.js';
 import { normalizeParsedData } from '../services/excel-schema-normalizer.js';
+import { normSize } from '../unitSize.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -90,6 +92,7 @@ router.get('/api/units', (req, res) => {
   // Phase 30-Fix: 映射 sprite_key → main_image_url，与前端字段名对齐
   const units = rows.map(r => ({
     ...r,
+    size: r.size || 'm',
     main_image_url: r.sprite_key || null,
   }));
   res.json({ units });
@@ -106,19 +109,31 @@ const FACTION_DICT: Record<string, { code: string; name: string; logoUrl: string
 };
 
 router.get('/api/units/factions', (_req, res) => {
-  // 动态合并数据库中实际使用到的阵营
+  // 合并三处来源：内置字典 + 持久化自定义阵营表 + 单位表已用阵营
+  const customFactions: Record<string, { code: string; name: string; logoUrl: string }> = {};
+  try {
+    const rows = all('SELECT code, name, logo_url FROM factions') as { code: string; name: string; logo_url: string }[];
+    for (const r of rows) {
+      customFactions[r.code] = {
+        code: r.code,
+        name: r.name,
+        logoUrl: r.logo_url || '',
+      };
+    }
+  } catch (e) { /* factions 表尚未创建时忽略 */ }
+
   const usedCodes = all(
     'SELECT DISTINCT faction FROM units WHERE faction IS NOT NULL AND faction != \'\''
   ) as { faction: string }[];
   const dbFactions: Record<string, { code: string; name: string; logoUrl: string }> = {};
   for (const row of usedCodes) {
     const code = row.faction;
-    if (!FACTION_DICT[code]) {
+    if (!FACTION_DICT[code] && !customFactions[code]) {
       dbFactions[code] = { code, name: code, logoUrl: `/api/units/factions/logo/${code}.png` };
     }
   }
 
-  const allFactions = { ...FACTION_DICT, ...dbFactions };
+  const allFactions = { ...FACTION_DICT, ...customFactions, ...dbFactions };
   res.json({ factions: Object.values(allFactions) });
 });
 
@@ -138,6 +153,7 @@ router.get('/api/units/:unitId', (req, res) => {
     faction: unit.faction,
     category: unit.category,
     tier: unit.tier,
+    size: unit.size || 'm',
     totalPoints: unit.total_points ?? 0,
     sprite_key: unit.sprite_key,
     main_image_url: unit.sprite_key || null,
@@ -157,7 +173,7 @@ router.get('/api/units/:unitId', (req, res) => {
 // ========================================
 router.post('/api/units', (req, res) => {
   try {
-    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key: sk, stats = {}, skills = [], attributes = {}, is_public = false, view_urls = {} } = req.body;
+    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key: sk, stats = {}, skills = [], attributes = {}, is_public = false, view_urls = {}, size = 'm' } = req.body;
     // Phase 30-Cover: 废弃单图 main_image_url，封面改由七视图正视图派生；sprite_key 不再从 main_image_url 映射
     const sprite_key = sk || null;
 
@@ -172,17 +188,17 @@ router.post('/api/units', (req, res) => {
 
     const id = uuidv4();
     run(
-      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, sprite_key, view_urls, stats, skills, is_public, review_status, attributes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, req.auth!.userId, name, codename || null, faction, category, tier, sprite_key, JSON.stringify(view_urls ?? {}), JSON.stringify(stats), JSON.stringify(skills), finalIsPublic, review_status, JSON.stringify(attributes)]
+      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, sprite_key, view_urls, stats, skills, is_public, review_status, attributes, size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, req.auth!.userId, name, codename || null, faction, category, tier, sprite_key, JSON.stringify(view_urls ?? {}), JSON.stringify(stats), JSON.stringify(skills), finalIsPublic, review_status, JSON.stringify(attributes), normSize(size)]
     );
     persistChanges();
 
-    console.log(`[Units] 创建: ${name} (is_public=${finalIsPublic}, review=${review_status})`);
+    logger.info({ msg: `[Units] 创建: ${name} (is_public=${finalIsPublic}, review=${review_status}, size=${normSize(size)})` });
 
-    res.status(201).json({ unit: { id, name, faction, category, tier, owner_id: req.auth!.userId, is_public: finalIsPublic, review_status } });
+    res.status(201).json({ unit: { id, name, faction, category, tier, size: normSize(size), owner_id: req.auth!.userId, is_public: finalIsPublic, review_status } });
   } catch (err) {
-    console.error('[Units] 创建单位错误:', err);
+    logger.error({ msg: `[Units] 创建单位错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '创建单位失败' });
   }
 });
@@ -219,7 +235,7 @@ router.post('/api/units/generate', (req, res) => {
     run('UPDATE users SET credits = ?, updated_at = datetime(\'now\') WHERE id = ?', [newCredits, userId]);
     persistChanges();
 
-    console.log(`[Units] AI 生成 — 用户 ${req.auth!.username} 消耗 1 积分，剩余 ${newCredits}`);
+    logger.info({ msg: `[Units] AI 生成 — 用户 ${req.auth!.username} 消耗 1 积分，剩余 ${newCredits}` });
 
     // 此处可接入实际的 AI 生成管线（异步）
     res.json({
@@ -229,7 +245,7 @@ router.post('/api/units/generate', (req, res) => {
       generationId: uuidv4(),
     });
   } catch (err) {
-    console.error('[Units] AI 生成错误:', err);
+    logger.error({ msg: `[Units] AI 生成错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: 'AI 生成失败' });
   }
 });
@@ -244,7 +260,7 @@ router.put('/api/units/:unitId', (req, res) => {
     return;
   }
 
-  const { name, codename, faction, category, tier, sprite_key: sk, stats, skills, attributes, is_public, view_urls } = req.body;
+  const { name, codename, faction, category, tier, sprite_key: sk, stats, skills, attributes, is_public, view_urls, size } = req.body;
   // Phase 30-Cover: 移除废弃 main_image_url 映射，仅保留七视图 view_urls
   const sprite_key = sk ?? unit.sprite_key;
 
@@ -257,17 +273,18 @@ router.put('/api/units/:unitId', (req, res) => {
   const finalViewUrls = (view_urls && typeof view_urls === 'object') ? view_urls : (unit.view_urls ? JSON.parse(unit.view_urls) : {});
 
   run(
-    `UPDATE units SET name = ?, codename = ?, faction = ?, category = ?, tier = ?, sprite_key = ?, view_urls = ?, stats = ?, skills = ?, is_public = ?, review_status = ?, attributes = ?, updated_at = datetime('now')
+    `UPDATE units SET name = ?, codename = ?, faction = ?, category = ?, tier = ?, sprite_key = ?, view_urls = ?, stats = ?, skills = ?, is_public = ?, review_status = ?, attributes = ?, size = ?, updated_at = datetime('now')
      WHERE id = ?`,
     [name || unit.name, finalCodename || null, faction || unit.faction, category || unit.category, tier ?? unit.tier,
      sprite_key, JSON.stringify(finalViewUrls), JSON.stringify(stats ?? JSON.parse(unit.stats)),
      JSON.stringify(skills ?? JSON.parse(unit.skills || '[]')),
      finalIsPublic, review_status,
-     JSON.stringify(attributes ?? JSON.parse(unit.attributes || '{}')), req.params.unitId]
+     JSON.stringify(attributes ?? JSON.parse(unit.attributes || '{}')), normSize(size !== undefined ? size : unit.size),
+     req.params.unitId]
   );
   persistChanges();
 
-  console.log(`[Units] 更新: ${name || unit.name} (is_public=${finalIsPublic}, review=${review_status})`);
+  logger.info({ msg: `[Units] 更新: ${name || unit.name} (is_public=${finalIsPublic}, review=${review_status})` });
 
   res.json({ success: true, is_public: finalIsPublic, review_status });
 });
@@ -284,7 +301,7 @@ router.post('/api/units/parse-excel', upload.single('file'), (req, res) => {
       return;
     }
 
-    console.log(`[Units/Excel] 收到文件: ${req.file.originalname}, 大小: ${req.file.size} bytes`);
+    logger.info({ msg: `[Units/Excel] 收到文件: ${req.file.originalname}, 大小: ${req.file.size} bytes` });
 
     // 1. 解析 Excel
     const parser = new ExcelParser();
@@ -349,7 +366,7 @@ router.post('/api/units/parse-excel', upload.single('file'), (req, res) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Units/Excel] 解析异常:', msg);
+    logger.error({ msg: `[Units/Excel] 解析异常: ${ msg }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `Excel 解析失败: ${msg}` });
   }
 });
@@ -371,7 +388,7 @@ router.post('/api/units/create-from-json', (req, res) => {
     const normName = req.body?.normalized?.name ?? '(none)';
     const hasDirectName = !!req.body?.name;
     const hasImportPayload = !!req.body?._importPayload;
-    console.log(`[Units/create-from-json] body keys: [${bodyKeys.join(', ')}], normalized type: ${normType}, normalized.name: ${normName}, hasDirectName: ${hasDirectName}, hasImportPayload: ${hasImportPayload}`);
+    logger.info({ msg: `[Units/create-from-json] body keys: [${bodyKeys.join(', ')}], normalized type: ${normType}, normalized.name: ${normName}, hasDirectName: ${hasDirectName}, hasImportPayload: ${hasImportPayload}` });
 
     // Phase 30-RobustData: 优先用结构化 payload 字符串，其次嵌套对象，最后扁平 fallback
     let normalized: any;
@@ -379,7 +396,7 @@ router.post('/api/units/create-from-json', (req, res) => {
       // 前端传回了 JSON 字符串格式的结构化数据
       const parsed = JSON.parse(req.body._importPayload);
       normalized = parsed.normalized;
-      console.log(`[Units/create-from-json] 使用 _importPayload 字符串，normalized.name=${normalized?.name}`);
+      logger.info({ msg: `[Units/create-from-json] 使用 _importPayload 字符串，normalized.name=${normalized?.name}` });
     } else if (req.body?.normalized && typeof req.body.normalized === 'object') {
       normalized = req.body.normalized;
     } else if (req.body?.name && typeof req.body === 'object') {
@@ -387,16 +404,16 @@ router.post('/api/units/create-from-json', (req, res) => {
     }
 
     // Phase 30-DeepDebug: 输出 normalized 核心字段的实际内容
-    console.log(`[Units/create-from-json] normalized.stats=${JSON.stringify(normalized?.stats)?.slice(0,200)}`);
-    console.log(`[Units/create-from-json] normalized.skills#=${normalized?.skills?.length}`);
-    console.log(`[Units/create-from-json] normalized.attributes=${JSON.stringify(normalized?.attributes)?.slice(0,200)}`);
+    logger.info({ msg: `[Units/create-from-json] normalized.stats=${JSON.stringify(normalized?.stats)?.slice(0,200)}` });
+    logger.info({ msg: `[Units/create-from-json] normalized.skills#=${normalized?.skills?.length}` });
+    logger.info({ msg: `[Units/create-from-json] normalized.attributes=${JSON.stringify(normalized?.attributes)?.slice(0,200)}` });
 
     if (!normalized || !normalized.name) {
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '缺少单位数据（normalized.name 为必填项）' });
       return;
     }
 
-    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0, view_urls = {} } = normalized;
+    const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0, view_urls = {}, size = 'm' } = normalized;
 
     // Phase 29-DataSecurity: 审核状态机卡口
     const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
@@ -412,13 +429,13 @@ router.post('/api/units/create-from-json', (req, res) => {
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
     run(
-      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, total_points, sprite_key, view_urls, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?)`,
-      [id, userId, name, codename || null, faction, category, tier, totalPoints, sprite_key || null, JSON.stringify(view_urls ?? {}), statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, now, now]
+      `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, total_points, sprite_key, view_urls, stats, skills, is_public_copy, is_public, review_status, original_author_id, generation_status, attributes, size, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'completed', ?, ?, ?, ?)`,
+      [id, userId, name, codename || null, faction, category, tier, totalPoints, sprite_key || null, JSON.stringify(view_urls ?? {}), statsJson, skillsJson, finalIsPublic, reviewStatus, attrsJson, normSize(size), now, now]
     );
     persistChanges();
 
-    console.log(`[Units/Excel] 导入成功: ${name} (id=${id}, owner=${userId}, is_public=${finalIsPublic}, review=${reviewStatus})`);
+    logger.info({ msg: `[Units/Excel] 导入成功: ${name} (id=${id}, owner=${userId}, is_public=${finalIsPublic}, review=${reviewStatus})` });
 
     res.status(201).json({
       success: true,
@@ -435,7 +452,7 @@ router.post('/api/units/create-from-json', (req, res) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[Units/Excel] 批量导入错误:', msg);
+    logger.error({ msg: `[Units/Excel] 批量导入错误: ${ msg }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `导入失败: ${msg}` });
   }
 });
@@ -462,7 +479,7 @@ router.delete('/api/units/:unitId', (req, res) => {
 // ========================================
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB：放宽以容忍原图/截图 PNG，超限由全局 MulterError 处理返回 413
   fileFilter: (_req, file, cb) => {
     const allowedMimes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
     if (allowedMimes.includes(file.mimetype)) {
@@ -489,14 +506,24 @@ router.post('/api/units/upload-view', imageUpload.single('image'), (req, res) =>
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请上传七视图图片' });
       return;
     }
-    const unitCode = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
+    // 优先用单位 UUID（全局唯一，杜绝同名/同代号单位互相覆盖），回退 unitCode 兼容历史数据
+    let key;
+    const rawId = req.body.unitId;
+    if (rawId && /^[a-f0-9-]{36}$/i.test(rawId)) {
+      key = rawId;
+    } else {
+      key = (req.body.unitCode || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '');
+    }
     const direction = req.body.direction || '0';
-    const filename = `${unitCode}_${direction}_idle.png`;
+    const filename = `${key}_${direction}_idle.png`;
     const dir = path.join(IMG_DIR, 'views');
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
-    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+    // 覆盖同单位同方向旧图，避免孤儿文件堆积
+    const target = path.join(dir, filename);
+    if (fs.existsSync(target)) { fs.unlinkSync(target); }
+    fs.writeFileSync(target, req.file.buffer);
     const url = `/api/units/views/${filename}`;
-    console.log(`[Units/View] 七视图上传: ${unitCode}_${direction} -> ${filename}`);
+    logger.info({ msg: `[Units/View] 七视图上传: ${key}_${direction} -> ${filename}` });
     res.json({ success: true, url, filename });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -526,7 +553,7 @@ router.post('/api/units/factions/upload', imageUpload.single('file'), (req, res)
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(path.join(dir, filename), req.file.buffer);
     const url = `/api/units/factions/logo/${filename}`;
-    console.log(`[Units/Faction] Logo 上传成功: ${req.file.originalname} -> ${filename}`);
+    logger.info({ msg: `[Units/Faction] Logo 上传成功: ${req.file.originalname} -> ${filename}` });
     res.json({ success: true, url, filename, logoUrl: url });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -541,6 +568,44 @@ router.get('/api/units/factions/logo/:filename', (req, res) => {
     res.sendFile(filePath);
   } else {
     res.status(404).json({ error: 'LOGO_NOT_FOUND' });
+  }
+});
+
+// ========================================
+// Phase 30: 创建自定义阵营（持久化到 factions 表）
+// 注意：必须放在 imageUpload (multer) 声明之后，否则 TS 报 "used before declaration"
+// ========================================
+router.post('/api/units/factions', imageUpload.single('image'), (req, res) => {
+  try {
+    const code = (req.body.code || '').trim();
+    const name = (req.body.name || '').trim();
+    if (!code) { res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '阵营 Code 不能为空' }); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(code)) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: 'Code 只能包含字母、数字、下划线、连字符' }); return;
+    }
+    if (!name) { res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '阵营名称不能为空' }); return; }
+    if (FACTION_DICT[code]) { res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '该 Code 与内置阵营冲突' }); return; }
+    if (get('SELECT code FROM factions WHERE code = ?', [code])) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '该阵营 Code 已存在' }); return;
+    }
+
+    let logoUrl = '';
+    if (req.file) {
+      const ext = req.file.originalname.split('.').pop() || 'png';
+      const filename = `faction-${uuidv4().slice(0, 8)}.${ext}`;
+      const dir = path.join(IMG_DIR, 'factions');
+      if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+      fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+      logoUrl = `/api/units/factions/logo/${filename}`;
+    }
+
+    run('INSERT INTO factions (code, name, logo_url) VALUES (?, ?, ?)', [code, name, logoUrl]);
+    persistChanges();
+    logger.info({ msg: `[Units/Faction] 阵营创建成功: ${code} (${name})` });
+    res.status(201).json({ success: true, faction: { code, name, logoUrl } });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `阵营创建失败: ${msg}` });
   }
 });
 

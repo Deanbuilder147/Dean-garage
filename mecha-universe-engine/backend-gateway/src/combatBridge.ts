@@ -23,6 +23,7 @@ let _SkillExecutorClass: any = null;
 let _skillExecutorInstance: any = null;
 let _skillContract: any = null;
 let _EquipmentDurability: any = null;
+let _effectExecutor: any = null;
 
 function loadCjs(name: string): any {
   return require(CORE_DIR + name);
@@ -34,6 +35,12 @@ export function getSkillExecutor(): any {
     _skillExecutorInstance = new _SkillExecutorClass();
   }
   return _skillExecutorInstance;
+}
+
+// effectExecutor.cjs 导出单例（module.exports = new EffectExecutor()），直接返回实例。
+export function getEffectExecutor(): any {
+  if (!_effectExecutor) _effectExecutor = loadCjs('effectExecutor.cjs');
+  return _effectExecutor;
 }
 
 export function getSkillContract(): any {

@@ -11,6 +11,7 @@
  * @module skillExecutor
  */
 
+import { logger } from './utils/logger.js';
 import {
   LexicalToken,
   DamageType,
@@ -391,12 +392,12 @@ export function executeSkill(
   } catch (err: unknown) {
     // UGC 语法错误降级使用基础公式兜底
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[CRITICAL FAILED] [SkillExecutor] 技能执行异常，降级兜底:
+    logger.error({ msg: `[CRITICAL FAILED] [SkillExecutor] 技能执行异常，降级兜底:
   Error: ${message}
   Input: ${typeof input === 'string' ? input.slice(0, 200) : JSON.stringify(input).slice(0, 200)}
   Caster: ${context.caster.matrixId || context.caster.unitId}
   Target: ${context.target.matrixId || context.target.unitId}
-`);
+` });
     return {
       ...createFallbackResult(context, message),
       error: ErrorCode.SKILL_EXECUTION_ERROR,
@@ -460,7 +461,7 @@ function executeDSL(
   const unrecognized = nodes.filter(n => n.token === 'UNRECOGNIZED');
   if (unrecognized.length > 0) {
     const tokens = unrecognized.map(n => n.value).join(', ');
-    console.warn(`[SkillExecutor] 检测到未识别词元: ${tokens}，继续执行已知部分`);
+    logger.warn({ msg: `[SkillExecutor] 检测到未识别词元: ${tokens}，继续执行已知部分` });
   }
 
   const result: SkillExecutionResult = {
@@ -484,9 +485,9 @@ function executeDSL(
     if (loopCounter > MAX_LOOP_STEP) {
       result.log.push(`[SKILL 熔断] 循环步数超过上限 ${MAX_LOOP_STEP}，强制中止执行`);
       result.error = ErrorCode.SKILL_LOOP_OVERFLOW;
-      console.error(`[CRITICAL FAILED] [SkillExecutor] 死循环熔断！loopCounter=${loopCounter} > ${MAX_LOOP_STEP}
+      logger.error({ msg: `[CRITICAL FAILED] [SkillExecutor] 死循环熔断！loopCounter=${loopCounter} > ${MAX_LOOP_STEP}
   Script: ${script.slice(0, 200)}
-  Caster: ${context.caster.matrixId || context.caster.unitId}`);
+  Caster: ${context.caster.matrixId || context.caster.unitId}` });
       break;
     }
   }
@@ -749,7 +750,7 @@ function executePredicate(
 
     case 'UNRECOGNIZED': {
       // 未识别词元 → 记录警告但不崩溃
-      console.warn(`[SkillExecutor] 未识别词元: ${node.value}`);
+      logger.warn({ msg: `[SkillExecutor] 未识别词元: ${node.value}` });
       return {
         damage: 0,
         effects: [],

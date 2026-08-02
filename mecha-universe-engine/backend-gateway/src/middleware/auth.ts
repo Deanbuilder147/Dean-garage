@@ -17,6 +17,7 @@ declare global {
   namespace Express {
     interface Request {
       auth?: AuthPayload;
+      user?: AuthPayload;
       isAuthenticated: boolean;
     }
   }
@@ -83,6 +84,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   try {
     const payload = jwt.verify(token, config.jwt.secret) as AuthPayload;
     req.auth = payload;
+    req.user = payload;
     req.isAuthenticated = true;
     next();
   } catch (err: unknown) {

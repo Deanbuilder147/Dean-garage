@@ -5,6 +5,7 @@
  * 前端 GlossaryView 通过 /api/combat-glossary/config 自由读取、写入大厅规则配置。
  */
 
+import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -90,7 +91,8 @@ const CORE_SKILLS: Record<string, any> = {
 };
 
 // 读写辅助 — Phase 29-DataSecurity: 合并核心技能
-function readConfig(): any {
+// 导出供 assetGen.ts 复用（AI 素材生成写回地形 material_url），保证单一配置真相、路径不漂移
+export function readConfig(): any {
   try {
     if (fs.existsSync(GLOSSARY_CONFIG_PATH)) {
       const raw = fs.readFileSync(GLOSSARY_CONFIG_PATH, 'utf-8');
@@ -100,7 +102,7 @@ function readConfig(): any {
       return config;
     }
   } catch (err) {
-    console.error('[Glossary] 读取配置文件失败:', err);
+    logger.error({ msg: `[Glossary] 读取配置文件失败: ${ err }` });
   }
   const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   config.skills = { ...CORE_SKILLS };
@@ -111,7 +113,7 @@ function isAdminOrAbove(role: string): boolean {
   return role === UserRole.ADMIN || role === UserRole.DOMINATOR;
 }
 
-function writeConfig(config: any): void {
+export function writeConfig(config: any): void {
   const dir = path.dirname(GLOSSARY_CONFIG_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -139,43 +141,65 @@ router.get('/config', (_req, res) => {
 // POST /config — 保存词条库配置（仅 admin/dominator）
 // Phase 29-DataSecurity: 普通用户 -> 403 "词条需经管理员审核方可公开"
 // ========================================
+/**
+ * A4 词条落库归一化：
+ * 1. cast_range 必须是标量数值——词条执行器按数字比对射程，对象/数组会导致 NaN 比对失效。
+ * 2. trigger 字段为「死字段」——仅被 _getUniversalFields 读出，无任何调度逻辑；此处保留
+ *    该字段但强制为字符串（单一触发标识），并对非空值告警，提示维护者勿将其当作分派键使用。
+ */
+function normalizeSkillForSave(key: string, raw: any): any {
+  const skill = { ...(raw || {}) };
+  // cast_range：标量数字兜底
+  if (skill.cast_range != null && typeof skill.cast_range !== 'number') {
+    const parsed = Number(skill.cast_range);
+    skill.cast_range = Number.isFinite(parsed) ? parsed : 1;
+  } else if (skill.cast_range == null) {
+    skill.cast_range = 1;
+  }
+  // trigger：死字段，强制为字符串，非空则告警（非分派键）
+  if (skill.trigger != null && skill.trigger !== '') {
+    skill.trigger = String(skill.trigger);
+    logger.warn({ msg: `[Glossary][A4] 词条 "${key}" 携带 trigger="${skill.trigger}"，该字段为死字段，不参与任何调度，请勿依赖。` });
+  }
+  return skill;
+}
+
 router.post('/config', authenticate, (req, res) => {
   try {
     const role = req.auth?.role || UserRole.GUEST;
-
-    // 🔒 焊死普通用户写入：直接拒绝
-    if (!isAdminOrAbove(role)) {
-      console.log(`[Glossary] 权限拦截: ${req.auth?.username || 'guest'} (role=${role}) 尝试写入词条库`);
-      res.status(403).json({
-        success: false,
-        error: ErrorCode.ROLE_FORBIDDEN,
-        message: '权限不足：普通玩家词条需经管理员审核方可公开',
-        hint: '请联系管理员 (admin/dominator) 审核您的词条变更',
-      });
-      return;
-    }
+    const isAdmin = isAdminOrAbove(role);
 
     const current = readConfig();
     const incoming = req.body || {};
 
-    // 深度合并 skills（但不能覆盖核心技能）
-    if (incoming.skills) {
-      const nonCoreSkills: Record<string, any> = {};
-      for (const [key, value] of Object.entries(incoming.skills)) {
-        if (!CORE_SKILLS[key]) {
-          nonCoreSkills[key] = value;
+    // skills：仅 admin 可写（普通用户忽略，避免破坏审核机制）
+    if (isAdmin) {
+      if (incoming.skills) {
+        const nonCoreSkills: Record<string, any> = {};
+        for (const [key, value] of Object.entries(incoming.skills)) {
+          if (!CORE_SKILLS[key]) {
+            nonCoreSkills[key] = normalizeSkillForSave(key, value);
+          }
+        }
+        current.skills = { ...CORE_SKILLS, ...(current.skills || {}), ...nonCoreSkills };
+      }
+
+      // 处理删除指令（不允许删除核心技能）
+      if (Array.isArray(incoming._delete_skills) && incoming._delete_skills.length > 0) {
+        for (const key of incoming._delete_skills) {
+          if (!CORE_SKILLS[key]) {
+            delete current.skills[key];
+          }
         }
       }
-      current.skills = { ...CORE_SKILLS, ...(current.skills || {}), ...nonCoreSkills };
+    } else if (incoming.skills || incoming._delete_skills) {
+      logger.info({ msg: `[Glossary] 普通用户 ${req.auth?.username || 'guest'} 提交的 skills 改动已忽略（需 admin）` });
     }
 
-    // 处理删除指令（不允许删除核心技能）
-    if (Array.isArray(incoming._delete_skills) && incoming._delete_skills.length > 0) {
-      for (const key of incoming._delete_skills) {
-        if (!CORE_SKILLS[key]) {
-          delete current.skills[key];
-        }
-      }
+    // terrains：已认证用户即可写（地形编辑器：素材绑定 / 参数编辑）
+    // 合并写入，保留未被编辑的地形字段（如脚本注入的 material_url、color、move_cost 等）
+    if (incoming.terrains && typeof incoming.terrains === 'object') {
+      current.terrains = { ...(current.terrains || {}), ...incoming.terrains };
     }
 
     // 更新版本
@@ -187,12 +211,13 @@ router.post('/config', authenticate, (req, res) => {
 
     res.json({
       success: true,
-      message: '词条库配置已保存并同步',
+      message: isAdmin ? '词条库与地形库配置已保存并同步' : '地形库配置已保存',
       skillCount: Object.keys(current.skills || {}).length,
+      terrainCount: Object.keys(current.terrains || {}).length,
       version: current.version,
     });
   } catch (err: any) {
-    console.error('[Glossary] 保存配置失败:', err);
+    logger.error({ msg: `[Glossary] 保存配置失败: ${ err }` });
     res.status(500).json({
       success: false,
       error: 'GLOSSARY_SAVE_FAILED',
@@ -213,7 +238,7 @@ router.post('/import-excel', excelUpload.single('file'), authenticate, requireAd
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请上传 Excel 文件（.xlsx / .xls）' });
       return;
     }
-    console.log(`[Glossary/Excel] 收到文件: ${file.originalname}, ${file.size} bytes`);
+    logger.info({ msg: `[Glossary/Excel] 收到文件: ${file.originalname}, ${file.size} bytes` });
 
     const parsed = parseGlossaryExcel(file.buffer);
     const validation = validateGlossaryExcel(parsed);
@@ -238,7 +263,7 @@ router.post('/import-excel', excelUpload.single('file'), authenticate, requireAd
     });
   } catch (err: any) {
     const msg = err?.message || String(err);
-    console.error('[Glossary/Excel] 解析异常:', msg);
+    logger.error({ msg: `[Glossary/Excel] 解析异常: ${ msg }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `Excel 解析失败: ${msg}` });
   }
 });
@@ -285,7 +310,7 @@ router.post('/import-apply', authenticate, requireAdmin, (req, res) => {
     current.skills = { ...CORE_SKILLS, ...currentSkills, ...applied };
     writeConfig(current);
 
-    console.log(`[Glossary/Excel] 导入成功: 新增/更新 ${Object.keys(applied).length} 条, 删除 ${deleted.length} 条`);
+    logger.info({ msg: `[Glossary/Excel] 导入成功: 新增/更新 ${Object.keys(applied).length} 条, 删除 ${deleted.length} 条` });
 
     res.json({
       success: true,
@@ -296,7 +321,7 @@ router.post('/import-apply', authenticate, requireAdmin, (req, res) => {
     });
   } catch (err: any) {
     const msg = err?.message || String(err);
-    console.error('[Glossary/Excel] 落盘失败:', msg);
+    logger.error({ msg: `[Glossary/Excel] 落盘失败: ${ msg }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: `词条导入落盘失败: ${msg}` });
   }
 });

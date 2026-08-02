@@ -134,7 +134,7 @@ export function parseGlossaryExcel(buffer: Buffer): ParsedGlossaryExcel {
   const rows: ParsedSkillRow[] = [];
   let branchCount = 0;
 
-  skillRows.forEach((row, i) => {
+  skillRows.forEach((row: any, i: number) => {
     const rowNumber = i + 2; // 第 1 行为表头，行号从 2 起
     const key = cellStr(row['key']);
     const name = cellStr(row['name']);

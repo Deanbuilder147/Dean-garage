@@ -5,6 +5,7 @@
  * 统一执政所有房间、用户、战斗数据。
  */
 
+import { logger } from '../utils/logger.js';
 import initSqlJs, { type Database, type Statement } from 'sql.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -81,9 +82,10 @@ export async function initDatabase(): Promise<Database> {
   db.run('PRAGMA foreign_keys = ON');
 
   createTables();
+  migrateTables();
   saveToDisk();
 
-  console.log('[DB] SQLite (sql.js) 数据库初始化完成:', config.dbPath);
+  logger.info({ msg: `[DB] SQLite (sql.js) 数据库初始化完成: ${ config.dbPath }` });
   return db;
 }
 
@@ -97,6 +99,7 @@ function createTables(): void {
       faction TEXT DEFAULT 'earth',
       permission INTEGER DEFAULT 1,
       role TEXT DEFAULT 'user',
+      last_room_id TEXT,
       credits INTEGER DEFAULT 10,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -105,6 +108,7 @@ function createTables(): void {
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      code TEXT,
       status TEXT NOT NULL DEFAULT '${RoomStatus.WAITING}',
       host_id TEXT NOT NULL REFERENCES users(id),
       map_id TEXT NOT NULL,
@@ -113,6 +117,8 @@ function createTables(): void {
       is_private INTEGER DEFAULT 0,
       password_hash TEXT,
       rules TEXT DEFAULT '{}',
+      victory_conditions TEXT DEFAULT '{}',
+      roster_locked INTEGER DEFAULT 0,
       battle_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -125,6 +131,7 @@ function createTables(): void {
       faction TEXT DEFAULT 'earth',
       team INTEGER DEFAULT 0,
       ready INTEGER DEFAULT 0,
+      is_spectator INTEGER DEFAULT 0,
       joined_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (room_id, user_id)
     );
@@ -179,6 +186,13 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_room_chats_room ON room_chats(room_id);
     CREATE INDEX IF NOT EXISTS idx_units_owner ON units(owner_id);
     CREATE INDEX IF NOT EXISTS idx_battles_room ON battles(room_id);
+
+    CREATE TABLE IF NOT EXISTS factions (
+      code TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      logo_url TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Phase 29-P1: 存量数据库迁移 — 为旧版 users/units 表追加新列
@@ -193,12 +207,111 @@ function migrateExistingTables(): void {
     const msg = e?.message || String(e);
     // 已存在的列导致的 duplicate 错误可以安全忽略
     if (msg.includes('duplicate column') || msg.includes('already exists')) {
-      console.log(`[DB] 迁移信息（已存在，跳过）: ${msg}`);
+      logger.info({ msg: `[DB] 迁移信息（已存在，跳过）: ${msg}` });
       return;
     }
     // 其他错误继续抛出
-    console.error('[DB] 迁移失败:', msg);
+    logger.error({ msg: `[DB] 迁移失败: ${ msg }` });
     throw e;
+  }
+}
+
+/** B-2.1: 增量迁移（含 roster_locked 等新列，安全幂等） */
+function migrateTables(): void {
+  migrateExistingTables();
+  // Phase: 战局状态快照持久化（重hydration 用）。battles 表扩容 state_snapshot + snapshot_at。
+  try {
+    const bcols = all('PRAGMA table_info(battles)').map((c: any) => c.name);
+    if (!bcols.includes('state_snapshot')) {
+      db.run('ALTER TABLE battles ADD COLUMN state_snapshot TEXT');
+      logger.info({ msg: `[DB] 迁移：battles 增加 state_snapshot 列` });
+    }
+    if (!bcols.includes('snapshot_at')) {
+      db.run("ALTER TABLE battles ADD COLUMN snapshot_at TEXT");
+      logger.info({ msg: `[DB] 迁移：battles 增加 snapshot_at 列` });
+    }
+  } catch (e: any) {
+    logger.error({ msg: `[DB] 迁移 battles 快照列失败: ${ e?.message || e }` });
+  }
+  try {
+    const cols = all('PRAGMA table_info(rooms)') as any[];
+    const colNames = cols.map((c: any) => c.name);
+    if (!colNames.includes('roster_locked')) {
+      db.run('ALTER TABLE rooms ADD COLUMN roster_locked INTEGER DEFAULT 0');
+      logger.info({ msg: `[DB] 迁移：rooms 增加 roster_locked 列` });
+    }
+  } catch (e: any) {
+    logger.error({ msg: `[DB] 迁移 roster_locked 失败: ${ e?.message || e }` });
+  }
+  // Phase: room code (6-digit join key) + victory_conditions + users.last_room_id + room_players.is_spectator
+  try {
+    const rcols = all('PRAGMA table_info(rooms)').map((c: any) => c.name);
+    if (!rcols.includes('code')) {
+      db.run('ALTER TABLE rooms ADD COLUMN code TEXT');
+    }
+    if (!rcols.includes('victory_conditions')) {
+      db.run("ALTER TABLE rooms ADD COLUMN victory_conditions TEXT DEFAULT '{}'");
+    }
+    const need = all('SELECT id FROM rooms WHERE code IS NULL OR code = \'\'') as any[];
+    for (const r of need) {
+      let code = '';
+      let tries = 0;
+      do {
+        code = String(Math.floor(100000 + Math.random() * 900000));
+        tries++;
+      } while (tries < 200 && get('SELECT 1 FROM rooms WHERE code = ?', [code]));
+      if (!get('SELECT 1 FROM rooms WHERE code = ?', [code])) {
+        run('UPDATE rooms SET code = ? WHERE id = ?', [code, r.id]);
+      }
+    }
+    db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code)');
+    // Phase: 等级-功能权限矩阵后台（dominator 管理各等级对各功能的可见/可用权限）
+    try {
+      db.run('CREATE TABLE IF NOT EXISTS feature_permissions (role TEXT PRIMARY KEY, enabled TEXT NOT NULL DEFAULT \'[]\')');
+    } catch (e: any) {
+      logger.error({ msg: `[DB] 迁移 feature_permissions 失败: ${ e?.message || e }` });
+    }
+    const ucols = all('PRAGMA table_info(users)').map((c: any) => c.name);
+    if (!ucols.includes('last_room_id')) {
+      db.run('ALTER TABLE users ADD COLUMN last_room_id TEXT');
+    }
+    const rpcols = all('PRAGMA table_info(room_players)').map((c: any) => c.name);
+    if (!rpcols.includes('is_spectator')) {
+      db.run('ALTER TABLE room_players ADD COLUMN is_spectator INTEGER DEFAULT 0');
+    }
+    // 整备室：玩家在房间内选中的出战棋子（JSON 数组 of unitId），开战时聚合进部署池
+    const rpcols2 = all('PRAGMA table_info(room_players)').map((c: any) => c.name);
+    if (!rpcols2.includes('selected_units')) {
+      db.run('ALTER TABLE room_players ADD COLUMN selected_units TEXT');
+      logger.info({ msg: `[DB] 迁移：room_players 增加 selected_units 列` });
+    }
+    // 阵营角色（攻击/防守/偷袭/观众）与房间各阵营密码
+    const rpcols3 = all('PRAGMA table_info(room_players)').map((c: any) => c.name);
+    if (!rpcols3.includes('role')) {
+      db.run('ALTER TABLE room_players ADD COLUMN role TEXT');
+      logger.info({ msg: `[DB] 迁移：room_players 增加 role 列` });
+    }
+    // 角色剥离双轨制（2026-07-30）：identity_role=权限(裁判/玩家/观战)，tactical_slot=轮转席位(攻击/防守/偷袭)
+    // 新增列用幂等守卫（避免容器重启重跑因列已存在报错），并据存量 role 回填，绝不覆盖已被 UI 修改过的值。
+    const rpcols4 = all('PRAGMA table_info(room_players)').map((c: any) => c.name);
+    if (!rpcols4.includes('identity_role')) {
+      db.run('ALTER TABLE room_players ADD COLUMN identity_role TEXT');
+      logger.info({ msg: `[DB] 迁移：room_players 增加 identity_role 列` });
+    }
+    if (!rpcols4.includes('tactical_slot')) {
+      db.run('ALTER TABLE room_players ADD COLUMN tactical_slot TEXT');
+      logger.info({ msg: `[DB] 迁移：room_players 增加 tactical_slot 列` });
+    }
+    // 回填：依据存量 role 推导双轨（仅填 NULL 行，已被 UI 改过的行不覆盖）
+    db.run(`UPDATE room_players SET identity_role = CASE WHEN role IN ('referee','visitor') THEN role ELSE 'player' END WHERE identity_role IS NULL`);
+    db.run(`UPDATE room_players SET tactical_slot = CASE WHEN role IN ('attack','defense','ambush') THEN role ELSE NULL END WHERE tactical_slot IS NULL`);
+    const roomCols2 = all('PRAGMA table_info(rooms)').map((c: any) => c.name);
+    if (!roomCols2.includes('faction_passwords')) {
+      db.run('ALTER TABLE rooms ADD COLUMN faction_passwords TEXT');
+      logger.info({ msg: `[DB] 迁移：rooms 增加 faction_passwords 列` });
+    }
+  } catch (e: any) {
+    logger.error({ msg: `[DB] 迁移 room code/VC/last_room 失败: ${ e?.message || e }` });
   }
 }
 
@@ -208,11 +321,11 @@ function _migrateExistingTablesInner(): void {
 
   if (!colNames.includes('role')) {
     db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
-    console.log('[DB] 迁移：users 表添加 role 列');
+    logger.info({ msg: `[DB] 迁移：users 表添加 role 列` });
   }
   if (!colNames.includes('credits')) {
     db.run('ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 10');
-    console.log('[DB] 迁移：users 表添加 credits 列');
+    logger.info({ msg: `[DB] 迁移：users 表添加 credits 列` });
   }
 
   const unitCols = all('PRAGMA table_info(units)') as any[];
@@ -220,15 +333,19 @@ function _migrateExistingTablesInner(): void {
 
   if (!unitColNames.includes('original_author_id')) {
     db.run('ALTER TABLE units ADD COLUMN original_author_id TEXT');
-    console.log('[DB] 迁移：units 表添加 original_author_id 列');
+    logger.info({ msg: `[DB] 迁移：units 表添加 original_author_id 列` });
   }
 
   // Phase 30-Fix: 持久化行动代号与七视图 URL
   if (!unitColNames.includes('codename')) {
-    try { db.run("ALTER TABLE units ADD COLUMN codename TEXT DEFAULT ''"); console.log('[DB] 迁移：units 表添加 codename 列'); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
+    try { db.run("ALTER TABLE units ADD COLUMN codename TEXT DEFAULT ''"); logger.info({ msg: `[DB] 迁移：units 表添加 codename 列` }); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
   }
   if (!unitColNames.includes('view_urls')) {
-    try { db.run("ALTER TABLE units ADD COLUMN view_urls TEXT DEFAULT '{}'"); console.log('[DB] 迁移：units 表添加 view_urls 列'); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
+    try { db.run("ALTER TABLE units ADD COLUMN view_urls TEXT DEFAULT '{}'"); logger.info({ msg: `[DB] 迁移：units 表添加 view_urls 列` }); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
+  }
+  // 单位体型（体积）：s / m / l / xl，默认 m，保证老机体不崩溃
+  if (!unitColNames.includes('size')) {
+    try { db.run("ALTER TABLE units ADD COLUMN size TEXT DEFAULT 'm'"); logger.info({ msg: `[DB] 迁移：units 表添加 size 列` }); } catch (e: any) { if (!e?.message?.includes('duplicate column')) throw e; }
   }
 
   // Phase 29-DataSecurity: is_public / review_status 审核卡口
@@ -236,10 +353,10 @@ function _migrateExistingTablesInner(): void {
   const safeAlter = (table: string, col: string, sql: string, label: string) => {
     try {
       db.run(sql);
-      console.log(`[DB] 迁移：${label}`);
+      logger.info({ msg: `[DB] 迁移：${label}` });
     } catch (e: any) {
       if (e?.message?.includes('duplicate column')) {
-        console.log(`[DB] 迁移跳过：${label} (列已存在)`);
+        logger.info({ msg: `[DB] 迁移跳过：${label} (列已存在)` });
       } else {
         throw e;
       }
@@ -282,15 +399,15 @@ function _migrateExistingTablesInner(): void {
 
   if (!mapColNames.includes('is_public')) {
     db.run('ALTER TABLE maps ADD COLUMN is_public INTEGER DEFAULT 0');
-    console.log('[DB] 迁移：maps 表添加 is_public 列');
+    logger.info({ msg: `[DB] 迁移：maps 表添加 is_public 列` });
   }
   if (!mapColNames.includes('review_status')) {
     db.run("ALTER TABLE maps ADD COLUMN review_status TEXT DEFAULT 'pending'");
-    console.log('[DB] 迁移：maps 表添加 review_status 列');
+    logger.info({ msg: `[DB] 迁移：maps 表添加 review_status 列` });
   }
   if (!mapColNames.includes('original_author_id')) {
     db.run('ALTER TABLE maps ADD COLUMN original_author_id TEXT');
-    console.log('[DB] 迁移：maps 表添加 original_author_id 列');
+    logger.info({ msg: `[DB] 迁移：maps 表添加 original_author_id 列` });
   }
 }
 

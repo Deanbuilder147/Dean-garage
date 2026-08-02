@@ -5,6 +5,7 @@
  * 查询旧表 users，执行 Bcrypt 哈希对账，成功后自动迁移资产至 SQLite。
  */
 
+import { logger } from '../utils/logger.js';
 import pg from 'pg';
 import { config } from '../config.js';
 
@@ -27,7 +28,7 @@ export function getPgPool(): pg.Pool {
     });
 
     pool.on('error', (err) => {
-      console.error('[PG] 连接池异常:', err.message);
+      logger.error({ msg: `[PG] 连接池异常: ${ err.message }` });
     });
   }
   return pool;
@@ -47,7 +48,7 @@ export async function pgQuery<T = Record<string, any>>(
       client.release();
     }
   } catch (err: any) {
-    console.error(`[PG] 查询失败: ${err.message}`);
+    logger.error({ msg: `[PG] 查询失败: ${err.message}` });
     return [];
   }
 }
@@ -74,7 +75,7 @@ export async function pgExecute(
       client.release();
     }
   } catch (err: any) {
-    console.error(`[PG] 写入失败: ${err.message}`);
+    logger.error({ msg: `[PG] 写入失败: ${err.message}` });
     throw err;
   }
 }

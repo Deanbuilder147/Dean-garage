@@ -4,6 +4,7 @@
  * 大一统登录/注册管线，使用 bcrypt + JWT。
  */
 
+import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -50,6 +51,7 @@ router.post('/api/auth/register', async (req, res) => {
     const user: UserProfile = {
       id, username, email, faction: 'earth',
       permission: 1, role: UserRole.USER, credits: 10,
+      lastRoomId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -59,10 +61,10 @@ router.post('/api/auth/register', async (req, res) => {
       { expiresIn: config.jwt.expiresIn as any }
     );
 
-    console.log(`[Auth] 新用户注册: ${username}`);
+    logger.info({ msg: `[Auth] 新用户注册: ${username}` });
     res.status(201).json({ token, user } satisfies AuthResponse);
   } catch (err) {
-    console.error('[Auth] 注册错误:', err);
+    logger.error({ msg: `[Auth] 注册错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '注册失败' });
   }
 });
@@ -81,7 +83,7 @@ router.post('/api/auth/login', async (req, res) => {
     // 第一源：SQLite 大一统主库
     // ============================================
     let row = get(
-      'SELECT id, username, email, password_hash, faction, permission, role, credits, created_at, updated_at FROM users WHERE username = ?',
+      'SELECT id, username, email, password_hash, faction, permission, role, credits, last_room_id, created_at, updated_at FROM users WHERE username = ?',
       [username]
     ) as any;
 
@@ -91,7 +93,7 @@ router.post('/api/auth/login', async (req, res) => {
     // 第二源：PostgreSQL 旧库（SQLite 未命中时触发）
     // ============================================
     if (!row) {
-      console.log(`[Auth] SQLite 未命中 ${username}，检索 PostgreSQL 旧库...`);
+      logger.info({ msg: `[Auth] SQLite 未命中 ${username}，检索 PostgreSQL 旧库...` });
       const pgRow = await pgGetOne(
         'SELECT id, username, email, password_hash, faction, role, credits, created_at, updated_at FROM users WHERE username = $1',
         [username]
@@ -101,7 +103,7 @@ router.post('/api/auth/login', async (req, res) => {
         // 验证旧库 Bcrypt 哈希
         const valid = await bcrypt.compare(password, pgRow.password_hash);
         if (valid) {
-          console.log(`[Auth] PostgreSQL 旧库命中 ${username}，执行资产平移...`);
+          logger.info({ msg: `[Auth] PostgreSQL 旧库命中 ${username}，执行资产平移...` });
 
           // 无损平移用户到 SQLite
           const id = pgRow.id || uuidv4();
@@ -123,10 +125,10 @@ router.post('/api/auth/login', async (req, res) => {
             // Phase 29-DataSecurity: 自动平移旧资产（单位 + 地图）
             await migrateLegacyAssets(id, username);
             persistChanges();
-            console.log(`[Auth] 老账号 ${username} 资产平移完成`);
+            logger.info({ msg: `[Auth] 老账号 ${username} 资产平移完成` });
           }
 
-          row = { id, username, email, password_hash: pgRow.password_hash, faction, permission: 1, role, credits, created_at: createdAt, updated_at: updatedAt };
+          row = { id, username, email, password_hash: pgRow.password_hash, faction, permission: 1, role, credits, last_room_id: null, created_at: createdAt, updated_at: updatedAt };
           migratedFromPg = true;
         }
       }
@@ -154,6 +156,7 @@ router.post('/api/auth/login', async (req, res) => {
       id: row.id, username: row.username, email: row.email,
       faction: row.faction, permission: row.permission,
       role: userRole, credits: userCredits,
+      lastRoomId: row.last_room_id || null,
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
 
@@ -163,16 +166,16 @@ router.post('/api/auth/login', async (req, res) => {
       { expiresIn: config.jwt.expiresIn as any }
     );
 
-    console.log(`[Auth] 用户登录: ${username} (role=${userRole}, pg_migrated=${migratedFromPg})`);
+    logger.info({ msg: `[Auth] 用户登录: ${username} (role=${userRole}, pg_migrated=${migratedFromPg})` });
     res.json({ token, user } satisfies AuthResponse);
   } catch (err) {
-    console.error('[Auth] 登录错误:', err);
+    logger.error({ msg: `[Auth] 登录错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '登录失败' });
   }
 });
 
 router.get('/api/auth/me', authenticate, requireAuth, (req, res) => {
-  const row = get('SELECT id, username, email, faction, permission, role, credits, created_at, updated_at FROM users WHERE id = ?', [req.auth!.userId]);
+  const row = get('SELECT id, username, email, faction, permission, role, credits, last_room_id, created_at, updated_at FROM users WHERE id = ?', [req.auth!.userId]);
 
   if (!row) {
     res.status(404).json({ error: 'USER_NOT_FOUND', message: '用户不存在' });
@@ -184,8 +187,100 @@ router.get('/api/auth/me', authenticate, requireAuth, (req, res) => {
     faction: row.faction, permission: row.permission,
     role: (row.role || UserRole.USER) as UserRole,
     credits: typeof row.credits === 'number' ? row.credits : 10,
+    lastRoomId: row.last_room_id || null,
     createdAt: row.created_at, updatedAt: row.updated_at,
   } satisfies UserProfile);
+});
+
+// ========================================
+// 修改自己的账号信息（不修改 uid/id、role、permission、credits）
+// 身份严格来自 req.auth.userId（token 派生），绝不使用前端传入的 id
+// ========================================
+router.put('/api/auth/profile', authenticate, requireAuth, (req, res) => {
+  const { username, email, faction } = req.body as { username?: string; email?: string; faction?: string };
+  const userId = req.auth!.userId;
+
+  if (username === undefined && email === undefined && faction === undefined) {
+    res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '请至少提供一项要修改的信息' });
+    return;
+  }
+
+  // 邮箱格式 + 唯一性
+  if (email !== undefined) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '邮箱格式不正确' });
+      return;
+    }
+    const clash = get('SELECT id FROM users WHERE email = ? AND id != ?', [email, userId]);
+    if (clash) {
+      res.status(409).json({ error: 'DUPLICATE', message: '该邮箱已被其他账号使用' });
+      return;
+    }
+  }
+  // 用户名唯一性
+  if (username !== undefined) {
+    const clash = get('SELECT id FROM users WHERE username = ? AND id != ?', [username, userId]);
+    if (clash) {
+      res.status(409).json({ error: 'DUPLICATE', message: '该用户名已被其他账号使用' });
+      return;
+    }
+  }
+
+  const updates: string[] = [];
+  const values: any[] = [];
+  if (username !== undefined) { updates.push('username = ?'); values.push(username); }
+  if (email !== undefined) { updates.push('email = ?'); values.push(email); }
+  if (faction !== undefined) { updates.push('faction = ?'); values.push(faction); }
+  updates.push("updated_at = datetime('now')");
+  values.push(userId);
+
+  run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
+  persistChanges();
+
+  const row = get('SELECT id, username, email, faction, permission, role, credits, last_room_id, created_at, updated_at FROM users WHERE id = ?', [userId]) as any;
+  res.json({
+    id: row.id, username: row.username, email: row.email,
+    faction: row.faction, permission: row.permission,
+    role: (row.role || UserRole.USER) as UserRole,
+    credits: typeof row.credits === 'number' ? row.credits : 10,
+    lastRoomId: row.last_room_id || null,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  } satisfies UserProfile);
+});
+
+// ========================================
+// 修改密码（验证旧密码，身份来自 token）
+// ========================================
+router.post('/api/auth/change-password', authenticate, requireAuth, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body as { oldPassword?: string; newPassword?: string };
+    if (!oldPassword || !newPassword) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '旧密码和新密码均为必填' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: '新密码至少 6 位' });
+      return;
+    }
+    const userId = req.auth!.userId;
+    const row = get('SELECT password_hash FROM users WHERE id = ?', [userId]) as any;
+    if (!row) {
+      res.status(404).json({ error: 'USER_NOT_FOUND', message: '用户不存在' });
+      return;
+    }
+    const valid = await bcrypt.compare(oldPassword, row.password_hash);
+    if (!valid) {
+      res.status(401).json({ error: ErrorCode.AUTH_CREDENTIALS_INVALID, message: '旧密码错误' });
+      return;
+    }
+    const newHash = await bcrypt.hash(newPassword, config.bcryptRounds);
+    run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", [newHash, userId]);
+    persistChanges();
+    res.json({ success: true, message: '密码修改成功' });
+  } catch (err) {
+    logger.error({ msg: `[Auth] 修改密码错误: ${ err }` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '密码修改失败' });
+  }
 });
 
 router.get('/api/auth/health', (_req, res) => {
@@ -264,10 +359,10 @@ async function migrateLegacyAssets(userId: string, username: string): Promise<vo
     }
 
     if (unitCount > 0 || mapCount > 0) {
-      console.log(`[Auth] 资产平移: ${username} → ${unitCount} 单位 + ${mapCount} 地图`);
+      logger.info({ msg: `[Auth] 资产平移: ${username} → ${unitCount} 单位 + ${mapCount} 地图` });
     }
   } catch (err: any) {
-    console.error(`[Auth] 资产平移失败 (${username}):`, err.message);
+    logger.error({ msg: `[Auth] 资产平移失败 (${username}): ${ err.message }` });
   }
 }
 

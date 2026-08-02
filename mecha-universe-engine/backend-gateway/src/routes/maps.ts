@@ -5,6 +5,7 @@
  * 承接旧 mecha-map:3003 微服务的 BattlefieldMap 查询职责。
  */
 
+import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate, requireAuth } from '../middleware/auth.js';
@@ -108,8 +109,8 @@ router.get('/api/map/list', authenticate, (req, res) => {
         name: map.name,
         filename: map.id,
         terrainCount: JSON.parse(map.cells || '[]').length,
-        width: 100,
-        height: 100,
+        width: 50,
+        height: 50,
         terrain: map.cells,
         cells: migrateCells(JSON.parse(map.cells || '[]')),
         spawn_points: JSON.parse(map.spawn_points || '[]'),
@@ -143,7 +144,7 @@ router.get('/api/map/list', authenticate, (req, res) => {
       res.json({ maps: parsed });
     }
   } catch (err) {
-    console.error('[Maps] 地图列表查询失败:', err);
+    logger.error({ msg: `[Maps] 地图列表查询失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '地图列表查询失败' });
   }
 });
@@ -159,7 +160,7 @@ router.get('/api/map/battlefields', authenticate, (req, res) => {
       const maps = all('SELECT * FROM maps ORDER BY updated_at DESC');
       const parsed = maps.map(m => ({
         ...m,
-        width: 100, height: 100, cells: migrateCells(JSON.parse(m.cells || '[]')),
+        width: 50, height: 50, cells: migrateCells(JSON.parse(m.cells || '[]')),
         spawn_points: JSON.parse(m.spawn_points || '[]'),
         attributes: JSON.parse(m.attributes || '{}'),
       }));
@@ -171,14 +172,14 @@ router.get('/api/map/battlefields', authenticate, (req, res) => {
       );
       const parsed = maps.map(m => ({
         ...m,
-        width: 100, height: 100, cells: migrateCells(JSON.parse(m.cells || '[]')),
+        width: 50, height: 50, cells: migrateCells(JSON.parse(m.cells || '[]')),
         spawn_points: JSON.parse(m.spawn_points || '[]'),
         attributes: JSON.parse(m.attributes || '{}'),
       }));
       res.json({ battlefields: parsed });
     }
   } catch (err) {
-    console.error('[Maps] 获取战场列表失败:', err);
+    logger.error({ msg: `[Maps] 获取战场列表失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '获取战场列表失败' });
   }
 });
@@ -195,13 +196,13 @@ router.get('/api/map/battlefields/:id', authenticate, (req, res) => {
     }
     const result = {
       ...map,
-      width: 100, height: 100, cells: migrateCells(JSON.parse(map.cells || '[]')),
+      width: 50, height: 50, cells: migrateCells(JSON.parse(map.cells || '[]')),
       spawn_points: JSON.parse(map.spawn_points || '[]'),
       attributes: JSON.parse(map.attributes || '{}'),
     };
     res.json(result);
   } catch (err) {
-    console.error('[Maps] 获取战场详情失败:', err);
+    logger.error({ msg: `[Maps] 获取战场详情失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '获取战场详情失败' });
   }
 });
@@ -239,11 +240,11 @@ router.post('/api/map/battlefields', authenticate, requireAuth, (req, res) => {
     );
     persistChanges();
 
-    console.log(`[Maps] 创建: ${name} (is_public=${finalIsPublic}, review=${review_status})`);
+    logger.info({ msg: `[Maps] 创建: ${name} (is_public=${finalIsPublic}, review=${review_status})` });
 
     res.status(201).json({ id, name, width, height, is_public: finalIsPublic, review_status });
   } catch (err) {
-    console.error('[Maps] 创建战场失败:', err);
+    logger.error({ msg: `[Maps] 创建战场失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '创建战场失败' });
   }
 });
@@ -290,11 +291,11 @@ router.put('/api/map/battlefields/:id', authenticate, requireAuth, (req, res) =>
     );
     persistChanges();
 
-    console.log(`[Maps] 更新: ${name || map.name} (is_public=${finalIsPublic}, review=${review_status})`);
+    logger.info({ msg: `[Maps] 更新: ${name || map.name} (is_public=${finalIsPublic}, review=${review_status})` });
 
     res.json({ success: true, is_public: finalIsPublic, review_status });
   } catch (err) {
-    console.error('[Maps] 更新战场失败:', err);
+    logger.error({ msg: `[Maps] 更新战场失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '更新战场失败' });
   }
 });
@@ -313,7 +314,7 @@ router.delete('/api/map/battlefields/:id', authenticate, requireAuth, (req, res)
     persistChanges();
     res.json({ success: true });
   } catch (err) {
-    console.error('[Maps] 删除战场失败:', err);
+    logger.error({ msg: `[Maps] 删除战场失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '删除战场失败' });
   }
 });

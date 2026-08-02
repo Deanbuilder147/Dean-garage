@@ -5,10 +5,12 @@
  * 端口 3006 统一执政。
  */
 
+import { logger } from './utils/logger.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { MulterError } from 'multer';
 import { config } from './config.js';
 import authRoutes from './routes/auth.js';
 import roomRoutes from './routes/rooms.js';
@@ -18,10 +20,25 @@ import combatRoutes from './routes/combat.js';
 import mapRoutes from './routes/maps.js';
 import glossaryRoutes from './routes/glossary.js'
 import terrainRoutes from './routes/terrain.js';
+import assetGenRoutes from './routes/assetGen.js';
 import { authenticate } from './middleware/auth.js';
+import { applySizeConfigOverride } from './unitSize.js';
+import { createRequire } from 'module';
 
 export function createApp(): express.Application {
   const app = express();
+
+  // ========================================
+  // 启动时热加载体型工坊参数（从 glossary.size 注入内存覆盖，保证重启后仍生效）
+  // ========================================
+  try {
+    const nodeRequire = createRequire(import.meta.url);
+    const { getGlossaryConfig } = nodeRequire('../services/combat-service/src/services/combatCore/configLoader.cjs');
+    const gl = getGlossaryConfig();
+    if (gl && gl.size) applySizeConfigOverride(gl.size);
+  } catch (e) {
+    logger.warn({ msg: `[size] 启动时加载体型配置失败，使用内置默认值 ${ e }` });
+  }
 
   // ========================================
   // 反向代理信任链（关键：还原真实客户端 IP）
@@ -106,6 +123,9 @@ export function createApp(): express.Application {
   // 需求④ 地图素材上传（全局地形素材库）
   app.use('/api/terrain', terrainRoutes);
 
+  // Phase AssetGen: AI 素材生成网关（玩家上传参考图 → Meowa → 落盘服务器）
+  app.use('/api/asset-gen', assetGenRoutes);
+
   // Phase 29-P1: 试玩战役端点（游客可访问，无需 Token）
   app.get('/api/campaign/trial', (_req, res) => {
     res.json({
@@ -157,12 +177,12 @@ export function createApp(): express.Application {
         );
         res.json({ success: true, result });
       }).catch((err: Error) => {
-        console.error('[CRITICAL FAILED] [SkillTest] 技能测试异常:', err.message);
+        logger.error({ msg: `[CRITICAL FAILED] [SkillTest] 技能测试异常: ${ err.message }` });
         res.status(500).json({ success: false, error: err.message });
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[CRITICAL FAILED] [SkillTest] 外层异常:', msg);
+      logger.error({ msg: `[CRITICAL FAILED] [SkillTest] 外层异常: ${ msg }` });
       res.status(500).json({ success: false, error: msg });
     }
   });
@@ -174,7 +194,17 @@ export function createApp(): express.Application {
 
   // 全局错误处理
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('[Gateway] 未捕获异常:', err);
+    // Multer 文件上传错误（如超出大小限制）：返回精确状态码 + 中文提示，避免被笼统吞成 500
+    if (err instanceof MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: 'FILE_TOO_LARGE',
+          message: '上传文件过大，请压缩后重试。图片建议 ≤ 20MB，文档 ≤ 5MB。',
+        });
+      }
+      return res.status(400).json({ error: 'UPLOAD_ERROR', message: `文件上传失败：${err.message}` });
+    }
+    logger.error({ msg: `[Gateway] 未捕获异常: ${ err }` });
     res.status(500).json({
       error: 'INTERNAL_ERROR',
       message: config.nodeEnv === 'development' ? err.message : '服务器内部错误',

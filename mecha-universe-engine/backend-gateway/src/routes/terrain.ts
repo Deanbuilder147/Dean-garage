@@ -4,6 +4,7 @@
  * GET  /api/terrain/materials/:filename → 静态服务
  * 复用 units.ts 的 imageUpload（gateway_data volume 持久化），无需 DB 迁移。
  */
+import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -45,7 +46,7 @@ router.post('/upload', authenticate, imageUpload.single('file'), (req, res) => {
     const filename = `${safe}${ext}`;
     fs.writeFileSync(path.join(TERRAIN_DIR, filename), req.file.buffer);
     const url = `/api/terrain/materials/${filename}`;
-    console.log(`[Terrain/Material] 上传: ${terrain} -> ${filename}`);
+    logger.info({ msg: `[Terrain/Material] 上传: ${terrain} -> ${filename}` });
     res.json({ ok: true, url, filename });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

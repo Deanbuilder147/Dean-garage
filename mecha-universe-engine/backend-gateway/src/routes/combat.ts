@@ -82,11 +82,11 @@ function requireBattle(battleId: string): any | null {
       const rebuilt = fromPlainState(plain);
       reconcileBattle(rebuilt); // 隐患一加固：清算超时僵尸 pendingSurprise
       battleStore.set(battleId, rebuilt); // 写回内存，后续调用直接命中
-      console.log('[requireBattle] 从 DB 快照重建战局', battleId, 'units=', rebuilt.units?.size ?? 0);
+      logger.info({ msg: `[requireBattle] 从 DB 快照重建战局 ${ battleId } units= ${ rebuilt.units?.size ?? 0 }` });
       return rebuilt;
     }
   } catch (e: any) {
-    console.error('[requireBattle] rehydrate 失败', battleId, e?.message || e);
+    logger.error({ msg: `[requireBattle] rehydrate 失败 ${ battleId } ${ e?.message || e }` });
   }
   return null;
 }
@@ -197,7 +197,7 @@ function applyNewRoundEffects(battle: BattleState): void {
     } else if (battle.units && typeof (battle.units as any).forEach === 'function') {
       (battle.units as any).forEach((u: any) => pickupAirdrops(battle, u));
     }
-  } catch (e) { console.error('[airdrop/H4]', (e as any)?.message); }
+  } catch (e) { logger.error({ msg: `[airdrop/H4] ${ JSON.stringify((e as any)?.message) }` }); }
   // 清除上一轮遗留的「防御姿态」减伤（持续到该单位下个自己的回合开始 = 新一轮时点）
   try {
     const unitsArr = Array.isArray(battle.units) ? battle.units : (battle.units && typeof (battle.units as any).forEach === 'function' ? Array.from((battle.units as any).values()) : []);
@@ -206,7 +206,7 @@ function applyNewRoundEffects(battle: BattleState): void {
         u.statusEffects = u.statusEffects.filter((s: any) => s.source !== 'defend_action');
       }
     }
-  } catch (e2) { console.error('[defend/clear]', (e2 as any)?.message); }
+  } catch (e2) { logger.error({ msg: `[defend/clear] ${ JSON.stringify((e2 as any)?.message) }` }); }
 }
 
 /** 推进到下一个「有存活棋子」的角色；跨过末尾则进入新一轮（重置行动点） */
@@ -334,7 +334,7 @@ class PushBattleStore extends Map<string, BattleState> {
     try {
       saveBattleSnapshot(key, value);
     } catch (e: any) {
-      console.error('[PushBattleStore] saveBattleSnapshot 失败', key, e?.message || e);
+      logger.error({ msg: `[PushBattleStore] saveBattleSnapshot 失败 ${ key } ${ e?.message || e }` });
     }
     return r;
   }
@@ -555,7 +555,7 @@ router.post('/api/combat', authenticate, (req: Request, res: Response) => {
 
   battleStore.set(battleId, battle);
 
-  console.log(`[Gateway:3006] [BATTLE CREATE] 战局 ${battleId} 已创建 | battlefield=${battlefield_id} (${bfRow.name}) | 地图尺寸: ${bfRow.width}×${bfRow.height} | user=${req.auth?.username || '?'}`);
+  logger.info({ msg: `[Gateway:3006] [BATTLE CREATE] 战局 ${battleId} 已创建 | battlefield=${battlefield_id} (${bfRow.name}) | 地图尺寸: ${bfRow.width}×${bfRow.height} | user=${req.auth?.username || '?'}` });
 
   res.status(201).json({
     success: true,
@@ -646,7 +646,7 @@ router.post('/api/combat/:battleId/victory-conditions', authenticate, (req: Requ
     // 将胜利条件挂载到 battle 元数据上
     (battle as any).victoryConditions = normalized;
 
-    console.log(`[Gateway:3006] [VICTORY CONDS] 战局 ${battleId} 胜利条件已绑定:`, JSON.stringify(normalized));
+    logger.info({ msg: `[Gateway:3006] [VICTORY CONDS] 战局 ${battleId} 胜利条件已绑定: ${ JSON.stringify(normalized) }` });
 
     battleStore.set(battleId, battle); // 触发实时推送：胜利条件绑定
   });
@@ -683,7 +683,7 @@ router.post('/api/combat/:battleId/ace-unit', authenticate, (req: Request, res: 
   }
   (battle as any).aceUnits[faction] = unitId;
 
-  console.log(`[Gateway:3006] [ACE UNIT] 战局 ${battleId} ACE 已绑定: faction=${faction}, unitId=${unitId}`);
+  logger.info({ msg: `[Gateway:3006] [ACE UNIT] 战局 ${battleId} ACE 已绑定: faction=${faction}, unitId=${unitId}` });
 
   battleStore.set(battleId, battle); // 触发实时推送：ACE 机体绑定
 
@@ -766,14 +766,14 @@ export function seedRoomBattle(battleId: string, mapId: string | null, pendingUn
   (battle as any).hostId = hostId || (battle as any).hostId || null;
   // 权威阵营↔角色配置（来自 room.rules.factionRoles），开战部署完成后供 reconcileFactionRoles 使用
   (battle as any).factionRolesConfig = (factionRolesConfig && typeof factionRolesConfig === 'object') ? factionRolesConfig : null;
-  console.log(`[Gateway:3006] [seedRoomBattle] battle=${battleId} 预置部署池 ${((battle as any).pendingUnits || []).length} 个单位；hostId=${hostId || '缺省'}；factionRolesConfig=${factionRolesConfig ? '已注入' : '缺省'}`);
+  logger.info({ msg: `[Gateway:3006] [seedRoomBattle] battle=${battleId} 预置部署池 ${((battle as any).pendingUnits || []).length} 个单位；hostId=${hostId || '缺省'}；factionRolesConfig=${factionRolesConfig ? '已注入' : '缺省'}` });
 }
 
 // 清除内存中的对局（房间删除/对局解散时调用，由 rooms 路由在 dominator 或房主删除房间时触发）
 export function clearBattle(battleId: string): void {
   if (battleStore.has(battleId)) {
     battleStore.delete(battleId);
-    console.log(`[Gateway:3006] [clearBattle] 已清除内存对局 battle=${battleId}`);
+    logger.info({ msg: `[Gateway:3006] [clearBattle] 已清除内存对局 battle=${battleId}` });
   }
 }
 
@@ -809,7 +809,7 @@ router.post('/api/combat/:battleId/pending-units', authenticate, (req: Request, 
   // 将待部署单位存入沙盒（deploy 阶段正式注入战场坐标）
   (battle as any).pendingUnits = sanitizedUnits;
 
-  console.log(`[Gateway:3006] [PENDING UNITS] 战局 ${battleId} 已接收 ${rawUnits.length} 个待部署单位`);
+  logger.info({ msg: `[Gateway:3006] [PENDING UNITS] 战局 ${battleId} 已接收 ${rawUnits.length} 个待部署单位` });
 
   res.json({
     success: true,
@@ -929,7 +929,7 @@ router.post('/api/combat/:battleId/initialize', authenticate, (req: Request, res
 
   battleStore.set(battleId, battle);
 
-  console.log(`[Gateway:3006] [BATTLE INIT] 战局 ${battleId} 已初始化，${units.length} 个单位就位 | action_points: { MOVE: 1, ATTACK: 1 }`);
+  logger.info({ msg: `[Gateway:3006] [BATTLE INIT] 战局 ${battleId} 已初始化，${units.length} 个单位就位 | action_points: { MOVE: 1, ATTACK: 1 }` });
 
   res.json({
     success: true,
@@ -972,7 +972,7 @@ router.post('/api/combat/:battleId/action-points/consume', authenticate, (req: R
     return;
   }
 
-  console.log(`[Gateway:3006] [ACTION POINT] ${unitId} 消耗 ${action} ×${amount} | 剩余: ${JSON.stringify(unit.action_points)}`);
+  logger.info({ msg: `[Gateway:3006] [ACTION POINT] ${unitId} 消耗 ${action} ×${amount} | 剩余: ${JSON.stringify(unit.action_points)}` });
 
   battleStore.set(battleId, battle); // 触发实时推送：行动点强制消耗
 
@@ -1077,7 +1077,7 @@ router.post('/api/combat/:battleId/end-turn', authenticate, (req: Request, res: 
     clearBattleSnapshot(battleId); // 隐患二：终局清快照，避免 SQLite 膨胀
   }
 
-  console.log(`[Gateway:3006] [TURN END] 战局 ${battleId} 阵营切换 → ${battle.activeFaction} | Round ${battle.round} | ${adv.isNewRound ? '统一重置AP' : '仅切换阵营'}`);
+  logger.info({ msg: `[Gateway:3006] [TURN END] 战局 ${battleId} 阵营切换 → ${battle.activeFaction} | Round ${battle.round} | ${adv.isNewRound ? '统一重置AP' : '仅切换阵营'}` });
 
   battleStore.set(battleId, battle); // 触发实时推送：阵营切换/AP 重置/胜利判定
 
@@ -1124,7 +1124,7 @@ router.post('/api/combat/:battleId/damage', async (req: Request, res: Response) 
     );
     res.json({ success: true, result });
   } catch (err) {
-    console.error(`[Gateway:3006] [DAMAGE ERROR] 战局 ${battleId}:`, err);
+    logger.error({ msg: `[Gateway:3006] [DAMAGE ERROR] 战局 ${battleId}: ${ err }` });
     res.status(500).json({ success: false, error: String(err) });
   }
 });
@@ -1387,7 +1387,7 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
       victory: skillVictory,
     });
   } catch (err: any) {
-    console.error(`[Gateway:3006] [SKILL ERROR] 战局 ${battleId}:`, err);
+    logger.error({ msg: `[Gateway:3006] [SKILL ERROR] 战局 ${battleId}: ${ err }` });
     res.status(500).json({ success: false, error: String(err?.message || err) });
   }
 });
@@ -1699,7 +1699,7 @@ function runAttackInternal(battle: any, opts: any): any {
       luckyEffect,
     };
   } catch (err: any) {
-    console.error(`[Gateway:3006] [ATTACK ERROR] 战局 ${battle?.id}:`, err);
+    logger.error({ msg: `[Gateway:3006] [ATTACK ERROR] 战局 ${battle?.id}: ${ err }` });
     return { ok: false, code: 'ATTACK_EXEC_ERROR', status: 500, message: String(err?.message || err) };
   }
 }
@@ -2294,7 +2294,7 @@ function breakStealth(unit: any, reason: string): void {
     brokenAt: Date.now(),
     reason,
   };
-  console.log(`[Gateway:3006] [STEALTH] 单位 ${(unit as any).unitId ?? (unit as any).id} 破隐 reason=${reason}`);
+  logger.info({ msg: `[Gateway:3006] [STEALTH] 单位 ${(unit as any).unitId ?? (unit as any).id} 破隐 reason=${reason}` });
 }
 
 // 邻近暴露扫描：任一隐匿单位若被敌方(不同 ownerId)存活单位停在距离 ≤ threshold 内则破隐。
@@ -2324,7 +2324,7 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
   const { q, r, unit_data } = req.body || {};
 
   if (!unitId || q === undefined || r === undefined) {
-    console.error('[DEPLOY-UNIT] 400 拦截: 缺必填参数 | req.body=', JSON.stringify(req.body));
+    logger.error({ msg: `[DEPLOY-UNIT] 400 拦截: 缺必填参数 | req.body= ${ JSON.stringify(req.body) }` });
     res.status(400).json({ error: 'VALIDATION_ERROR', message: 'unitId, q, r 为必填项' });
     return;
   }
@@ -2345,7 +2345,7 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
     (battle as any).pendingUnits = pending;
   } else if (unit_data) {
     unitData = unit_data;
-    console.warn(`[DEPLOY-UNIT] 单位 ${unitId} 不在部署池，回退使用请求体 unit_data 创建`);
+    logger.warn({ msg: `[DEPLOY-UNIT] 单位 ${unitId} 不在部署池，回退使用请求体 unit_data 创建` });
   } else {
     res.status(404).json({ error: 'UNIT_NOT_IN_POOL', message: '该单位不在部署池中' });
     return;
@@ -2390,7 +2390,7 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
   //   ③ 任一敌方单位停在其距离 ≤2 内（proximity，移动后扫描）；④ 奇袭结算后反应方 C 强制显形（D9-4）。
   if (isStealthCapableUnit(unitData, battle.factionRoles)) applySpawnStealth(deployedUnit);
 
-  console.log(`[Gateway:3006] [DEPLOY] 单位 ${unitId} 部署到 (${q},${r}) | 战局 ${battleId} | 池剩余 ${pending.length}`);
+  logger.info({ msg: `[Gateway:3006] [DEPLOY] 单位 ${unitId} 部署到 (${q},${r}) | 战局 ${battleId} | 池剩余 ${pending.length}` });
 
   battleStore.set(battleId, battle); // 触发实时推送：单位登场（含隐匿状态）
 
@@ -2428,7 +2428,7 @@ router.post('/api/combat/:battleId/end-deployment', authenticate, (req: Request,
     (u as unknown as { role?: string }).role = resolveRole(battle.factionRoles, (u as unknown as { faction?: string }).faction);
   }
 
-  console.log(`[Gateway:3006] [DEPLOY END] 战局 ${battleId} 部署阶段结束 → 进入战斗 | ${battle.units.size} 个单位`);
+  logger.info({ msg: `[Gateway:3006] [DEPLOY END] 战局 ${battleId} 部署阶段结束 → 进入战斗 | ${battle.units.size} 个单位` });
 
   battleStore.set(battleId, battle); // 触发实时推送：进入战斗阶段/重置回合
 
@@ -2461,7 +2461,7 @@ router.get('/api/combat/:battleId/deploy-pool', authenticate, (req: Request, res
 
   const pendingUnits = (battle as any).pendingUnits || [];
 
-  console.log(`[Gateway:3006] [DEPLOY POOL] 战局 ${battleId} 返回 ${pendingUnits.length} 个待部署单位`);
+  logger.info({ msg: `[Gateway:3006] [DEPLOY POOL] 战局 ${battleId} 返回 ${pendingUnits.length} 个待部署单位` });
 
   res.json({
     success: true,
@@ -2488,7 +2488,7 @@ router.get('/api/combat/:battleId/victory-conditions', authenticate, (req: Reque
 
   const conditions = (battle as any).victoryConditions || null;
 
-  console.log(`[Gateway:3006] [GET VICTORY CONDS] 战局 ${battleId}`, conditions ? '有胜利条件' : '(空)');
+  logger.info({ msg: `[Gateway:3006] [GET VICTORY CONDS] 战局 ${battleId} ${ conditions ? '有胜利条件' : '(空)' }` });
 
   res.json({
     success: true,
@@ -2524,7 +2524,7 @@ router.get('/api/combat/:battleId/faction-cooldowns', authenticate, (req: Reques
 
   const cooldowns = (battle as any).factionCooldowns;
 
-  console.log(`[Gateway:3006] [FACTION CDs] 战局 ${battleId} 冷却状态:`, JSON.stringify(cooldowns));
+  logger.info({ msg: `[Gateway:3006] [FACTION CDs] 战局 ${battleId} 冷却状态: ${ JSON.stringify(cooldowns) }` });
 
   res.json({
     success: true,
@@ -2563,7 +2563,7 @@ router.post('/api/combat/:battleId/faction-cooldowns/tick', authenticate, (req: 
 
   (battle as any).factionCooldowns = cds;
 
-  console.log(`[Gateway:3006] [CD TICK] 战局 ${battleId} 全阵营冷却递减完成`);
+  logger.info({ msg: `[Gateway:3006] [CD TICK] 战局 ${battleId} 全阵营冷却递减完成` });
 
   battleStore.set(battleId, battle); // 触发实时推送：阵营冷却递减
 
@@ -2660,7 +2660,7 @@ router.post('/api/combat/:battleId/beam-hits', authenticate, (req: Request, res:
     battle.units
   );
 
-  console.log(`[Gateway:3006] [BEAM HITS] 战局 ${battleId} 射线命中 ${hits.length} 个单位`);
+  logger.info({ msg: `[Gateway:3006] [BEAM HITS] 战局 ${battleId} 射线命中 ${hits.length} 个单位` });
 
   res.json({
     success: true,

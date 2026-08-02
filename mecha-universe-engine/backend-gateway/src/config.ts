@@ -5,6 +5,7 @@
  * 端口 3006 统一承载全部核心业务逻辑。
  */
 
+import { logger } from './utils/logger.js';
 import { randomBytes } from 'node:crypto';
 
 export const config = {
@@ -59,7 +60,7 @@ export const config = {
 
 // 启动时打印安全摘要（隐藏密钥）
 export function logConfigSummary(): void {
-  console.log(`
+  logger.info({ msg: `
 ╔══════════════════════════════════════════════╗
 ║   Mechaverse Unified Engine — Backend Gateway ║
 ║   Phase 29-X 最高图腾令                        ║
@@ -69,5 +70,5 @@ export function logConfigSummary(): void {
 ║   JWT Exp:   ${config.jwt.expiresIn.padEnd(35)}║
 ║   DB:        ${config.dbPath.padEnd(35)}║
 ╚══════════════════════════════════════════════╝
-`);
+` });
 }

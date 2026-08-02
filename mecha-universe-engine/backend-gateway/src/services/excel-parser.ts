@@ -7,6 +7,7 @@
  *   - 技能归属: 按行号范围硬编码（非 slot 列数值）
  * Schema 归一化由 excel-schema-normalizer.ts 在后处理阶段完成。
  */
+import { logger } from '../utils/logger.js';
 import * as XLSX from 'xlsx';
 import { EXCEL_TEMPLATE, type ExcelTemplate } from './excel-template.js';
 
@@ -68,15 +69,15 @@ export class ExcelParser {
    * 解析 Excel 文件 Buffer
    */
   parse(buffer: Buffer): ParsedResult {
-    console.log('[ExcelParser v2.1] 开始解析 Excel 文件...');
+    logger.info({ msg: `[ExcelParser v2.1] 开始解析 Excel 文件...` });
 
     const workbook = XLSX.read(buffer, { type: 'buffer' });
-    console.log(`[ExcelParser v2.1] 工作表: ${workbook.SheetNames.join(', ')}`);
+    logger.info({ msg: `[ExcelParser v2.1] 工作表: ${workbook.SheetNames.join(', ')}` });
 
     // ====== 旧版兼容: 优先查找 "设定器" 工作表 ======
     const sheetName = this.selectSheet(workbook);
     const sheet = workbook.Sheets[sheetName];
-    console.log(`[ExcelParser v2.1] 使用工作表: "${sheetName}"`);
+    logger.info({ msg: `[ExcelParser v2.1] 使用工作表: "${sheetName}"` });
 
     const result: ParsedResult = {
       basic: { name: '', codename: null, faction: 'earth', totalPoints: null },
@@ -91,19 +92,19 @@ export class ExcelParser {
 
     try {
       result.basic = this.parseBasic(sheet);
-      console.log('[ExcelParser v2.1] 基本信息:', JSON.stringify(result.basic));
+      logger.info({ msg: `[ExcelParser v2.1] 基本信息: ${ JSON.stringify(result.basic) }` });
 
       result.units = this.parseUnits(sheet);
-      console.log('[ExcelParser v2.1] 单位数量:', Object.keys(result.units).length);
+      logger.info({ msg: `[ExcelParser v2.1] 单位数量: ${ Object.keys(result.units).length }` });
 
       result.skills = this.parseSkills(sheet);
-      console.log('[ExcelParser v2.1] 技能数量:', result.skills.length);
+      logger.info({ msg: `[ExcelParser v2.1] 技能数量: ${ result.skills.length }` });
 
-      console.log('[ExcelParser v2.1] 解析完成');
+      logger.info({ msg: `[ExcelParser v2.1] 解析完成` });
       return result;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error('[ExcelParser v2.1] 解析失败:', msg);
+      logger.error({ msg: `[ExcelParser v2.1] 解析失败: ${ msg }` });
       throw error;
     }
   }
@@ -121,7 +122,7 @@ export class ExcelParser {
     if (!first) {
       throw new Error('Excel 文件中没有找到工作表');
     }
-    console.warn(`[ExcelParser v2.1] 未找到"设定器"工作表，使用第一个: "${first}"`);
+    logger.warn({ msg: `[ExcelParser v2.1] 未找到"设定器"工作表，使用第一个: "${first}"` });
     return first;
   }
 
@@ -195,7 +196,7 @@ export class ExcelParser {
 
       const unitKey = this.resolveUnitKey(aText) || aText;
       if (units[unitKey]) {
-        console.warn(`[ExcelParser v2.1] 单位 "${unitKey}" 在行 ${rowConfig.row} 重复出现，后者覆盖前者`);
+        logger.warn({ msg: `[ExcelParser v2.1] 单位 "${unitKey}" 在行 ${rowConfig.row} 重复出现，后者覆盖前者` });
       }
 
       const unitData: ParsedUnit = {
@@ -227,7 +228,7 @@ export class ExcelParser {
       }
 
       units[unitKey] = unitData;
-      console.log(`[ExcelParser v2.1] 行 ${rowConfig.row}: A="${aText}" → key="${unitKey}"`);
+      logger.info({ msg: `[ExcelParser v2.1] 行 ${rowConfig.row}: A="${aText}" → key="${unitKey}"` });
     }
 
     return units;
