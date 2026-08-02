@@ -330,7 +330,7 @@
               <span class="sk-name">⚔ 普通攻击</span>
             </div>
             <div class="sk-meta">
-              <span class="sk-attrinfo">{{ weaponAttrLabel }} 范围{{ basicAttackRange(selectedUnit) }}</span>
+              <span class="sk-attrinfo">{{ weaponAttrLabel }} 射程{{ basicAttackRange(selectedUnit) }}</span>
               <span class="skill-type-badge badge-basic">基础</span>
               <span class="sk-durability-label" v-if="selectedUnit.right_hand_durability !== undefined">右:{{ selectedUnit.right_hand_durability }} 左:{{ selectedUnit.left_hand_durability !== undefined ? selectedUnit.left_hand_durability : '?' }}</span>
             </div>
@@ -360,7 +360,7 @@
                 <span class="sk-name">{{ skill.name }}</span>
               </div>
               <div class="sk-meta">
-                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 范围{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '') || (skill.cast_range ?? skill.range) || '1') }}</span>
+                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 射程{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '') || (skill.cast_range ?? skill.range) || '1') }}<template v-if="(skill.aoe_radius ?? skill.aoe_range)"> 辐射范围{{ skill.aoe_radius ?? skill.aoe_range }}</template></span>
                 <span class="skill-type-badge" :class="'badge-' + (skill.category || 'special')">{{ skill.typeLabel || skill.type || skill.category }}</span>
                 <span class="sk-durability-label" v-if="group.durability !== undefined">耐久 <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b></span>
               </div>
@@ -859,10 +859,10 @@ function getPassiveSkillDesc(skill) {
       baseDesc = `放弃移动，获得固定伤害加成+${gs.bonus}`
       break
     case 'throw':
-      baseDesc = `主动：1~${gs.max_range}格，目标周围${gs.aoe_range}格所有目标下次伤害+${gs.value}`
+      baseDesc = `主动：射程1~${gs.max_range}格，目标周围辐射范围${gs.aoe_range}格所有目标下次伤害+${gs.value}`
       break
     case 'sweep':
-      baseDesc = `主动：扇形${gs.max_range}格范围攻击，不进行机动值判定。精准命中单体造成伤害${gs.damage_modifier_precise}，范围攻击伤害由所有目标均摊`
+      baseDesc = `主动：扇形射程${gs.max_range}格攻击，不进行机动值判定。精准命中单体造成伤害${gs.damage_modifier_precise}，射程内所有目标伤害由所有目标均摊`
       break
     case 'duel':
       baseDesc = `双方在攻击范围内且HP<对方${gs.stat_comparison}时触发，攻击力高者胜`

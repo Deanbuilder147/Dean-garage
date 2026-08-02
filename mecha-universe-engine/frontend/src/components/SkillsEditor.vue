@@ -34,8 +34,8 @@
         <button type="button" class="delete-btn" @click="removeSkill(index)">×</button>
       </div>
       <div class="skill-extra-row">
-        <label :for="`skill-${index}-range`" class="sr-only">距离</label>
-        <input :id="`skill-${index}-range`" type="text" v-model="skill.range" class="skill-range-input" placeholder="距离" name="skill-range">
+        <label :for="`skill-${index}-range`" class="sr-only">射程</label>
+        <input :id="`skill-${index}-range`" type="text" v-model="skill.range" class="skill-range-input" placeholder="射程" name="skill-range">
         <label :for="`skill-${index}-special`" class="sr-only">特效说明</label>
         <input :id="`skill-${index}-special`" type="text" v-model="skill.special" class="skill-special-input" placeholder="特效说明" name="skill-special">
       </div>
@@ -67,18 +67,18 @@ const rangedEffects = ['扫射', '投掷', '稳定', '狙击']
 const autoEffects = ['助攻', '守护', '阻碍', '侦察（双槽）']
 
 const effectDescriptions = {
-  '反击': '被动：受到敌人攻击且对方处于该技能攻击范围内时触发，对其发动一次反击，并且伤害+2',
+  '反击': '被动：受到敌人攻击且对方处于该技能攻击辐射范围内时触发，对其发动一次反击，并且伤害+2',
   '格挡': '被动：被攻击时伤害-3',
-  '长柄': '攻击范围扩大至周围两圈',
-  '补给（双槽）': '只能对友军单位使用，跳过移动环节，对范围1内的友军回复格斗值*1的HP',
-  '扫射': '扇形2格范围攻击，不进行机动值判定。精准命中单体造成伤害-2，范围攻击伤害由所有目标均摊',
-  '投掷': '1~3格范围攻击',
-  '稳定': '1~4格范围攻击，伤害稳定',
-  '狙击': '4~6格范围攻击，拥有该特性的技能需要舍弃本回合的移动后才能使用，机动值差计算中目标的机动值-2',
+  '长柄': '攻击辐射范围扩大至周围两圈',
+  '补给（双槽）': '只能对友军单位使用，跳过移动环节，对辐射范围1内的友军回复格斗值*1的HP',
+  '扫射': '扇形射程2格攻击，不进行机动值判定。精准命中单体造成伤害-2，射程内所有目标伤害由所有目标均摊',
+  '投掷': '射程1~3格攻击',
+  '稳定': '射程1~4格攻击，伤害稳定',
+  '狙击': '射程4~6格攻击，拥有该特性的技能需要舍弃本回合的移动后才能使用，机动值差计算中目标的机动值-2',
   '助攻': '友军攻击时触发，使其伤害+2',
   '守护': '被动：受到攻击时代替友军承受伤害',
   '阻碍': '敌军攻击时触发，降低其伤害-2',
-  '侦察（双槽）': '跳过移动环节，对射击值*1范围内的区域进行侦察，暴露敌方单位3*3的范围'
+  '侦察（双槽）': '跳过移动环节，对射击值*1射程内的区域进行侦察，暴露敌方单位3*3的辐射范围'
 }
 
 const getEffectDescription = (skill) => effectDescriptions[skill.effect] || ''
