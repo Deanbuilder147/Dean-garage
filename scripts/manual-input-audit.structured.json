@@ -1,0 +1,193 @@
+{
+  "generatedAt": "2026-07-26T06:00:52.542Z",
+  "totalItems": 8,
+  "riskStat": {
+    "HIGH": 4,
+    "MEDIUM": 3,
+    "LOW": 1
+  },
+  "modules": 8,
+  "items": [
+    {
+      "id": "A1",
+      "module": "unit",
+      "title": "机甲单位编辑器",
+      "schemaTitle": "机甲单位 Unit",
+      "link": {
+        "ui_entry": "NewUnitEditorView.vue (saveUnit→buildUnitPayload)",
+        "api_route": "POST /api/units",
+        "db_store": "units 表 (stats[JSON], skills[JSON], attributes[JSON], name, faction, codename, unit_code, type, owner_id, owner_name, import_source, is_public_copy, is_public, royalty, created_at)",
+        "core_consumer": "createBattleUnit / skillExecutor / combatResolver"
+      },
+      "risk": "HIGH",
+      "problem": "历史 bug：平铺表单整包发出，后端只认 stats/skills/attributes → 手动单位战斗数据全空（已修复为 buildUnitPayload 同构打包）。射程断层（二次断层）：过去 range 仅存 currentStats.range 嵌套层，前端 selectedUnit.range（顶层）读不到 → 普通攻击被压成距离 1；已于 2026-07-24 在 createBattleUnit L134 提升顶层 range 修复，currentStats.range 在 L110 保留。本条作为回归守卫。",
+      "requiredChecks": [
+        "buildUnitPayload 输出字段名 == createBattleUnit 读取字段名（stats.* / skills[] / attributes.parts / factionSkills / equipment / royroy）",
+        "stats 必填项完整（hp/maxHp/armor/attack/defense/speed/mobility/range）",
+        "skills[].id/name/cooldown/energyCost 与 UnitSkill 一致",
+        "attributes.parts 键集合 == {主机体,跟随,左手,右手,其它}",
+        "equipment 3 槽位 damage_kind_modifiers 键集合 == {kinetic,beam,explosive,corrosive}",
+        "faction 命中 factionSkillRegistry 或标注「自建阵营无技能」",
+        "royroy 模型字段齐全（deployed/status/hp/maxHp/cooldownRound/isAuto）",
+        "必查项8（射程二次断层回归守卫）：createBattleUnit 已提升顶层 unit.range（L134）且保留 currentStats.range（L110）；网关 /attack 普通攻击走 casterUnit.currentStats?.range（L902）。须确保两者双向同步、currentStats.range 必填，防止回归为「录入 range=3 仅打 1 格」。"
+      ],
+      "fallback": "createBattleUnit 对缺字段有 try/catch 兜底 + 默认值，但字段错位会静默丢数据",
+      "schemaRef": "unit schema"
+    },
+    {
+      "id": "A2",
+      "module": "battlefield",
+      "title": "战场 / 地形编辑器",
+      "schemaTitle": "战场 / 地形 Battlefield",
+      "link": {
+        "ui_entry": "NewBattlefieldView.vue (saveMap)",
+        "api_route": "POST /api/map/battlefields",
+        "db_store": "maps 表 (name, width, height, cells[JSON], spawn_points[JSON], attributes[JSON], is_public_copy, is_public, review_status, generation_status)",
+        "core_consumer": "buildTerrainMap / terrainCost / terrainDefense"
+      },
+      "risk": "HIGH",
+      "problem": "引擎只读 c.terrain；后端兼容 cells 数组或 terrain 字典两种格式，resolveTerrainId 从值里挖 terrain_id/terrain/id/type。若前端送出 terrain_id 而非 terrain → 静默回退 moon。自定义地形 move_cost/defense_bonus 若不命中静态 terrain 表则无效。",
+      "requiredChecks": [
+        "saveMap 送出的 cells[].terrain 字段名 == buildTerrainMap 读取的 c.terrain",
+        "terrain 值 ∈ ENUM.terrain（命中静态表才享减伤/移动成本）",
+        "spawn_points 的 q,r 与 cells 坐标体系一致（Even-R offset）",
+        "自定义地形 move_cost/defense_bonus 是否真被 terrainCost/terrainDefense 读取（而非仅 UI 展示）",
+        "width/height 与实际 cells 范围匹配",
+        "坐标 Key 一致性（防月面回退）：buildTerrainMap 用 `${q},${r}`（L45），skillExecutor 地形读取用 `${target.q},${target.r}`（L335）/ `cellQ+\",\"+cellR`（L1154），前端 hexKey=`${q},${r}`（L1955），getHexKey 亦 `${q},${r}`——当前均逗号分隔一致，无 `3_4` 类拼写漂移；建议统一收敛到单一 getHexKey(q,r) 函数，杜绝未来坐标格式分裂导致地形 Key 命中失败、回退 moon。",
+        "距离计算体系：Even-R offset→Axial/Cube 由 hexDistanceOffset（combat.ts）统一转换；确认引擎地形查找与距离/ZOC 判定使用的是同一套 offset 坐标，未误混入 axial 坐标做 Key。"
+      ],
+      "fallback": "buildTerrainMap 默认 c.terrain||\"moon\" → 地形静默丢失为无减伤月面",
+      "schemaRef": "battlefield schema"
+    },
+    {
+      "id": "A3",
+      "module": "faction",
+      "title": "自定义阵营",
+      "schemaTitle": "阵营 Faction",
+      "link": {
+        "ui_entry": "整备室阵营编辑 / POST /api/units/factions",
+        "api_route": "POST /api/units/factions",
+        "db_store": "factions 表 (id, name, code, logo_url, created_at, updated_at)  ★无 skills 列",
+        "core_consumer": "factionSkillRegistry.getFactionSkills()"
+      },
+      "risk": "HIGH",
+      "problem": "factions 表无 skills 列；引擎从硬编码 FactionSkillRegistry（仅 earth/balon/maxion，不含 neutral）取技能，不读 DB。自建阵营单位拿不到任何阵营技能。此外：未知 faction 当前被 getFactionSkills 返回 []（已安全，无即时崩溃）与 getFactionInfo 返回 null（已防御）兜底；但若未来任一逻辑段直接读取 FactionSkillRegistry[faction].color 或解构返回对象，未知 faction 会抛 TypeError 致 /attack 500。故不仅是「读不到」，还存在潜在「崩溃面」，必须加安全兜底锁封死。",
+      "requiredChecks": [
+        "factions 表是否应增加 skills 列以持久化阵营技能",
+        "factionSkillRegistry 是否改造为运行时从 DB 动态加载（含自建阵营）",
+        "安全兜底锁（关键）：getFactionSkills(faction) 未知 → 返回 []（保持数组类型，勿改对象以免破坏 .forEach 调用）；getFactionInfo(faction) 未知 → 返回 {id: faction, skills: [], buff: {}}（而非 null），防止未来 .color / .id 访问崩溃",
+        "确认硬编码 FACTION_IDS 仅 earth/balon/maxion；neutral/未知 亦被视作无技能（须与前端 FACTION_CONFIG.unknown 兜底对齐）"
+      ],
+      "fallback": "当前：getFactionSkills 未知→[]（安全，功能缺失）；getFactionInfo 未知→null（需改造为安全结构）。真正架构缺口：factions 表技能不进引擎；未知 faction 在未来代码路径存在崩溃面，须以安全兜底锁封死。",
+      "schemaRef": "faction schema"
+    },
+    {
+      "id": "A4",
+      "module": "skill",
+      "title": "词条 / 技能编辑器",
+      "schemaTitle": "词条 / 技能 Skill",
+      "link": {
+        "ui_entry": "GlossaryView.vue (POST /config)",
+        "api_route": "POST /config",
+        "db_store": "configs 表 (key, value[JSON]) — skills 为 id→对象 字典",
+        "core_consumer": "skillExecutor / skillRegistry"
+      },
+      "risk": "MEDIUM",
+      "problem": "admin-only，深度合入 cfg.skills。危险点：action_type 是唯一分派键，UI 若新增未知 action_type 会静默失效；trigger 为死字段；cast_range 必须标量。",
+      "requiredChecks": [
+        "action_type ∈ {attack,heal,buff,debuff,passive}，未知值须拦截",
+        "cast_range 为标量数值（非对象）",
+        "category 用容错值 auto/special（battleStateFactory isAuto 硬依赖 auto）",
+        "damage_kind_modifiers / status_effects 字段名与 skillExecutor 读取一致",
+        "trigger 字段明确标注「不可调度」避免误用"
+      ],
+      "fallback": "未知 action_type 落 default 仅返回 bonus_value 无副作用（静默失效）",
+      "schemaRef": "skill schema"
+    },
+    {
+      "id": "A5",
+      "module": "victoryConditions",
+      "title": "胜利条件配置",
+      "schemaTitle": "胜利条件 Victory Conditions",
+      "link": {
+        "ui_entry": "NewPreparationRoom.vue → victory-conditions",
+        "api_route": "POST /api/combat/:battleId/victory-conditions",
+        "db_store": "battles 表 victory_conditions[JSON] → state.victoryConditions (整包存 req.body)",
+        "core_consumer": "victoryChecker.evaluateVictory"
+      },
+      "risk": "HIGH",
+      "problem": "★真实活 bug（契约错位，比原 MEDIUM 更严重）：前端 destroy_facility 送 {target_q,target_r}、hold_position 送 {hold_round}；但 victoryChecker（L53/100/137）读的是 vc.facility.{q,r,hp,faction,attacker}。字段名不匹配 → facility 恒为 null → destroy_facility 与 hold_position 永不触发（典型\"录了但读不到\"）。坐标比对本身一致：hold_position 用 unit.position.{q,r}（offset）== facility.{q,r}（offset），无轴向混用；但须确保 facility 字段真正落地且统一用 offset 坐标。",
+      "requiredChecks": [
+        "conditions ∈ ENUM.victoryCondition 且非空",
+        "★契约对齐：前端 target_q/target_r 须在落库或网关处映射为 victoryConditions.facility.{q,r}；hold_round 条件须同时生成 facility.{faction,hp,attacker}，或改 victoryChecker 直接读 target_q/target_r",
+        "坐标同一把尺子：victoryChecker 比对须用 offset 坐标（unit.position.{q,r} 与 facility.{q,r} 同为 Even-R offset），调用统一 getHexKey/hexDistanceOffset，禁止轴向坐标直接 ==",
+        "evaluateVictory 对 destroy_facility 实际比对 facility.hp<=0、对 hold_position 比对 u.q===fq && u.r===fr，确认无坐标体系错配"
+      ],
+      "fallback": "现网：facility 为 null → destroy_facility/hold_position 永不触发胜利（条件死链，非崩溃）",
+      "schemaRef": "victoryConditions schema"
+    },
+    {
+      "id": "A6",
+      "module": "aceUnit",
+      "title": "王牌机体配置",
+      "schemaTitle": "王牌机体 ACE Unit",
+      "link": {
+        "ui_entry": "NewPreparationRoom.vue → ace-unit",
+        "api_route": "POST /api/combat/:battleId/ace-unit",
+        "db_store": "battles 表 ace_unit[JSON] → state.aceUnit",
+        "core_consumer": "combatResolver（王牌倍率/胜负）"
+      },
+      "risk": "LOW",
+      "problem": "faction 须合法；unit_id 须指向 pending_units 中存在的单位。",
+      "requiredChecks": [
+        "faction ∈ ENUM.faction",
+        "unit_id 存在于 pending_units"
+      ],
+      "fallback": "缺失 → 无王牌加成",
+      "schemaRef": "aceUnit schema"
+    },
+    {
+      "id": "A7",
+      "module": "pendingUnits",
+      "title": "部署单位池",
+      "schemaTitle": "部署单位池 Pending Units",
+      "link": {
+        "ui_entry": "NewPreparationRoom.vue → pending-units",
+        "api_route": "POST /api/combat/:battleId/pending-units",
+        "db_store": "battles 表 pending_units[JSON] → state.pendingUnits",
+        "core_consumer": "createBattleUnit / deploy"
+      },
+      "risk": "MEDIUM",
+      "problem": "units[] 须为完整 Unit 形状（含 stats/skills/attributes）；equipment 须已 sanitize 为 3 槽位 damage_kind_modifiers，否则 deploy 时减伤缺失。",
+      "requiredChecks": [
+        "units[] 复用 unit schema 全字段校验",
+        "equipment 与 unit schema 一致",
+        "同 unit_code 去重"
+      ],
+      "fallback": "缺 equipment → 减伤失效；缺 stats → createBattleUnit 兜底默认值",
+      "schemaRef": "pendingUnits schema"
+    },
+    {
+      "id": "A8",
+      "module": "royroy",
+      "title": "Royroy 浮游辅机",
+      "schemaTitle": "Royroy 浮游辅机 (attributes.royroy 内嵌模型)",
+      "link": {
+        "ui_entry": "单位编辑器「跟随」部件 → buildUnitPayload",
+        "api_route": "随 Unit 保存",
+        "db_store": "units 表 attributes JSON 内 royroy 对象",
+        "core_consumer": "combat.ts /action (deploy/retrieve/damage_royroy) + move 自动重定位"
+      },
+      "risk": "MEDIUM",
+      "problem": "royroy 内嵌于 attributes。若 buildUnitPayload 未注入 isAuto/deployed/status/hp/maxHp/cooldownRound，则 /action 部署会 400「该单位无 Royroy」或字段缺失。",
+      "requiredChecks": [
+        "buildUnitPayload 注入完整 royroy 模型（deployed/status/hp/maxHp/cooldownRound/isAuto）",
+        "★阵营继承：royroy 实体须携带并继承母机 faction/ownerId（部署时由 combat.ts /action 透传），确保友军/敌军/归属识别逻辑（含未来可能将 royroy 纳入 AoE/ZOC 目标集合）正确",
+        "isAuto 与 category=auto 词条门控一致",
+        "deploy_royroy 校验 q/r 相邻 + 占用格"
+      ],
+      "fallback": "roy 不存在 → 400 NO_ROYROY；字段缺失 → 部署异常",
+      "schemaRef": "royroy schema"
+    }
+  ]
+}

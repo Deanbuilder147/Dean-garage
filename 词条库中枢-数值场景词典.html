@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>词条库中枢 · 数值场景词典</title>
+<style>
+  :root{
+    --bg:#0c0f16; --panel:#141a25; --panel2:#1b2330; --line:#2a3548;
+    --txt:#d7e0ee; --muted:#8b97ad; --accent:#4cc2ff; --accent2:#ffb454;
+    --green:#3fd17a; --orange:#ff9f43; --red:#ff5d6c; --purple:#a07bff;
+    --warn:#ffcf5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;
+    line-height:1.6;font-size:14px}
+  header{padding:22px 26px 14px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#101723,#0c0f16)}
+  header h1{margin:0;font-size:22px;letter-spacing:.5px}
+  header h1 .tag{color:var(--accent);font-weight:700}
+  header p{margin:6px 0 0;color:var(--muted);font-size:13px}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px 26px 80px}
+  .search{position:sticky;top:0;z-index:20;background:var(--bg);
+    padding:10px 0 12px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  .search input{width:100%;padding:11px 14px;border-radius:9px;border:1px solid var(--line);
+    background:var(--panel);color:var(--txt);font-size:14px;outline:none}
+  .search input:focus{border-color:var(--accent)}
+  section{margin-bottom:34px}
+  h2{font-size:18px;border-left:4px solid var(--accent);padding-left:10px;margin:0 0 14px}
+  h2 small{color:var(--muted);font-weight:400;font-size:12px;margin-left:8px}
+  /* sandbox */
+  .sandbox{display:grid;grid-template-columns:1fr 320px;gap:18px}
+  @media(max-width:820px){.sandbox{grid-template-columns:1fr}}
+  .canvas-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px;display:flex;flex-direction:column;align-items:center}
+  canvas{background:#0a0d14;border-radius:8px;cursor:crosshair;max-width:100%}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:12px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:12px;height:12px;border-radius:3px;display:inline-block}
+  .side{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .side label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+  select,button{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--txt);font-size:13px;margin-bottom:12px}
+  button{cursor:pointer;background:var(--accent);color:#06121f;font-weight:700;border:none}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:400}
+  .hint{font-size:12px;color:var(--muted);background:var(--panel2);border-radius:8px;
+    padding:10px;margin-top:6px}
+  .readout{font-size:13px;margin-top:6px}
+  .readout b{color:var(--accent2)}
+  /* field cards */
+  .grp-title{font-size:14px;color:var(--accent);margin:18px 0 10px;
+    padding-bottom:6px;border-bottom:1px dashed var(--line)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:14px;transition:.15s}
+  .card:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .card .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .card .key{font-family:ui-monospace,Menlo,monospace;color:var(--accent2);font-size:13px}
+  .card .unit{font-size:11px;color:var(--muted);border:1px solid var(--line);
+    border-radius:6px;padding:1px 7px;white-space:nowrap}
+  .card .name{font-size:16px;font-weight:700;margin:4px 0 8px}
+  .card .scene{font-size:13px;color:var(--txt)}
+  .card .scene .num{color:var(--green);font-weight:700;font-family:ui-monospace,monospace}
+  .card .eg{font-size:12px;color:var(--muted);margin-top:9px;
+    border-top:1px solid var(--line);padding-top:8px}
+  .card .eg b{color:var(--accent)}
+  .card.dead{border-color:#5a4a1f;background:#1c1810}
+  .card.dead .name{color:var(--warn)}
+  .badge{font-size:10px;padding:1px 6px;border-radius:5px;margin-left:6px;
+    background:#3a2e0e;color:var(--warn);border:1px solid #5a4a1f}
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);
+    border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+  th,td{padding:9px 11px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:var(--panel2);color:var(--muted);font-weight:600;font-size:12px}
+  tr:hover td{background:var(--panel2)}
+  td .pill{font-family:ui-monospace,monospace;color:var(--accent2)}
+  .clickable{cursor:pointer;color:var(--accent)}
+  .clickable:hover{text-decoration:underline}
+  .foot{color:var(--muted);font-size:12px;text-align:center;margin-top:30px}
+  .tag-dead{color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>词条库中枢 · <span class="tag">数值场景词典</span></h1>
+  <p>把每个数值「翻译成战场语言」—— cast_range 填 1~3 到底能打多远？这个页面用真实配置 + 可交互六边形沙盘告诉你。</p>
+</header>
+
+<div class="wrap">
+  <div class="search">
+    <input id="search" placeholder="🔍 搜索字段名 / 中文名 / 技能名（如 cast_range、高地、狙击）" />
+  </div>
+
+  <!-- ============ 沙盘 ============ -->
+  <section>
+    <h2>① 六边形沙盘 <small>选一个技能，点格子看「这群格」在战场上意味着什么</small></h2>
+    <div class="sandbox">
+      <div class="canvas-card">
+        <canvas id="hex" width="560" height="520"></canvas>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--red)"></i>释放者(你)</span>
+          <span><i class="dot" style="background:var(--green)"></i>可命中环带</span>
+          <span><i class="dot" style="background:var(--accent2)"></i>瞄准方向/目标</span>
+          <span><i class="dot" style="background:var(--orange)"></i>溅射范围(AOE)</span>
+          <span><i class="dot" style="background:#27313f"></i>不可命中</span>
+        </div>
+      </div>
+      <div class="side">
+        <label>选择真实技能</label>
+        <select id="skillSel"></select>
+        <label>该技能的实测数值</label>
+        <div class="readout" id="skillStats"></div>
+        <button class="ghost" id="resetAim">清除瞄准目标</button>
+        <div class="hint">
+          点击沙盘任意格子 = 设定<b>瞄准方向</b>（扇形技能生效）和 <b>AOE 落点</b>（溅射技能生效）。
+          <br>绿色格 = 从第 min 圈到第 max 圈「站得下敌人且能被选中」的格子；红色 = 你自己。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 场景化数值词典 ============ -->
+  <section>
+    <h2>② 场景化数值词典 <small>每个值填成 N，在真实战局里等于什么</small></h2>
+    <div id="cards"></div>
+  </section>
+
+  <!-- ============ 技能画廊 ============ -->
+  <section>
+    <h2>③ 技能数值画廊 <small>点技能名 → 自动载入上方沙盘</small></h2>
+    <table id="skillTable">
+      <thead><tr><th>技能</th><th>谓语</th><th>释放范围</th><th>最小距离</th><th>AOE</th><th>扇形</th><th>伤害/加成</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- ============ 地形 ============ -->
+  <section>
+    <h2>④ 地形数值速查 <small>move_cost=走过每格耗的机动值；defense_bonus=站此格减伤%</small></h2>
+    <table id="terrainTable">
+      <thead><tr><th>地形</th><th>移动消耗</th><th>防御加成</th><th>可破坏</th><th>伤害类型倍率(部分)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- ============ 系统 ============ -->
+  <section>
+    <h2>⑤ 战斗系统数值 <small>全局规则，对所有单位生效</small></h2>
+    <div id="systems"></div>
+  </section>
+
+  <div class="foot">数据来源：glossary-skill-config.json (v5.0) · 距离采用引擎同款立方距离 cube distance · 单文件离线可用</div>
+</div>
+
+<script>
+/* ===================== 内嵌真实配置（与 glossary-skill-config.json v5.0 一致） ===================== */
+const GLOSSARY = {
+  "damage_kinds": {
+    "kinetic": {"label":"动能","description":"物理冲击伤害"},
+    "beam": {"label":"光束","description":"能量束伤害"},
+    "explosive": {"label":"爆炸","description":"范围爆破伤害"},
+    "corrosive": {"label":"腐蚀","description":"持续性腐蚀伤害"},
+    "thermal": {"label":"热熔","description":"高温热熔伤害"}
+  },
+  "action_types": {
+    "attack":{"label":"攻击"},"heal":{"label":"治疗"},"buff":{"label":"增益"},
+    "debuff":{"label":"减益"},"passive":{"label":"被动"}
+  },
+  "skills": {
+    "block":{"type":"passive","label":"格挡","category":"melee","reduction":2,"cast_range":0,"aoe_radius":0,"base_damage":0,"damage_kind":"kinetic","min_cast_range":0,"height_bonus_per_diff":0,"action_type":"passive","attack_stat":"melee","requires_unmoved":false,"requires_stealth":false},
+    "sweep":{"label":"扫射","category":"ranged","sector_angle":60,"cast_range":2,"aoe_radius":0,"base_damage":-2,"damage_kind":"kinetic","min_cast_range":0,"action_type":"attack","attack_stat":"ranged","requires_unmoved":false},
+    "throw":{"label":"投掷","cast_range":3,"aoe_radius":2,"base_damage":5,"damage_kind":"kinetic","min_cast_range":1,"action_type":"debuff","attack_stat":"ranged"},
+    "execute":{"label":"斩杀","category":"special","hp_threshold_percent":10,"cast_range":1,"base_damage":999,"damage_kind":"kinetic","min_cast_range":0,"action_type":"passive","attack_stat":"melee"},
+    "duel":{"label":"决斗","category":"special","cast_range":1,"damage_kind":"kinetic","min_cast_range":0,"action_type":"passive","attack_stat":"max"},
+    "snatch":{"label":"抢夺","category":"special","damage_multiplier":0.5,"cast_range":1,"damage_kind":"kinetic","min_cast_range":0,"action_type":"passive","attack_stat":"melee"},
+    "focused_fire":{"label":"专注射击","bonus":4,"cast_range":1,"base_damage":4,"damage_kind":"kinetic","min_cast_range":0,"action_type":"attack","attack_stat":"ranged","requires_unmoved":true},
+    "lucky":{"label":"幸运","cast_range":0,"damage_kind":"kinetic","action_type":"passive","attack_stat":"melee"},
+    "reactivate":{"label":"再动","cast_range":0,"damage_kind":"kinetic","action_type":"passive","attack_stat":"melee"},
+    "counter":{"label":"反击","bonus":2,"cast_range":1,"min_cast_range":0,"aoe_radius":0,"base_damage":0,"damage_kind":"kinetic","action_type":"passive","attack_stat":"melee","skill_shape":"single","requires_unmoved":false},
+    "polearm":{"label":"长柄","cast_range":2,"min_cast_range":1,"aoe_radius":0,"damage_kind":"kinetic","action_type":"passive","attack_stat":"melee","skill_shape":"single"},
+    "supply":{"label":"补给","cast_range":1,"min_cast_range":1,"aoe_radius":0,"damage_kind":"kinetic","action_type":"heal","attack_stat":"melee","skill_shape":"single","requires_unmoved":true},
+    "stable":{"label":"稳定","once_per_battle":true,"cast_range":4,"min_cast_range":1,"aoe_radius":0,"damage_kind":"kinetic","action_type":"buff","attack_stat":"ranged","skill_shape":"single"},
+    "sniper":{"label":"狙击","cast_range":6,"min_cast_range":4,"aoe_radius":0,"damage_kind":"kinetic","action_type":"attack","attack_stat":"ranged","skill_shape":"single","requires_unmoved":true},
+    "assist":{"label":"助攻","bonus":3,"cast_range":0,"min_cast_range":0,"aoe_radius":0,"damage_kind":"kinetic","action_type":"buff","attack_stat":"melee","skill_shape":"single"},
+    "guard":{"label":"守护","reduction":5,"cast_range":0,"min_cast_range":0,"aoe_radius":0,"damage_kind":"kinetic","action_type":"buff","attack_stat":"melee","skill_shape":"single"},
+    "blockade":{"label":"阻碍","value":5,"cast_range":0,"min_cast_range":0,"aoe_radius":0,"damage_kind":"kinetic","action_type":"debuff","attack_stat":"melee","skill_shape":"single"},
+    "scout":{"label":"侦察","evasion_mod":2,"cast_range":0,"min_cast_range":0,"aoe_radius":3,"damage_kind":"kinetic","action_type":"buff","attack_stat":"ranged","skill_shape":"concentric"}
+  },
+  "systems": {
+    "ambush":{"label":"奇袭","description":"敌方攻击时触发先制进攻：跳过敌方回合并以70%攻击力反击，全员可用","damage_percent":0.7},
+    "fog_of_war":{"label":"迷雾系统","description":"战场迷雾：视野正常可见，无额外命中率修正","visibility":"normal","accuracy_modifier":0},
+    "crit":{"label":"暴击系统","description":"每次攻击固定33.3%暴击率，暴击倍率1.0~1.5","chance":0.333,"multiplier_min":1.0,"multiplier_max":1.5}
+  },
+  "terrains": {
+    "moon":{"name":"月面","color":"#c0c0c0","move_cost":1,"defense_bonus":0,"is_destructible":false,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "plain":{"name":"平原","color":"#7a9b4f","move_cost":1,"defense_bonus":0,"is_destructible":false,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "mountain":{"name":"山地","color":"#8b7355","move_cost":3,"defense_bonus":20,"is_destructible":false,"damage_kind_modifiers":{"beam":1.0,"kinetic":0.9,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "water":{"name":"水域","color":"#4682b4","move_cost":99,"defense_bonus":-10,"is_destructible":false,"damage_kind_modifiers":{"beam":0.5,"kinetic":1.0,"explosive":0.8,"corrosive":0.6,"thermal":1.2}},
+    "forest":{"name":"森林","color":"#2d5a27","move_cost":2,"defense_bonus":15,"is_destructible":true,"max_hp":3,"damage_kind_modifiers":{"beam":0.9,"kinetic":1.0,"explosive":1.1,"corrosive":1.0,"thermal":1.0}},
+    "fortress":{"name":"堡垒","color":"#4a4a6a","move_cost":1,"defense_bonus":30,"is_destructible":true,"max_hp":5,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "ruins":{"name":"废墟","color":"#696969","move_cost":2,"defense_bonus":10,"is_destructible":false,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "crystal":{"name":"晶矿","color":"#7b68ee","move_cost":2,"defense_bonus":5,"is_destructible":true,"max_hp":2,"damage_kind_modifiers":{"beam":1.5,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "rubble":{"name":"残骸","color":"#8b7d6b","move_cost":2,"defense_bonus":10,"is_destructible":false,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}},
+    "city_building":{"name":"城市建筑","color":"#b8860b","move_cost":1,"defense_bonus":25,"is_destructible":true,"max_hp":4,"damage_kind_modifiers":{"beam":1.0,"kinetic":1.0,"explosive":1.0,"corrosive":1.0,"thermal":1.0}}
+  }
+};
+
+/* ===================== 场景化字段元数据（基于引擎真实消费核对） ===================== */
+const FIELDS = [
+  {grp:"释放范围类", key:"cast_range", name:"释放距离(最大)", unit:"格",
+   scene:"=<num> 表示从释放者脚下向外数，第 1 到第 <num> 圈六边形格内的合法目标可被选中。1 格 = 1 立方距离（不含释放者自身那格）。",
+   eg:"sweep=<b>2</b> 可打到第2圈的敌人；sniper=<b>6</b> 可狙击6圈外；block=<b>0</b> 仅自身（被动减伤）。"},
+
+  {grp:"释放范围类", key:"min_cast_range", name:"最小释放距离", unit:"格",
+   scene:"=<num> 表示必须离释放者至少 <num> 圈才能命中，脚下(第0圈)打不到。",
+   eg:"throw=<b>1</b> 不能打脚下，从第1圈起；polearm=<b>1</b> 近战最长延伸但最近1格；sniper=<b>4</b> 必须4圈外才够得着。"},
+
+  {grp:"释放范围类", key:"aoe_radius", name:"溅射/范围半径", unit:"格",
+   scene:"=<num> 表示命中点周围 <num> 圈内所有单位同样吃效果（不限于单个体）。",
+   eg:"throw=<b>2</b> 落点周围2圈敌人全获+5伤害；scout=<b>3</b> 侦察暴露3圈区域。"},
+
+  {grp:"释放范围类", key:"sector_angle", name:"扇形张角", unit:"°",
+   scene:"=<num>° 表示以「释放者→目标」方向为中线的扇形张角，只命中扇形内的敌人（左右各 <half>°）。",
+   eg:"sweep=<b>60</b> 朝目标方向左右各30°的扇区；沙盘里点一个格子即可看到扇形朝向。"},
+
+  {grp:"释放范围类", key:"skill_shape", name:"作用形状", unit:"—",
+   scene:"single=单体；concentric=以目标为中心的同心圆(AOE)。决定范围是「一条线/一个点」还是「一圈」。",
+   eg:"scout=concentric 配 aoe_radius=3 形成3圈侦察圈；其余多为 single。"},
+
+  {grp:"伤害结算类", key:"base_damage", name:"基础伤害", unit:"点",
+   scene:"本次结算的固定伤害基点。<span class='num'>负值</span>是惩罚不是加伤；攻击技能真实伤害多由 attack_stat 算出，base_damage 多作校准/降级。",
+   eg:"sweep=<b>-2</b> 精准命中时伤害−2；execute=<b>999</b> 是斩杀内部补偿值（非真实伤害）。"},
+
+  {grp:"伤害结算类", key:"bonus", name:"固定加成", unit:"点",
+   scene:"=<num> 表示本次/后续伤害直接 +<num> 点（可叠加，区别于百分比）。",
+   eg:"focused_fire=<b>4</b> 放弃移动后本次+4；assist=<b>3</b> 后续5次伤害+3；counter=<b>2</b> 反击+2。"},
+
+  {grp:"伤害结算类", key:"reduction", name:"固定减伤", unit:"点",
+   scene:"=<num> 表示每次受击伤害 −<num> 点（固定值，非百分比）。",
+   eg:"block=<b>2</b> 受击−2；guard=<b>5</b> 后续3次受击−5（不与百分比减伤叠加）。"},
+
+  {grp:"伤害结算类", key:"damage_modifier_precise", name:"精准修正", unit:"点",
+   scene:"精准命中单体时的伤害修正值；范围攻击时由所有目标均摊，非此精准值。",
+   eg:"sweep=<b>-2</b> 单体精准命中−2，范围攻击则所有目标平分本次伤害。"},
+
+  {grp:"伤害结算类", key:"value", name:"效果数值", unit:"点/层",
+   scene:"增益/减益类词条携带的具体数值（随技能语义变化）。",
+   eg:"throw 的 value=<b>5</b> 表示被投掷命中的敌人下次伤害+5；blockade value=<b>5</b> 对方机动值−5。"},
+
+  {grp:"命中/闪避类", key:"accuracy_mod", name:"命中修正", unit:"点",
+   scene:"=<num> 影响命中判定的修正；正值更易命中，负值更易Miss。当前全库多为 0。",
+   eg:"系统 fog_of_war 的 accuracy_modifier=<b>0</b>（视野正常，无额外修正）。"},
+
+  {grp:"命中/闪避类", key:"evasion_mod", name:"闪避修正", unit:"点",
+   scene:"=<num> 自身闪避能力修正；越高越难被命中。",
+   eg:"scout=<b>2</b> 侦察后自身闪避+2，更难被敌方击中。"},
+
+  {grp:"高地类", key:"height_bonus_per_diff", name:"高地优势", unit:"点/层",
+   scene:"每比目标高 1 层地形，本次伤害 +<num>。当前全库多为 0（未启用高地优势）。",
+   eg:"若设为 <b>10</b>，站山上打平地的敌人就 +10 伤害；现全库 =0 暂不生效。"},
+
+  {grp:"触发/条件类", key:"requires_unmoved", name:"需未移动", unit:"布尔",
+   scene:"=true 表示本回合必须放弃移动(不消耗机动)才能发动该技能。",
+   eg:"focused_fire / supply / sniper 都需 =<b>true</b>：先原地不动，再放技能。"},
+
+  {grp:"触发/条件类", key:"requires_stealth", name:"需潜行", unit:"布尔",
+   scene:"=true 表示需处于潜行状态方可发动；当前全库为 false，尚未启用该机制。",
+   eg:"全库均为 <b>false</b>，潜行系统暂未接线。"},
+
+  {grp:"触发/条件类", key:"once_per_battle", name:"每局一次", unit:"布尔",
+   scene:"=true 表示整场战斗仅可使用一次，用完即失效。",
+   eg:"stable=<b>true</b> 每局一次，移动后仍可使用专注射击。"},
+
+  {grp:"触发/条件类", key:"hp_threshold_percent", name:"血量阈线", unit:"%",
+   scene:"目标 HP 低于最大 HP 的 <num>% 时触发对应效果（如斩杀）。",
+   eg:"execute=<b>10</b> 近战结算后目标 HP<10% 最大HP 即被斩杀。"},
+
+  {grp:"地形类", key:"terrain.move_cost", name:"地形移动消耗", unit:"机动值/格",
+   scene:"=<num> 表示走过该地形每格消耗 <num> 点机动值（Dijkstra 寻路加权）。=1 普通可走；越大越慢；=99 不可通行。",
+   eg:"mountain=<b>3</b> 山地缓慢；water=<b>99</b> 水域不可通行（wall=99 同）。"},
+
+  {grp:"地形类", key:"terrain.defense_bonus", name:"地形防御加成", unit:"%",
+   scene:"=<num> 表示站在此格受击时固定减伤 <num>%。负值反而易伤。与实际伤害结算的地形减伤一致。",
+   eg:"fortress=<b>30</b>、city_building=<b>25</b>、mountain=<b>20</b> 减伤高；water=<b>-10</b> 易伤。"},
+
+  {grp:"地形类", key:"damage_kind_modifiers", name:"伤害类型倍率", unit:"倍",
+   scene:"地形对某种伤害类型的倍率。1.0=正常；<1 减伤，>1 增伤。",
+   eg:"water 对 beam=<b>0.5</b>（光束打水只剩一半）；crystal 对 beam=<b>1.5</b>（晶矿放大光束）。"},
+
+  {grp:"系统类", key:"system.ambush.damage_percent", name:"奇袭反击比例", unit:"倍",
+   scene:"=<num> 表示被敌人攻击时触发先制反击，以 <num>×攻击力回敬（跳过敌方回合）。",
+   eg:"ambush=<b>0.7</b> 全员可用，被攻击时以70%攻击力反击。"},
+
+  {grp:"系统类", key:"system.crit.chance", name:"暴击率", unit:"概率",
+   scene:"=<num> 表示每次攻击有 <num>×100% 概率暴击；暴击倍率在 multiplier_min~max 间随机。",
+   eg:"crit=<b>0.333</b> 即33.3%暴击率，倍率 1.0~1.5。"},
+
+  {grp:"⚠ 死字段 / 陷阱", key:"trigger", name:"trigger 触发时机", unit:"字符串", dead:true,
+   scene:"⚠ 死字段：仅被引擎 _getUniversalFields 读出，<b>没有任何调度逻辑</b>。配了 trigger=on_attacked 等不会自动触发任何行为。",
+   eg:"block/counter 配 trigger=\"on_attacked\"，但真实反应钩子由代码硬编码(counter)或注册表(assist/guard)接线，<b>勿依赖 trigger</b>。"},
+
+  {grp:"⚠ 死字段 / 陷阱", key:"execute/snatch/duel", name:"斩杀/抢夺/决斗(配而未接)", unit:"—", dead:true,
+   scene:"⚠ 这三个技能在词条库配置了完整字段，但引擎 executeExecute/executeSnatch/executeDuel <b>全项目零调用</b>，真实战斗无法触发。",
+   eg:"真正能打出的是特殊触发词条系统（另走 /resolve-duel 等路由），不要误以为 skill 段配了就能用。"}
+];
+
+/* ===================== 六边形数学（与 hexUtils.js 同款） ===================== */
+const SIZE = 16;
+function axialToCube(q,r){return {x:q,y:-q-r,z:r};}
+function cubeDist(q1,r1,q2,r2){
+  const a=axialToCube(q1,r1),b=axialToCube(q2,r2);
+  return Math.max(Math.abs(a.x-b.x),Math.abs(a.y-b.y),Math.abs(a.z-b.z));
+}
+// 尖顶 Even-R 中心像素（与 pointyTopCenter 一致）
+function hexCenter(q,r){
+  let x=SIZE*Math.sqrt(3)*q;
+  if(r%2===0) x+=(SIZE*Math.sqrt(3)/2);
+  const y=SIZE*1.5*r;
+  return {x,y};
+}
+function pointyHexPath(ctx,cx,cy,s){
+  ctx.beginPath();
+  for(let i=0;i<6;i++){
+    const ang=(60*i-30)*Math.PI/180;
+    const px=cx+s*Math.cos(ang), py=cy+s*Math.sin(ang);
+    i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+}
+function angDiff(a,b){let d=a-b;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d;}
+
+/* ===================== 沙盘渲染 ===================== */
+const canvas=document.getElementById('hex');
+const ctx=canvas.getContext('2d');
+let curSkill=null, aimCell=null;
+const CX=canvas.width/2, CY=canvas.height/2;
+
+function getRadius(){
+  const cr=curSkill?curSkill.cast_range:2;
+  const ar=curSkill?curSkill.aoe_radius:0;
+  return Math.min(Math.max(cr+ar+2,4),9);
+}
+function cellsInRange(){
+  const R=getRadius();
+  const cells=[];
+  for(let q=-R;q<=R;q++)for(let r=-R;r<=R;r++){
+    if(cubeDist(0,0,q,r)<=R) cells.push({q,r});
+  }
+  return cells;
+}
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const sk=curSkill;
+  const minR=sk?sk.min_cast_range:0, maxR=sk?sk.cast_range:2;
+  const aoe=sk?sk.aoe_radius:0;
+  const sector=sk&&sk.sector_angle?sk.sector_angle:0;
+  let aimAng=0;
+  if(aimCell){
+    const c=hexCenter(aimCell.q,aimCell.r);
+    aimAng=Math.atan2(c.y,c.x);
+  }
+  const cells=cellsInRange();
+  for(const cell of cells){
+    const c=hexCenter(cell.q,cell.r);
+    const sx=CX+c.x, sy=CY+c.y;
+    if(sx< -SIZE||sx>canvas.width+SIZE||sy<-SIZE||sy>canvas.height+SIZE) continue;
+    const dist=cubeDist(0,0,cell.q,cell.r);
+    let fill='#1a2230', stroke='#2a3548';
+    const isCaster=(cell.q===0&&cell.r===0);
+    const inBand=(dist>=minR&&dist<=maxR);
+    let inShape=inBand;
+    if(sector>0 && !isCaster){
+      const cellAng=Math.atan2(c.y,c.x);
+      inShape=inBand && Math.abs(angDiff(cellAng,aimAng))<=sector*Math.PI/360;
+    }
+    // AOE splash around aim
+    let isSplash=false;
+    if(aimCell && aoe>0){
+      const d=cubeDist(aimCell.q,aimCell.r,cell.q,cell.r);
+      if(d<=aoe && !(cell.q===aimCell.q&&cell.r===aimCell.r)) isSplash=true;
+    }
+    if(isCaster){fill='#ff5d6c';stroke='#ff5d6c';}
+    else if(isSplash){fill='#ff9f43';stroke='#ff9f43';}
+    else if(inShape){fill='rgba(63,209,122,.28)';stroke='#3fd17a';}
+    pointyHexPath(ctx,sx,sy,SIZE-1.2);
+    ctx.fillStyle=fill;ctx.fill();
+    ctx.lineWidth=isCaster?2:1;ctx.strokeStyle=stroke;ctx.stroke();
+  }
+  // aim marker
+  if(aimCell){
+    const c=hexCenter(aimCell.q,aimCell.r);
+    pointyHexPath(ctx,CX+c.x,CY+c.y,SIZE-1.2);
+    ctx.lineWidth=2.5;ctx.strokeStyle='#ffb454';ctx.stroke();
+  }
+  // aim direction line (sector)
+  if(aimCell && sector>0){
+    ctx.beginPath();ctx.moveTo(CX,CY);
+    ctx.lineTo(CX+Math.cos(aimAng)*200,CY+Math.sin(aimAng)*200);
+    ctx.strokeStyle='rgba(255,180,84,.5)';ctx.lineWidth=1.5;ctx.stroke();
+  }
+}
+function updateReadout(){
+  const el=document.getElementById('skillStats');
+  if(!curSkill){el.innerHTML='—';return;}
+  const cr=curSkill.cast_range, mn=curSkill.min_cast_range, aoe=curSkill.aoe_radius;
+  let bandTxt = cr===0 ? '仅自身(被动)' : `第 ${mn}~${cr} 圈（共 ${countBand(mn,cr)} 格）`;
+  let shape='单体';
+  if(curSkill.sector_angle) shape=`${curSkill.sector_angle}° 扇形`;
+  else if(curSkill.aoe_radius>0) shape=`${curSkill.aoe_radius} 圈溅射`;
+  else if(curSkill.skill_shape==='concentric') shape='同心圆';
+  el.innerHTML=`
+    <div>谓语：<b>${GLOSSARY.action_types[curSkill.action_type]?.label||curSkill.action_type}</b></div>
+    <div>可命中：<b>${bandTxt}</b></div>
+    <div>作用形状：<b>${shape}</b></div>
+    ${curSkill.bonus?`<div>固定加成：<b>+${curSkill.bonus}</b></div>`:''}
+    ${curSkill.reduction?`<div>固定减伤：<b>-${curSkill.reduction}</b></div>`:''}
+    ${curSkill.requires_unmoved?`<div class="tag-dead">需本回合未移动</div>`:''}
+  `;
+}
+function countBand(min,max){
+  if(max===0) return 1;
+  let n=0;const R=9;
+  for(let q=-R;q<=R;q++)for(let r=-R;r<=R;r++){
+    const d=cubeDist(0,0,q,r);if(d>=min&&d<=max)n++;
+  }
+  return n;
+}
+function pickCell(mx,my){
+  let best=null,bd=1e9;
+  for(const cell of cellsInRange()){
+    const c=hexCenter(cell.q,cell.r);
+    const d=Math.hypot(CX+c.x-mx,CY+c.y-my);
+    if(d<bd){bd=d;best=cell;}
+  }
+  if(best&&bd<SIZE) return best;
+  return null;
+}
+canvas.addEventListener('click',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const sx=(e.clientX-rect.left)*(canvas.width/rect.width);
+  const sy=(e.clientY-rect.top)*(canvas.height/rect.height);
+  const cell=pickCell(sx,sy);
+  if(cell && !(cell.q===0&&cell.r===0)){aimCell=cell;draw();}
+});
+document.getElementById('resetAim').addEventListener('click',()=>{aimCell=null;draw();});
+
+/* ===================== 初始化下拉 & 表格 ===================== */
+const skillSel=document.getElementById('skillSel');
+Object.entries(GLOSSARY.skills).forEach(([k,v])=>{
+  const o=document.createElement('option');
+  o.value=k;o.textContent=`${v.label}（${k}）`;
+  skillSel.appendChild(o);
+});
+function loadSkill(k){
+  curSkill=GLOSSARY.skills[k];
+  aimCell=null;updateReadout();draw();
+}
+skillSel.addEventListener('change',e=>loadSkill(e.target.value));
+
+// skill table
+const stBody=document.querySelector('#skillTable tbody');
+Object.entries(GLOSSARY.skills).forEach(([k,v])=>{
+  const tr=document.createElement('tr');
+  const cr=v.cast_range??'-',mn=v.min_cast_range??0,aoe=v.aoe_radius??0;
+  const dmg=v.base_damage||v.bonus||v.reduction?
+    [v.base_damage?v.base_damage:'',v.bonus?'+'+v.bonus:'',v.reduction?'-'+v.reduction:''].filter(Boolean).join(' / '):'—';
+  tr.innerHTML=`<td class="clickable" data-skill="${k}">${v.label} <span style="color:var(--muted);font-size:11px">${k}</span></td>
+    <td>${GLOSSARY.action_types[v.action_type]?.label||v.action_type}</td>
+    <td class="pill">${cr===0?'自身':cr}</td>
+    <td class="pill">${mn}</td>
+    <td class="pill">${aoe||'—'}</td>
+    <td class="pill">${v.sector_angle||'—'}</td>
+    <td class="pill">${dmg}</td>`;
+  stBody.appendChild(tr);
+});
+stBody.addEventListener('click',e=>{
+  const td=e.target.closest('[data-skill]');
+  if(td){const k=td.getAttribute('data-skill');skillSel.value=k;loadSkill(k);
+    document.querySelector('.sandbox').scrollIntoView({behavior:'smooth'});}
+});
+
+// terrain table
+const ttBody=document.querySelector('#terrainTable tbody');
+Object.entries(GLOSSARY.terrains).forEach(([k,v])=>{
+  const mods=Object.entries(v.damage_kind_modifiers).filter(([_,m])=>m!==1.0)
+    .map(([d,m])=>`${GLOSSARY.damage_kinds[d]?.label||d} ${m}`).join('，')||'全部 1.0';
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:${v.color};margin-right:6px"></span>${v.name}</td>
+    <td class="pill" style="${v.move_cost>=99?'color:var(--red)':''}">${v.move_cost}${v.move_cost>=99?' (不可通行)':''}</td>
+    <td class="pill" style="${v.defense_bonus<0?'color:var(--red)':v.defense_bonus>0?'color:var(--green)':''}">${v.defense_bonus>0?'+':''}${v.defense_bonus}%</td>
+    <td>${v.is_destructible?'可破坏('+v.max_hp+'HP)':'否'}</td>
+    <td style="color:var(--muted)">${mods}</td>`;
+  ttBody.appendChild(tr);
+});
+
+// systems
+const sysEl=document.getElementById('systems');
+const sysCards=[
+  {n:'奇袭系统', t:`被敌人攻击时<b>跳过敌方回合</b>并以 <b>70%</b> 攻击力先制反击，全员可用。`, c:'var(--accent2)'},
+  {n:'迷雾系统', t:`视野正常可见，<b>无额外命中率修正</b>（accuracy_modifier=0）。`, c:'var(--muted)'},
+  {n:'暴击系统', t:`每次攻击固定 <b>33.3%</b> 暴击率，暴击倍率随机 1.0~1.5。`, c:'var(--green)'}
+];
+sysCards.forEach(s=>{
+  const d=document.createElement('div');
+  d.className='card';d.style.borderColor=s.c;
+  d.innerHTML=`<div class="name">${s.n}</div><div class="scene">${s.t}</div>`;
+  sysEl.appendChild(d);
+});
+sysEl.style.display='grid';
+sysEl.style.gridTemplateColumns='repeat(auto-fill,minmax(280px,1fr))';
+sysEl.style.gap='14px';
+
+/* ===================== 渲染字段卡片 ===================== */
+const cardsEl=document.getElementById('cards');
+let lastGrp='';
+const grpOrder=[];
+FIELDS.forEach(f=>{if(!grpOrder.includes(f.grp))grpOrder.push(f.grp);});
+grpOrder.forEach(grp=>{
+  const h=document.createElement('div');
+  h.className='grp-title';h.textContent=grp;h.dataset.grp=grp;
+  cardsEl.appendChild(h);
+  FIELDS.filter(f=>f.grp===grp).forEach(f=>{
+    const c=document.createElement('div');
+    c.className='card'+(f.dead?' dead':'');
+    c.dataset.search=(f.key+' '+f.name+' '+grp+' '+f.scene+' '+f.eg).toLowerCase();
+    const sceneHtml=f.scene.replace(/<num>/g,'<span class="num">N</span>')
+                           .replace(/<half>/g,'<span class="num">N/2</span>');
+    c.innerHTML=`
+      <div class="top"><span class="key">${f.key}</span><span class="unit">${f.unit}</span></div>
+      <div class="name">${f.name}${f.dead?'<span class="badge">⚠ 死字段</span>':''}</div>
+      <div class="scene">${sceneHtml}</div>
+      <div class="eg">${f.eg}</div>`;
+    cardsEl.appendChild(c);
+  });
+});
+
+/* ===================== 搜索 ===================== */
+document.getElementById('search').addEventListener('input',e=>{
+  const q=e.target.value.trim().toLowerCase();
+  document.querySelectorAll('#cards .card').forEach(c=>{
+    c.style.display=(!q||c.dataset.search.includes(q))?'':'none';
+  });
+  document.querySelectorAll('#cards .grp-title').forEach(h=>{
+    const grp=h.dataset.grp;
+    const any=[...document.querySelectorAll('#cards .card')].some(c=>
+      c.dataset.search.includes(grp.toLowerCase()) && c.style.display!=='none' &&
+      c.closest('#cards').querySelectorAll('.grp-title').length);
+    // 简单处理：若该组下无可见卡则隐藏标题
+    const visible=[...document.querySelectorAll('#cards .card')].filter(c=>c.dataset.search.includes(grp.toLowerCase())&&c.style.display!=='none');
+    h.style.display=visible.length?'':'none';
+  });
+});
+
+/* ===================== 默认载入 ===================== */
+loadSkill('sweep');
+</script>
+</body>
+</html>

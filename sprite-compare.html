@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>棋子大小/锚定对比（调整前 vs 调整后 · 伪3D单元格）</title>
+<style>
+  body { margin:0; background:#001620; color:#cfe9f3; font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif; padding:20px; }
+  h1 { font-size:18px; font-weight:600; }
+  .hint { color:#7fa8b8; font-size:13px; margin:6px 0 14px; }
+  .wrap { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .card { background:#04222e; border:1px solid #0d3a4a; border-radius:12px; padding:12px; }
+  .card h2 { font-size:14px; margin:0 0 8px; text-align:center; }
+  .card.old h2 { color:#f87171; }
+  .card.new h2 { color:#36d399; }
+  canvas { background:#021019; border-radius:8px; display:block; }
+  .controls { margin-top:16px; background:#04222e; border:1px solid #0d3a4a; border-radius:12px; padding:14px; max-width:780px; }
+  .controls label { font-size:13px; display:inline-flex; align-items:center; gap:8px; margin-right:20px; }
+  .controls input[type=range]{ width:160px; }
+  .row { margin:8px 0; }
+  .val { color:#ffd479; font-variant-numeric:tabular-nums; }
+  .filepick { margin-top:10px; font-size:13px; }
+</style>
+</head>
+<body>
+  <h1>棋子大小 / 脚底锚定对比（伪3D 单元格）</h1>
+  <div class="hint">
+    单元格采用战场同款伪 3D 立柱：ISO 挤压（shearX=0.38 / scaleY=0.39 / rot=-24 / 顶角底角扁平 25%）+ 挤出侧面着色。<br>
+    左 = <b>调整前</b>（原大小，盒底钉在格心 → 脚底因透明留白悬浮）；右 = <b>调整后</b>（盒放大 20%，脚底落在格心上方约 10px）。<br>
+    棋子为直立 billboard，与引擎一致。下方可调放大比例 / 脚底留白，或用本地 7 视图 PNG 替换示意图。
+  </div>
+
+  <div class="wrap">
+    <div class="card old"><h2>调整前（原大小）</h2><canvas id="cvOld" width="380" height="440"></canvas></div>
+    <div class="card new"><h2>调整后（放大20%·脚底贴地）</h2><canvas id="cvNew" width="380" height="440"></canvas></div>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <label>盒子放大比例 <input id="enlarge" type="range" min="1" max="1.6" step="0.05" value="1.2"><span class="val" id="enlargeV">1.20</span>×</label>
+      <label>脚底留白(格心上方 px) <input id="gap" type="range" min="0" max="40" step="1" value="10"><span class="val" id="gapV">10</span></label>
+    </div>
+    <div class="filepick">
+      载入真实 7 视图 PNG（本地文件，同域可读取脚底像素）：<input id="file" type="file" accept="image/png,image/*">
+      <button id="reset">恢复示意图</button>
+    </div>
+  </div>
+
+<script>
+// ---- 常量（对齐 hexUtils.js / NewBattleView.vue）----
+const R = 36;                 // HEX_RADIUS
+const HEX_WIDTH = 64, HEX_HEIGHT = 72;
+const MAX_H_FACTOR = 1.7;     // 棋子 maxH = R*1.7*sizeScale
+const MAX_W_FACTOR = 1.5;     // 棋子 maxW = R*1.5*sizeScale
+const SIZE_SCALE = 1.0;       // 正常大小
+const EXTRUDE = 20;           // 单元格挤出高度（屏幕深度基准）
+let BOX_ENLARGE = 1.2;
+let FOOT_GAP = 10;
+
+// 战场校准的 ISO 参数
+const ISO = { shearX:0.38, shearY:0, scaleX:1.00, scaleY:0.39, topFlat:0.25, bottomFlat:0.25 };
+const ROT = -24 * Math.PI / 180;
+
+// ---- 2D网格坐标(格心=原点) → 屏幕坐标（ISO剪切 + 旋转）----
+function toScreen(px, py) {
+  const ix = px * ISO.scaleX + py * ISO.shearX;
+  const iy = px * ISO.shearY + py * ISO.scaleY;
+  const cos = Math.cos(ROT), sin = Math.sin(ROT);
+  return { x: ix * cos - iy * sin, y: ix * sin + iy * cos };
+}
+
+// 颜色调暗（hex → rgb），用于侧面着色
+function shade(hex, k) {
+  const m = hex.replace('#', '');
+  const r = parseInt(m.substring(0, 2), 16), g = parseInt(m.substring(2, 4), 16), b = parseInt(m.substring(4, 6), 16);
+  const f = v => Math.max(0, Math.min(255, Math.round(v * k)));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+
+// ---- 伪3D 立柱（复刻 hexDraw.drawIsoHexColumn 的顶面变形 + 侧面挤出）----
+function drawColumn(ctx, cx, cy, topColor) {
+  const hw = HEX_WIDTH / 2, hh = HEX_HEIGHT / 2;
+  const tf = ISO.topFlat, bf = ISO.bottomFlat;
+  const sideTopY = -hh + tf * HEX_HEIGHT;
+  const sideBotY = hh - bf * HEX_HEIGHT;
+  const raw = [
+    { x: 0, y: -hh },        // 顶点
+    { x: hw, y: sideTopY },  // 右上
+    { x: hw, y: sideBotY },  // 右下
+    { x: 0, y: hh },         // 底点
+    { x: -hw, y: sideBotY }, // 左下
+    { x: -hw, y: sideTopY }  // 左上
+  ];
+  const top = raw.map(p => { const s = toScreen(p.x, p.y); return { x: cx + s.x, y: cy + s.y }; });
+  const dy = EXTRUDE * ISO.scaleY;
+  const bot = top.map(p => ({ x: p.x, y: p.y + dy }));
+
+  // 侧面墙（仅下半可见边，双档明暗：右暗0.38 / 左亮0.55）
+  for (let i = 0; i < 6; i++) {
+    const a = top[i], b = top[(i + 1) % 6], c = bot[(i + 1) % 6], d = bot[i];
+    if (b.y > a.y) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y);
+      ctx.closePath();
+      ctx.fillStyle = (b.x >= a.x) ? shade(topColor, 0.38) : shade(topColor, 0.55);
+      ctx.fill();
+    }
+  }
+  // 顶面
+  ctx.beginPath();
+  top.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.closePath();
+  ctx.fillStyle = topColor; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 0.6; ctx.stroke();
+}
+
+// ---- 脚底检测：自底向上扫描最靠下 alpha>16 的像素行 ----
+function computeFoot(src) {
+  const w = src.naturalWidth || src.width;
+  const h = src.naturalHeight || src.height;
+  if (!w || !h) return -1;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cx = c.getContext('2d');
+  cx.drawImage(src, 0, 0);
+  let data;
+  try { data = cx.getImageData(0, 0, w, h).data; } catch (e) { return -1; }
+  for (let y = h - 1; y >= 0; y--) {
+    const off = y * w * 4;
+    for (let x = 0; x < w; x++) if (data[off + x * 4 + 3] > 16) return y;
+  }
+  return h - 1;
+}
+
+function drawFootMarker(ctx, x, y, color) {
+  ctx.save();
+  ctx.strokeStyle = color; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x - 80, y); ctx.lineTo(x + 80, y); ctx.stroke();
+  ctx.setLineDash([]); ctx.fillStyle = color; ctx.font = '11px sans-serif';
+  ctx.fillText('脚底', x + 84, y + 4);
+  ctx.restore();
+}
+function drawGroundRef(ctx, x, y, color) {
+  ctx.save();
+  ctx.strokeStyle = color; ctx.globalAlpha = 0.35; ctx.setLineDash([2, 3]);
+  ctx.beginPath(); ctx.moveTo(x - 80, y); ctx.lineTo(x + 80, y); ctx.stroke();
+  ctx.restore();
+}
+
+// ---- 渲染一个单元格 ----
+function drawCell(ctx, cx, cy, img, mode) {
+  drawColumn(ctx, cx, cy, '#0e3a4a');
+  // 接触阴影（顶面中心）
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(cx, cy, 22, 9, 0, 0, Math.PI * 2); ctx.fill();
+
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const maxH = R * MAX_H_FACTOR * SIZE_SCALE;
+  const maxW = R * MAX_W_FACTOR * SIZE_SCALE;
+  const aspect = iw / ih;
+  let dw, dh;
+  if (aspect > maxW / maxH) { dw = maxW; dh = dw / aspect; }
+  else { dh = maxH; dw = dh * aspect; }
+
+  const footY = computeFoot(img);
+
+  if (mode === 'new') {
+    dw *= BOX_ENLARGE; dh *= BOX_ENLARGE;
+    let topY = -dh;
+    if (footY >= 0 && footY < ih) {
+      const pad = ih - footY;
+      const bottomY = -FOOT_GAP + (pad / ih) * dh;
+      topY = bottomY - dh;
+    }
+    ctx.drawImage(img, cx - dw / 2, cy + topY, dw, dh);
+    const footAbsY = cy + topY + (footY / ih) * dh;
+    drawFootMarker(ctx, cx, footAbsY, '#36d399');
+    drawGroundRef(ctx, cx, cy, '#36d399');
+  } else {
+    const topY = -dh;
+    ctx.drawImage(img, cx - dw / 2, cy + topY, dw, dh);
+    const footAbsY = cy + topY + (footY / ih) * dh;
+    drawFootMarker(ctx, cx, footAbsY, '#f87171');
+    drawGroundRef(ctx, cx, cy, '#f87171');
+  }
+}
+
+let currentImg = null;
+function render() {
+  [document.getElementById('cvOld'), document.getElementById('cvNew')].forEach(c => c.getContext('2d').clearRect(0, 0, c.width, c.height));
+  if (!currentImg) return;
+  drawCell(document.getElementById('cvOld').getContext('2d'), 190, 250, currentImg, 'old');
+  drawCell(document.getElementById('cvNew').getContext('2d'), 190, 250, currentImg, 'new');
+}
+
+// ---- 合成示意图：简单机甲，脚底上方保留透明留白 ----
+function makeSynthetic() {
+  const w = 90, h = 130;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = '#9fb4c0';
+  x.fillRect(38, 18, 14, 14);            // 头
+  x.fillRect(30, 34, 30, 34);            // 身
+  x.fillRect(18, 36, 10, 28);            // 左臂
+  x.fillRect(62, 36, 10, 28);            // 右臂
+  x.fillRect(34, 70, 10, 22);            // 左腿
+  x.fillRect(46, 70, 10, 22);            // 右腿
+  x.fillStyle = '#6f8593';
+  x.fillRect(32, 90, 14, 6);             // 左脚
+  x.fillRect(44, 90, 14, 6);             // 右脚
+  const img = new Image(); img.src = c.toDataURL(); return img;
+}
+function loadSynthetic() { currentImg = makeSynthetic(); currentImg.onload = render; }
+
+// ---- 交互 ----
+document.getElementById('enlarge').addEventListener('input', e => {
+  BOX_ENLARGE = parseFloat(e.target.value);
+  document.getElementById('enlargeV').textContent = BOX_ENLARGE.toFixed(2); render();
+});
+document.getElementById('gap').addEventListener('input', e => {
+  FOOT_GAP = parseInt(e.target.value, 10);
+  document.getElementById('gapV').textContent = FOOT_GAP; render();
+});
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => { const img = new Image(); img.onload = () => { currentImg = img; render(); }; img.src = ev.target.result; };
+  r.readAsDataURL(f);
+});
+document.getElementById('reset').addEventListener('click', loadSynthetic);
+
+loadSynthetic();
+</script>
+</body>
+</html>
