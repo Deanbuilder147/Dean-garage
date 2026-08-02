@@ -4,23 +4,16 @@
  */
 
 const { AI_DIFFICULTY } = require('./aiEngine.cjs');
+// Phase 30-HexTruth：hex 距离统一复用 combat-core 真相源（hexKey.cjs → shared-kernel CJS）
+// 注：AI 策略内部以坐标对象 (a, b) 调用，故取对象签名版 hexDistanceCoord 并别名 hexDistance，
+// 数学仍来自 shared-kernel 单一真相源，不重实现。
+const { hexDistanceCoord: hexDistance } = require('./hexKey.cjs');
 
 // 方案A：取单位轮转角色，role 优先，faction 回退（逻辑判定唯一依据）
 function unitRoleOf(u) {
   if (!u) return '';
   if (u.role != null) return u.role;
   return u.faction != null ? u.faction : '';
-}
-
-// 六边形网格距离计算（Even-R offset → axial → cube 距离）
-// 注意：坐标本质是偶行偏移(offset)，必须先转轴向再用立方距离，
-// 否则直接对 offset 套轴向公式会得到错误距离。与后端 hexDistanceOffset / skillExecutor._hexDistance 完全一致。
-function hexDistance(a, b) {
-  const ax = a.q - (a.r + (a.r & 1)) / 2;
-  const az = a.r;
-  const bx = b.q - (b.r + (b.r & 1)) / 2;
-  const bz = b.r;
-  return Math.max(Math.abs(ax - bx), Math.abs(az - bz), Math.abs(ax + az - bx - bz));
 }
 
 // 计算两点的曼哈顿距离（简化版）

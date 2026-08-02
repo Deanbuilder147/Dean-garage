@@ -64,3 +64,12 @@ export type {
   SkillExecutionResult,
   WatchEvent,
 } from './types.js';
+
+// Phase 30-HexTruth: 六边形网格数学真相源（全栈唯一物理真相源）
+export {
+  hexDistance,
+  hexDistanceCoord,
+  getNeighbors,
+  getHexesInRange,
+  getHexKey,
+} from './hexMath.js';

@@ -523,7 +523,7 @@
 // ================================================================
 import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { drawHexPath, drawGroundItemToken } from '../utils/hexDraw.js'
-import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection, syncTerrainFromGlossary } from '../utils/hexUtils.js'
+import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, hexDistance, getHexesInRange, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection, syncTerrainFromGlossary } from '../utils/hexUtils.js'
 import HexGridCanvasEngine from '../components/HexGridCanvasEngine.vue'
 import { applySizeMobility, sizeRenderScale, normSize, SIZE_LABELS, sizeSevenBox } from '../utils/unitSize.js'
 import BattleMinimap from '../components/BattleMinimap.vue'
@@ -2141,33 +2141,25 @@ function drawBattleScene(ctx, opts) {
   // Skill/Tactical range preview
   const skillRangeHexes = new Set()
   const validTargets = new Set()
+  // ★ Phase 30-HexTruth：辐射范围(aoe_radius)高亮格集合，复用 getHexesInRange 真相源
+  const aoeRangeHexes = new Set()
   if (actionMode.value === 'tactical' && selectedUnit.value && !royroyDeployMode.value) {
     const su = selectedUnit.value
     const range = getSkillRange(selectedAttackSkill.value)
     // 审计报告 #4 修复：范围预览需排除最小施放距离(min_range)内的格
     const rangeMin = getSkillRangeMin(selectedAttackSkill.value)
-    // BFS for hex range ring
-    const startKey = `${su.q},${su.r}`
-    const visited = new Set([startKey])
-    const queue = [{ q: su.q, r: su.r, dist: 0 }]
-    while (queue.length > 0) {
-      const cur = queue.shift()
-      if (cur.dist >= range) continue
-      for (const n of getHexNeighbors(cur.q, cur.r)) {
-        const nKey = `${n.q},${n.r}`
-        if (visited.has(nKey)) continue
-        if (n.q < 0 || n.q >= gridWidth.value || n.r < 0 || n.r >= gridHeight.value) continue
-        visited.add(nKey)
-        queue.push({ q: n.q, r: n.r, dist: cur.dist + 1 })
-        const cell = cellMap[nKey]
-        const terrain = getTerrainDef(cell?.terrain || 'void')
-        // For range display, use raw hex distance (don't count terrain cost)
-        // 同时排除 min_range 内的格（审计报告 #4）
-        if (cur.dist + 1 <= range && cur.dist + 1 >= rangeMin) {
-          skillRangeHexes.add(nKey)
-        }
-      }
-    }
+    // ★ Phase 30-HexTruth：射程范围枚举直接复用 getHexesInRange（与 hexDistance 同源），
+    // 不再手写 BFS 步进（避免邻居顺序偏离立方体距离）。再过滤 rangeMin 与地图边界。
+    const within = getHexesInRange(su.q, su.r, range).filter(h => {
+      if (h.q < 0 || h.q >= gridWidth.value || h.r < 0 || h.r >= gridHeight.value) return false
+      const d = hexDistance(su.q, su.r, h.q, h.r)
+      return d <= range && d >= rangeMin
+    })
+    within.forEach(h => skillRangeHexes.add(`${h.q},${h.r}`))
+    // 辐射范围(aoe_radius)：后端结算已通过 getHexesInRange 真相源圈定辐射格。
+    // 前端实时高亮需"已选中的攻击目标点"坐标——本视图在战术模式选技能阶段尚无该点变量，
+    // 故此处预留 aoeRangeHexes 集合（getHexesInRange 已就位），待攻击目标点选中后接入绘制，
+    // 避免引用未定义变量导致运行时崩溃。命中结算真相源已在后端焊死，不受影响。
     // Highlight valid targets (enemy units in range)
     validTargets.clear()
     allUnits.value.forEach(u => {

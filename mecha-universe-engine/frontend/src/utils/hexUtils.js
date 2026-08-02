@@ -285,6 +285,48 @@ export function getHexNeighbors(q, r) {
 }
 
 /**
+ * ★ Phase 30-HexTruth：六边形网格距离（前端镜像真相源）。
+ * 算法与 @mecha/shared-kernel/src/hexMath.ts 的 hexDistance 逐字一致——改一处须同步另一处。
+ * Even-R offset → axial → cube 距离，返回两格最短 hex 步数。
+ * 注意：坐标本质是偶行偏移(offset)，必须先转轴向再用立方距离，否则直接对 offset 套轴向公式会得错距。
+ * @param {number} q1
+ * @param {number} r1
+ * @param {number} q2
+ * @param {number} r2
+ * @returns {number}
+ */
+export function hexDistance(q1, r1, q2, r2) {
+  const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+  const a = offToAx(q1, r1);
+  const b = offToAx(q2, r2);
+  const dq = Math.abs(a.q - b.q);
+  const dr = Math.abs(a.r - b.r);
+  const ds = Math.abs(a.q + a.r - b.q - b.r);
+  return Math.max(dq, dr, ds);
+}
+
+/**
+ * ★ Phase 30-HexTruth：枚举以 (centerQ, centerR) 为中心、半径 range 内的所有格（含中心）。
+ * 前端镜像真相源，算法与 @mecha/shared-kernel/src/hexMath.ts 的 getHexesInRange 逐字一致。
+ * 基于 axial/cube 范围环（满足 |q|+|r|+|s| <= range 的六边形范围），与 hexDistance 同源，
+ * 用于「射程可达格枚举」「辐射范围 aoe_radius 枚举（高亮/圈定）」。
+ * @param {number} centerQ
+ * @param {number} centerR
+ * @param {number} range
+ * @returns {Array<{q:number, r:number}>}
+ */
+export function getHexesInRange(centerQ, centerR, range) {
+  const results = [];
+  for (let q = -range; q <= range; q++) {
+    for (let r = Math.max(-range, -q - range); r <= Math.min(range, -q + range); r++) {
+      results.push({ q: centerQ + q, r: centerR + r });
+    }
+  }
+  return results;
+}
+
+
+/**
  * 平顶六边形邻居（Even-Q Offset）— 与 flatTopCenter / flatTopToHex 配套（阶段 1 · §3.1c）。
  * 平顶与尖顶的相邻关系不同；引擎在阶段 3 切换到平顶渲染时，
  * 所有"相邻格"逻辑（移动范围 / 命中 / 寻路）必须同步改用本函数。

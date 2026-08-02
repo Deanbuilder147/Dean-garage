@@ -3,15 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts",
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./hexMath": {
+      "import": "./dist/hexMath.js",
+      "require": "./dist/hexMath.cjs"
+    },
     "./tokens": "./src/tokens.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:cjs",
+    "build:cjs": "tsc --module commonjs --outDir dist/cjs --rootDir src src/hexMath.ts && node -e \"const fs=require('fs');const p='dist/cjs/hexMath.js';const s=fs.readFileSync(p,'utf8');fs.writeFileSync('dist/hexMath.cjs',s);fs.rmSync('dist/cjs',{recursive:true,force:true});\"",
     "typecheck": "tsc --noEmit"
   }
 }

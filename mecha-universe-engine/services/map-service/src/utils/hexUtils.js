@@ -1,16 +1,27 @@
 /**
  * 六角格坐标计算工具
  * 使用轴坐标系统 (q, r)
- * 
+ *
  * 六角格布局:
  * - 平顶 (flat-top): 奇偶行对齐方式不同
  * - 尖顶 (pointy-top): 奇偶列对齐方式不同
- * 
+ *
  * 坐标系统:
  * - q: 列方向轴 (column)
  * - r: 行方向轴 (row, 斜向)
  * - s: 第三轴 (s = -q - r, 用于计算)
+ *
+ * ★ Phase 30-HexTruth: 距离/邻居/范围/Key 数学统一复用 @mecha/shared-kernel 的 hexMath
+ * 真相源，本文件不再保留副本，消除与 combat-service / frontend 的漂移。
  */
+
+// 物理真相源：全栈唯一的 hex 数学（ESM 侧）
+import {
+  hexDistance as _hexDistance,
+  getNeighbors as _getNeighbors,
+  getHexesInRange as _getHexesInRange,
+  getHexKey as _getHexKey,
+} from '@mecha/shared-kernel/hexMath';
 
 export const HexUtils = {
   // 六角格类型
@@ -20,7 +31,7 @@ export const HexUtils = {
   /**
    * 计算六角格中心像素坐标
    * @param {number} q - 列坐标
-   * @param {number} r - 行坐标  
+   * @param {number} r - 行坐标
    * @param {number} size - 六角格大小 (中心到顶点距离)
    * @param {string} layout - 布局类型
    */
@@ -28,11 +39,11 @@ export const HexUtils = {
     const x = layout === 'flat-top'
       ? size * (3/2 * q)
       : size * (Math.sqrt(3)/2 * q + Math.sqrt(3)/2 * r);
-    
+
     const y = layout === 'flat-top'
       ? size * (Math.sqrt(3)/2 * r + Math.sqrt(3) * (q % 2 === 0 ? 0 : 0.5))
       : size * (3/2 * r);
-    
+
     return { x, y };
   },
 
@@ -45,7 +56,7 @@ export const HexUtils = {
    */
   pixelToHex(x, y, size, layout = 'flat-top') {
     let q, r;
-    
+
     if (layout === 'flat-top') {
       q = (2/3 * x) / size;
       r = (-1/3 * x + Math.sqrt(3)/3 * y) / size;
@@ -53,7 +64,7 @@ export const HexUtils = {
       q = (Math.sqrt(3)/3 * x - 1/3 * y) / size;
       r = (2/3 * y) / size;
     }
-    
+
     return this.axialRound(q, r);
   },
 
@@ -65,59 +76,39 @@ export const HexUtils = {
     let rq = Math.round(q);
     let rr = Math.round(r);
     let rs = Math.round(s);
-    
+
     const qDiff = Math.abs(rq - q);
     const rDiff = Math.abs(rr - r);
     const sDiff = Math.abs(rs - s);
-    
+
     if (qDiff > rDiff && qDiff > sDiff) {
       rq = -rr - rs;
     } else if (rDiff > sDiff) {
       rr = -rq - rs;
     }
-    
+
     return { q: rq, r: rr };
   },
 
   /**
-   * 计算两六角格距离
+   * 计算两六角格距离（复用 shared-kernel 真相源，禁止本地副本）
    */
-  hexDistance(q1, r1, q2, r2) {
-    // ★ 阶段 B：Even-R offset 语义统一（offset→axial 后取 cube 距离）
-    const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
-    const a = offToAx(q1, r1), b = offToAx(q2, r2);
-    const dq = Math.abs(a.q - b.q), dr = Math.abs(a.r - b.r), ds = Math.abs(a.q + a.r - b.q - b.r);
-    return Math.max(dq, dr, ds);
-  },
+  hexDistance: _hexDistance,
 
   /**
-   * 获取相邻六角格
+   * 获取相邻六角格（复用 shared-kernel 真相源，禁止本地副本）
    * @param {number} q - 列坐标
    * @param {number} r - 行坐标
    */
-  getNeighbors(q, r) {
-    // ★ 阶段 B：Even-R offset 邻居（与前端 hexUtils.getHexNeighbors 一致，含奇偶行分支）
-    const dirs = (r % 2 === 0)
-      ? [{ q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 1, r: 1 }]
-      : [{ q: 1, r: 0 }, { q: 0, r: -1 }, { q: -1, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }];
-    return dirs.map(d => ({ q: q + d.q, r: r + d.r }));
-  },
+  getNeighbors: _getNeighbors,
 
   /**
-   * 获取范围内的所有六角格
+   * 获取范围内的所有六角格（复用 shared-kernel 真相源，禁止本地副本）
    * @param {number} centerQ - 中心q
    * @param {number} centerR - 中心r
    * @param {number} range - 范围
    */
-  getHexesInRange(centerQ, centerR, range) {
-    const results = [];
-    for (let q = -range; q <= range; q++) {
-      for (let r = Math.max(-range, -q - range); r <= Math.min(range, -q + range); r++) {
-        results.push({ q: centerQ + q, r: centerR + r });
-      }
-    }
-    return results;
-  },
+  getHexesInRange: _getHexesInRange,
 
   /**
    * 检查坐标是否在地图范围内
@@ -132,13 +123,11 @@ export const HexUtils = {
   },
 
   /**
-   * 生成地图唯一键
+   * 生成地图唯一键（复用 shared-kernel 真相源，禁止本地副本）
    * @param {number} q - 列坐标
    * @param {number} r - 行坐标
    */
-  hexKey(q, r) {
-    return `${q},${r}`;
-  },
+  hexKey: _getHexKey,
 
   /**
    * 解析地图键

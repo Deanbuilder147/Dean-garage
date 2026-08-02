@@ -37,7 +37,7 @@ const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./config
 const { applyDamageModifiers } = require('./damageModifiers.cjs');
 const ConditionEvaluator = require('./conditionEvaluator.cjs');
 const BranchEvaluator = require('./branchEvaluator.cjs');
-const { getHexKey } = require('./hexKey.cjs');
+const { getHexKey, hexDistance } = require('./hexKey.cjs');
 const BuffManager = require('./buffManager.cjs');
 
 // ───────────────────── 单位体型（体积）换算 ─────────────────────
@@ -276,7 +276,7 @@ class SkillExecutor {
 
         // === 宾语距离检查 (Object Range Check) ===
         if (target && uf.target_filter !== 'self') {
-            const dist = this._hexDistance(unit, target);
+            const dist = hexDistance(unit, target);
             const minR = uf.min_cast_range || uf.min_range || 1; // 默认最小距离1（排除自身）
             const maxR = uf.cast_range || uf.max_range || 1;
             if (dist < minR || dist > maxR) {
@@ -542,7 +542,7 @@ class SkillExecutor {
         const healAmount = (uf.base_damage || healStat) + diceBonus;
 
         if (target) {
-            const dist = this._hexDistance(unit, target);
+            const dist = hexDistance(unit, target);
             if (dist > uf.cast_range || dist === 0) {
                 return {
                     heal_amount: 0, out_of_range: true,
@@ -891,7 +891,7 @@ class SkillExecutor {
         const cfg = getSkillConfig('counter');
         const uf = this._getUniversalFields('counter');
         const range = skillRange ?? uf.cast_range ?? 1;
-        const dist = this._hexDistance(unit, attacker);
+        const dist = hexDistance(unit, attacker);
         if (dist > range) return { triggered: false };
 
         const dice = this._evaluateDice(cfg);
@@ -931,7 +931,7 @@ class SkillExecutor {
     executeSupply(unit, target) {
         const uf = this._getUniversalFields('supply');
         if (target) {
-            const dist = this._hexDistance(unit, target);
+            const dist = hexDistance(unit, target);
             if (dist > uf.cast_range || dist === 0) {
                 return {
                     heal_amount: 0, out_of_range: true,
@@ -984,7 +984,7 @@ class SkillExecutor {
         const maxRange = uf.cast_range || uf.max_range;
 
         if (target) {
-            const dist = this._hexDistance(unit, target);
+            const dist = hexDistance(unit, target);
             if (dist < minRange || dist > maxRange) {
                 return {
                     mode: 'out_of_range',
@@ -1016,7 +1016,7 @@ class SkillExecutor {
         }
 
         if (target) {
-            const dist = this._hexDistance(unit, target);
+            const dist = hexDistance(unit, target);
             if (dist < 1 || dist > 4) {
                 return {
                     triggered: false, out_of_range: true,
@@ -1047,7 +1047,7 @@ class SkillExecutor {
         }
         const minRange = uf.min_cast_range || uf.min_range || 4;
         const maxRange = uf.cast_range || uf.max_range || 6;
-        const dist = this._hexDistance(unit, target);
+        const dist = hexDistance(unit, target);
         if (dist < minRange || dist > maxRange) {
             return {
                 triggered: false, out_of_range: true,
@@ -1076,7 +1076,7 @@ class SkillExecutor {
         const uf = this._getUniversalFields('scout');
         const scoutRange = unit.ranged || unit.attack || 10;
         if (!ally) return { triggered: false };
-        const dist = this._hexDistance(unit, ally);
+        const dist = hexDistance(unit, ally);
         // 方案A：侦察友军判定按轮转角色归并（同角色=友军）
         const su = unit.role != null ? unit.role : unit.faction;
         const sa = ally.role != null ? ally.role : ally.faction;
@@ -1114,7 +1114,7 @@ class SkillExecutor {
         const maxB = Math.max(unitB.melee || unitB.attack || 10, unitB.ranged || 0);
 
         if (unitA.hp >= maxB || unitB.hp >= maxA) return { triggered: false };
-        const dist = this._hexDistance(unitA, unitB);
+        const dist = hexDistance(unitA, unitB);
         if (dist > 1) return { triggered: false };
 
         if (maxA === maxB) {
@@ -1175,21 +1175,9 @@ class SkillExecutor {
     // 工具方法
     // ============================================================
 
-    _hexDistance(a, b) {
-        if (!a || !b) return 999;
-        // ★ 阶段 B：Even-R offset 语义统一（前端坐标即 offset，禁止 axial 公式误算）
-        const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
-        const ax = offToAx(a.q || 0, a.r || 0);
-        const bx = offToAx(b.q || 0, b.r || 0);
-        const dq = Math.abs(ax.q - bx.q);
-        const dr = Math.abs(ax.r - bx.r);
-        const ds = Math.abs(ax.q + ax.r - bx.q - bx.r);
-        return Math.max(dq, dr, ds);
-    }
-
     _isInSector(unit, target, maxDist = 2, sectorAngle = 60) {
         if (!unit || !target) return false;
-        const dist = this._hexDistance(unit, target);
+        const dist = hexDistance(unit, target);
         if (dist > maxDist || dist === 0) return false;
 
         const dq = (target.q || 0) - (unit.q || 0);

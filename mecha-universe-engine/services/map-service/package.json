@@ -9,6 +9,7 @@
     "start": "node src/index.js"
   },
   "dependencies": {
+    "@mecha/shared-kernel": "*",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^4.18.0",
