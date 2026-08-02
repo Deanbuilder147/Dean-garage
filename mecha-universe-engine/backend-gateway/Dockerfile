@@ -57,6 +57,9 @@ RUN cp package.json package.json.bak && \
 # 复制编译产物
 COPY --from=builder /build/backend-gateway/dist ./dist
 
+# Meowa 地形素材同步脚本（容器内运行：node /app/scripts/syncMeowaTerrains.mjs）
+COPY --from=builder /build/backend-gateway/scripts ./scripts
+
 # ============================================================
 # 桥接 combat-service 核心 .cjs 战斗引擎（零 npm 依赖；含 vendor 海豹骰子引擎）
 # 此前 .cjs 后端改造从未在生产生效（容器不打包 combat-service，真实战斗路径走 TS 版）。
@@ -64,16 +67,20 @@ COPY --from=builder /build/backend-gateway/dist ./dist
 # ============================================================
 COPY services/combat-service ./services/combat-service/
 
-# 统一词条库配置路径：
-#   - 前端/网关 glossary 写入 /app/data/glossary-skill-config.json
-#   - .cjs 引擎读取 combat-service/src/config/glossary-skill-config.json
-# 通过 symlink 让两者指向同一文件，确立单点真相，避免两份配置分裂。
+# 统一词条库配置路径（单点真相：/app/data/glossary-skill-config.json）
+#  Phase 2 起战斗核心统一走 TS 版（combat-service 独立外壳已废），
+#  .cjs 引擎如需 glossary 也改读 /app/data。此处保证 data 下文件存在；
+#  仅当遗留的 combat-service/src/config/glossary-skill-config.json 存在时才做 symlink 对齐。
 RUN mkdir -p /app/data && \
-    if [ ! -f /app/data/glossary-skill-config.json ] && [ -f /app/services/combat-service/src/config/glossary-skill-config.json ]; then \
-      cp /app/services/combat-service/src/config/glossary-skill-config.json /app/data/glossary-skill-config.json; \
-    fi && \
-    rm -f /app/services/combat-service/src/config/glossary-skill-config.json && \
-    ln -s /app/data/glossary-skill-config.json /app/services/combat-service/src/config/glossary-skill-config.json
+    if [ ! -f /app/data/glossary-skill-config.json ]; then \
+      if [ -f /app/services/combat-service/src/config/glossary-skill-config.json ]; then \
+        cp /app/services/combat-service/src/config/glossary-skill-config.json /app/data/glossary-skill-config.json; \
+        rm -f /app/services/combat-service/src/config/glossary-skill-config.json; \
+        ln -s /app/data/glossary-skill-config.json /app/services/combat-service/src/config/glossary-skill-config.json; \
+      else \
+        echo '{}' > /app/data/glossary-skill-config.json; \
+      fi; \
+    fi
 
 RUN mkdir -p /data
 
