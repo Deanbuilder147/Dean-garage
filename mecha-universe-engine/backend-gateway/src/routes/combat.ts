@@ -38,6 +38,8 @@ import {
 import type { BattleState, BattleUnit, HexCoord, UnitStats } from '@mecha/shared-kernel';
 import { getSkillExecutor, getEffectExecutor } from '../combatBridge.js';
 import { logger } from '../utils/logger.js';
+import { pickUnitId } from '../utils/combatId.js';
+import { sanitizeSkillContext } from '../utils/skillDto.js';
 import { createRequire } from 'module';
 
 // H1~H7 反应钩子注册表与联防纯函数（F 基础：文件隔离，零侵入主链路）
@@ -662,7 +664,7 @@ router.post('/api/combat/:battleId/victory-conditions', authenticate, (req: Requ
 router.post('/api/combat/:battleId/ace-unit', authenticate, (req: Request, res: Response) => {
   const { battleId } = req.params;
   const faction = req.body?.faction;
-  const unitId = req.body?.unitId ?? req.body?.unit_id; // 双接收兜底
+  const unitId = pickUnitId(req.body); // 阶段三：pickId 收口（双命名兜底 + 归一化）
 
   if (!faction || !unitId) {
     res.status(400).json({ error: 'VALIDATION_ERROR', message: 'faction 和 unitId 为必填项' });
@@ -1330,7 +1332,7 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
       exeCaster,
       exeTarget,
       {
-        ...(context || {}),
+        ...sanitizeSkillContext(context), // 阶段三：DTO 白名单剥离伪造战局字段，仅放行安全元数据
         allUnits: battle ? Array.from(battle.units.values()).map(toExecutorUnit) : (context?.allUnits || []),
         battleState: battle || context?.battleState || null,
         terrainMap: battle ? buildTerrainMap(battle) : (context?.terrainMap || null),
@@ -1593,7 +1595,7 @@ function runAttackInternal(battle: any, opts: any): any {
       exeCaster,
       exeTarget,
       {
-        ...(opts.context || {}),
+        ...sanitizeSkillContext(opts.context), // 阶段三：DTO 白名单剥离伪造战局字段，仅放行安全元数据
         allUnits: Array.from(battle.units.values()).map(toExecutorUnit),
         battleState: battle,
         terrainMap: buildTerrainMap(battle),
@@ -2211,8 +2213,8 @@ router.get('/api/combat/:battleId/surprise-choice', authenticate, (req: Request,
 
 router.post('/api/combat/:battleId/surprise-choice', authenticate, (req: Request, res: Response) => {
   const { battleId } = req.params;
-  // ★ P0 命名统一(C2/C3): 双接收兜底 unit_id ?? unitId，内部统一 unitId
-  const unitId = req.body?.unitId ?? req.body?.unit_id;
+  // 阶段三：pickId 收口（camelCase/snake_case 双接收兜底，内部统一 unitId）
+  const unitId = pickUnitId(req.body);
   const { choice, skill_id } = req.body || {};
   if (!battleId) { res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'battleId 必填' }); return; }
   if (!unitId || !choice) { res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'unitId/choice 必填' }); return; }
@@ -2317,8 +2319,8 @@ function exposeStealthByProximity(battle: any, threshold = STEALTH_PROXIMITY_RAN
 
 router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, res: Response) => {
   const { battleId } = req.params;
-  // ★ P0 命名统一(C2/C3): 双接收兜底 unit_id ?? unitId，内部统一 unitId
-  const unitId = req.body?.unitId ?? req.body?.unit_id;
+  // 阶段三：pickId 收口（camelCase/snake_case 双接收兜底，内部统一 unitId）
+  const unitId = pickUnitId(req.body);
   const { q, r, unit_data } = req.body || {};
 
   if (!unitId || q === undefined || r === undefined) {
@@ -2853,7 +2855,7 @@ router.post('/api/combat/:battleId/action', authenticate, (req: Request, res: Re
 router.post('/api/combat/:battleId/move', authenticate, (req: Request, res: Response) => {
   try {
     const battleId = req.params.battleId;
-    const unit_id = req.body?.unitId ?? req.body?.unit_id; // ★ P0 双接收兜底
+    const unit_id = pickUnitId(req.body); // 阶段三：pickId 收口（双命名兜底 + 归一化）
     const { target_q, target_r } = req.body || {};
     const state = requireBattle(battleId);
     if (!state) return res.status(404).json({ error: 'BATTLE_NOT_FOUND' });
@@ -3117,7 +3119,7 @@ router.put('/api/combat/size-config', authenticate, (req: Request, res: Response
 // ============================================
 router.post('/api/combat/:battleId/stealth', (req: Request, res: Response) => {
   const { battleId } = req.params;
-  const unitId = req.body?.unitId ?? req.body?.unit_id; // ★ P0 双接收兜底
+  const unitId = pickUnitId(req.body); // 阶段三：pickId 收口（双命名兜底 + 归一化）
   const { mode } = req.body || {};
   if (!battleId) { res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'battleId 必填' }); return; }
   if (!unitId) { res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'unitId 必填' }); return; }
