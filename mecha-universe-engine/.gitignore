@@ -12,3 +12,5 @@ dist/
 # 开发构建产物（禁止提交，避免污染 diff 与同行审查）
 dist-dev/
 frontend/dist-dev/
+# TypeScript 增量编译缓存（tsc -b 生成，位于包根，不入库）
+*.tsbuildinfo

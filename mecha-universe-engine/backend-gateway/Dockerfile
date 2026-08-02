@@ -13,7 +13,8 @@ COPY shared-kernel/ ./shared-kernel/
 # 复制后端网关源码
 COPY backend-gateway/ ./backend-gateway/
 
-# 安装 shared-kernel 依赖
+# 安装 shared-kernel 依赖（dist 编译产物由 rsync 同步提供，不在容器内 tsc 编译，
+# 避免 alpine 容器 tsc 环境差异；dist 为纯 JS 与宿主机同内核无平台差异）
 WORKDIR /build/shared-kernel
 RUN npm install --legacy-peer-deps --install-links=false
 
@@ -39,8 +40,9 @@ COPY --from=builder /build/shared-kernel/tsconfig.json ./shared-kernel/
 COPY --from=builder /build/shared-kernel/src/ ./shared-kernel/src/
 COPY --from=builder /build/shared-kernel/dist/ ./shared-kernel/dist/
 # 打补丁：让 main/exports 指向编译后的 .js 文件（生产环境 Node 不识别 .ts）
+# 保留 ./hexMath 子路径双格式导出（combat-core 的 .cjs 经 require('@mecha/shared-kernel/hexMath') 取 CJS 真相源）
 RUN cd shared-kernel && \
-    node -e "const p=require('./package.json');p.main='./dist/index.js';p.exports={'.':'./dist/index.js','./tokens':'./dist/tokens.js','./types':'./dist/types.js'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+    node -e "const p=require('./package.json');p.main='./dist/index.js';p.exports={'.':{import:'./dist/index.js',require:'./dist/index.js'},'./hexMath':{import:'./dist/hexMath.js',require:'./dist/hexMath.cjs'},'./tokens':'./dist/tokens.js','./types':'./dist/types.js'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 
 # 复制 package.json 并安装生产依赖
 # 策略：先用 sed 移除 @mecha/shared-kernel 依赖（避免 npm 查 registry），

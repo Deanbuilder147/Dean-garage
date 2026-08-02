@@ -126,7 +126,7 @@ function withBattleRollback<T>(battle: any, fn: () => T): T {
  * 这样 GM 在整备室配置的“阵营↔角色”映射在开战后始终生效，且不再被硬编码 earth/maxion/balon 覆盖。
  */
 function reconcileFactionRoles(battle: BattleState): void {
-  const order = (battle.factionTurnOrder || []).filter(r => TURN_ROLES.includes(r as typeof TURN_ROLES[number]));
+  const order = (battle.factionTurnOrder || []).filter((r: string) => TURN_ROLES.includes(r as typeof TURN_ROLES[number]));
   const deployed = new Set<string>();
   if (battle.units && typeof (battle.units as any).values === 'function') {
     for (const u of (battle.units as any).values()) {
@@ -173,7 +173,7 @@ function reconcileFactionRoles(battle: BattleState): void {
 
 function ensureTurnModel(battle: BattleState): void {
   // 归一化 factionTurnOrder 仅保留合法角色
-  const order = (battle.factionTurnOrder || []).filter(r => TURN_ROLES.includes(r as typeof TURN_ROLES[number]));
+  const order = (battle.factionTurnOrder || []).filter((r: string) => TURN_ROLES.includes(r as typeof TURN_ROLES[number]));
   if (order.length) battle.factionTurnOrder = order;
   else battle.factionTurnOrder = [...TURN_ROLES];
   // 始终根据实际部署重建 factionRoles（修复空 {} / 漏传 / 角色错位）

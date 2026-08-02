@@ -8,15 +8,23 @@
  * 运行：node scripts/hex-truth-contract.test.mjs
  */
 import { createRequire } from 'module';
-import { hexDistance as esmDist, getHexesInRange as esmRange }
-  from '/Users/dingxuyang/CodeBuddy/20260604120036/mecha-universe-engine/shared-kernel/dist/hexMath.js';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 
-const B = '/Users/dingxuyang/CodeBuddy/20260604120036/mecha-universe-engine';
+// 项目根：scripts/ 的上一级（跨环境可移植，不再硬编码绝对路径）
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const B = resolve(SCRIPT_DIR, '..');
+
 const require = createRequire(import.meta.url);
 const cjs = require(B + '/shared-kernel/dist/hexMath.cjs');
 const frontend = require(B + '/frontend/src/utils/hexUtils.js');
 const combat = require(B + '/services/combat-service/src/services/combatCore/hexKey.cjs');
 const ai = require(B + '/services/combat-service/src/services/combatCore/aiStrategies.cjs');
+
+// ESM 真相源产物用动态 import 加载（静态 import 不接受变量路径）
+const esmMod = await import(B + '/shared-kernel/dist/hexMath.js');
+const esmDist = esmMod.hexDistance;
+const esmRange = esmMod.getHexesInRange;
 
 const cases = [
   [0, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1], [0, 0, 3, 0], [0, 0, 0, 6],

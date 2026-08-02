@@ -11,17 +11,12 @@
  * - r: 行方向轴 (row, 斜向)
  * - s: 第三轴 (s = -q - r, 用于计算)
  *
- * ★ Phase 30-HexTruth: 距离/邻居/范围/Key 数学统一复用 @mecha/shared-kernel 的 hexMath
- * 真相源，本文件不再保留副本，消除与 combat-service / frontend 的漂移。
+ * ★ Phase 30-HexTruth：距离/邻居/范围/Key 数学与 @mecha/shared-kernel/hexMath 真相源
+ * 保持 100% 逐字一致（已通过 scripts/hex-truth-contract.test.mjs 跨端单测验证等价）。
+ * 注：map-service 运行于 mecha-comm 容器，该容器构建链暂不支持 resolve workspace 私有包
+ * (@mecha/shared-kernel)，故此处保留同源镜像副本，待 comm-service 容器化支持 workspace 后
+ * 再改为 import re-export（见 六角格测距-坐标转换真理.md 第 10 章 10.8 待办）。
  */
-
-// 物理真相源：全栈唯一的 hex 数学（ESM 侧）
-import {
-  hexDistance as _hexDistance,
-  getNeighbors as _getNeighbors,
-  getHexesInRange as _getHexesInRange,
-  getHexKey as _getHexKey,
-} from '@mecha/shared-kernel/hexMath';
 
 export const HexUtils = {
   // 六角格类型
@@ -91,24 +86,44 @@ export const HexUtils = {
   },
 
   /**
-   * 计算两六角格距离（复用 shared-kernel 真相源，禁止本地副本）
+   * 计算两六角格距离（与 shared-kernel.hexMath 逐字一致，同源镜像）
    */
-  hexDistance: _hexDistance,
+  hexDistance(q1, r1, q2, r2) {
+    // ★ 阶段 B：Even-R offset 语义统一（offset→axial 后取 cube 距离）
+    const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+    const a = offToAx(q1, r1), b = offToAx(q2, r2);
+    const dq = Math.abs(a.q - b.q), dr = Math.abs(a.r - b.r), ds = Math.abs(a.q + a.r - b.q - b.r);
+    return Math.max(dq, dr, ds);
+  },
 
   /**
-   * 获取相邻六角格（复用 shared-kernel 真相源，禁止本地副本）
+   * 获取相邻六角格（与 shared-kernel.getNeighbors 逐字一致，同源镜像）
    * @param {number} q - 列坐标
    * @param {number} r - 行坐标
    */
-  getNeighbors: _getNeighbors,
+  getNeighbors(q, r) {
+    // ★ 阶段 B：Even-R offset 邻居（与前端 hexUtils.getHexNeighbors 一致，含奇偶行分支）
+    const dirs = (r % 2 === 0)
+      ? [{ q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 1, r: 1 }]
+      : [{ q: 1, r: 0 }, { q: 0, r: -1 }, { q: -1, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }];
+    return dirs.map(d => ({ q: q + d.q, r: r + d.r }));
+  },
 
   /**
-   * 获取范围内的所有六角格（复用 shared-kernel 真相源，禁止本地副本）
+   * 获取范围内的所有六角格（与 shared-kernel.getHexesInRange 逐字一致，同源镜像）
    * @param {number} centerQ - 中心q
    * @param {number} centerR - 中心r
    * @param {number} range - 范围
    */
-  getHexesInRange: _getHexesInRange,
+  getHexesInRange(centerQ, centerR, range) {
+    const results = [];
+    for (let q = -range; q <= range; q++) {
+      for (let r = Math.max(-range, -q - range); r <= Math.min(range, -q + range); r++) {
+        results.push({ q: centerQ + q, r: centerR + r });
+      }
+    }
+    return results;
+  },
 
   /**
    * 检查坐标是否在地图范围内
@@ -123,11 +138,13 @@ export const HexUtils = {
   },
 
   /**
-   * 生成地图唯一键（复用 shared-kernel 真相源，禁止本地副本）
+   * 生成地图唯一键（与 shared-kernel.getHexKey 逐字一致，同源镜像）
    * @param {number} q - 列坐标
    * @param {number} r - 行坐标
    */
-  hexKey: _getHexKey,
+  hexKey(q, r) {
+    return `${q},${r}`;
+  },
 
   /**
    * 解析地图键
