@@ -1,0 +1,66 @@
+name: Production Deploy with Rollback
+
+on:
+  push:
+    branches:
+      - main # 生产分支；触发即走 rsync + build + 探活 + 秒级回滚
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Known Hosts
+        run: ssh-keyscan -H ${{ secrets.HOST_IP }} >> ~/.ssh/known_hosts
+
+      - name: Rsync to Server (Exclude DB and Dev Artifacts)
+        run: |
+          rsync -az --delete \
+          --exclude 'node_modules' \
+          --exclude '.git' \
+          --exclude 'dist' \
+          --exclude 'dist-dev' \
+          --exclude '*.db' \
+          ./ root@${{ secrets.HOST_IP }}:/root/mecha-universe-engine/
+
+      - name: Build, Tag & Zero-Downtime Deploy
+        run: |
+          ssh root@${{ secrets.HOST_IP }} << 'EOF'
+            cd /root/mecha-universe-engine
+
+            # 1. 备份当前稳定镜像标签 (打 prev 标，供回滚)
+            #    注意：镜像名须与 docker-compose.yml 的 image: 字段一致
+            docker tag mecha-universe-engine-mecha-gateway:latest mecha-universe-engine-mecha-gateway:prev || true
+            docker tag mecha-universe-engine-mecha-frontend:latest mecha-universe-engine-mecha-frontend:prev || true
+
+            # 2. 编译新镜像 (避开 DB 容器，绝不触碰 mecha-battle-db)
+            docker compose build --no-cache mecha-gateway mecha-frontend mecha-comm
+
+            # 3. 启动新容器 (--no-deps 确保不会误启/孤儿化 mecha-battle-db)
+            docker compose up -d --no-deps mecha-gateway mecha-frontend mecha-comm
+
+            # 4. 探活与秒级回滚防线
+            #    /health 端点已在 app.ts 就位（返回 {status:'ok'}）
+            echo "Waiting 5s for gateway to boot..."
+            sleep 5
+            if ! curl -s -f http://localhost:3006/health > /dev/null; then
+              echo "CRITICAL: Health check failed! Initiating rollback..."
+
+              # 恢复上一版本的镜像并强行重启
+              docker tag mecha-universe-engine-mecha-gateway:prev mecha-universe-engine-mecha-gateway:latest
+              docker tag mecha-universe-engine-mecha-frontend:prev mecha-universe-engine-mecha-frontend:latest
+              docker compose up -d --no-deps mecha-gateway mecha-frontend mecha-comm
+
+              echo "Rollback completed. Exiting with failure status."
+              exit 1
+            fi
+
+            echo "Deploy successful. Health check passed."
+          EOF

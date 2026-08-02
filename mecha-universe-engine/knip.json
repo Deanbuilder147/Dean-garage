@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["backend-gateway/src/index.ts", "frontend/src/main.ts"],
+  "project": ["backend-gateway/src/**/*.ts", "frontend/src/**/*.{ts,vue}"],
+  "ignore": [
+    "services/combat-service/src/services/combatCore/**",
+    "services/combat-service/src/**/*.cjs"
+  ],
+  "ignoreDependencies": ["pg"]
+}

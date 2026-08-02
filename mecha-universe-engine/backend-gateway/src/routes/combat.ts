@@ -37,6 +37,7 @@ import {
 } from '../combatSnap.js';
 import type { BattleState, BattleUnit, HexCoord, UnitStats } from '@mecha/shared-kernel';
 import { getSkillExecutor, getEffectExecutor } from '../combatBridge.js';
+import { logger } from '../utils/logger.js';
 import { createRequire } from 'module';
 
 // H1~H7 反应钩子注册表与联防纯函数（F 基础：文件隔离，零侵入主链路）
@@ -103,7 +104,7 @@ function withBattleRollback<T>(battle: any, fn: () => T): T {
     return fn();
   } catch (e: any) {
     Object.assign(battle, snap);        // 顶层引用替换，Map 等结构一并还原
-    console.error('[withBattleRollback] 战局写回回滚', battle?.id, e?.message || e);
+    logger.error({ msg: '[withBattleRollback] 战局写回回滚', battleId: battle?.id, err: e?.message || e });
     throw e;
   }
 }
