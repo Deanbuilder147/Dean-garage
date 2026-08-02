@@ -31,17 +31,20 @@ function hasSkill(type) {
   return Object.prototype.hasOwnProperty.call(REGISTRY, type);
 }
 
-// 内置注册（与旧分发逻辑 1:1 对齐）
-registerSkill('assist', ({ executor, unit }) => {
-  const r = executor.executeAssist(unit, false);
-  return r.triggered ? { type: 'assist', value: r.bonus, bonus_value: r.bonus } : null;
+// 内置注册（v5：由结构化 statusEffects 动态提取，彻底废弃 executeAssist/Guard/Blockade 写死函数）
+function statusSum(unit, appliesOn) {
+  const list = (unit && Array.isArray(unit.statusEffects)) ? unit.statusEffects : [];
+  return list.reduce((a, s) => (s && s.applies_on === appliesOn) ? a + (Number(s.value) || 0) : a, 0);
+}
+
+registerSkill('assist', ({ unit }) => {
+  const v = statusSum(unit, 'attack');
+  return v ? { type: 'assist', value: v, bonus_value: v } : null;
 });
 
-registerSkill('blockade', ({ executor, unit }) => {
-  const r = executor.executeBlockade(unit, undefined, false);
-  return r.triggered
-    ? { type: 'blockade', value: r.mobility_reduction, bonus_value: r.mobility_reduction }
-    : null;
+registerSkill('blockade', ({ unit }) => {
+  const v = statusSum(unit, 'attack_debuff_target');
+  return v ? { type: 'blockade', value: v, bonus_value: v } : null;
 });
 
 // 注：counter 在旧 _extractSkillBonuses 中写死 value:2（已知 P4 双份真相问题，
@@ -55,9 +58,9 @@ registerSkill('focused_fire', ({ executor, resolvedSkill }) => {
   return { type: 'focused_fire', value: ff.bonus, bonus_value: ff.bonus };
 });
 
-registerSkill('guard', ({ executor, unit }) => {
-  const r = executor.executeGuard(unit, false);
-  return r.triggered ? { type: 'guard', value: r.reduction, bonus_value: r.reduction } : null;
+registerSkill('guard', ({ unit }) => {
+  const v = statusSum(unit, 'defense');
+  return v ? { type: 'guard', value: v, bonus_value: v } : null;
 });
 
 module.exports = { registerSkill, getBonusExtractor, hasSkill, REGISTRY };

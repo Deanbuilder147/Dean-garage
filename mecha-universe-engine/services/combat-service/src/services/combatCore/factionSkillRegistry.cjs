@@ -12,6 +12,7 @@
 
 const DamagePipe = require('./damagePipe.cjs');
 const BuffManager = require('./buffManager.cjs');
+const DiceService = require('./diceService.cjs');
 
 /**
  * 阵营ID枚举
@@ -21,6 +22,41 @@ const FACTION_IDS = {
   BALON: 'balon',      // 拜隆
   MAXION: 'maxion'     // 马克西翁
 };
+
+// 方案A：轮转角色键（攻击/防守/偷袭）。阵营技能改为按轮转角色发放，
+// 固有阵营(earth/balon/maxion)仅作展示与兼容别名。
+const ROLE_IDS = {
+  ATTACK: 'attack',
+  DEFENSE: 'defense',
+  AMBUSH: 'ambush',
+};
+
+// 固有阵营 → 轮转角色（兜底映射，仅用于兼容旧调用/展示推导）
+const FACTION_TO_ROLE = {
+  earth: 'attack',
+  balon: 'defense',
+  maxion: 'ambush',
+  unknow: 'attack',
+};
+
+/**
+ * 取单位轮转角色：优先显式 role，回退固有阵营映射，再兜底 attack。
+ * 逻辑判定(敌我/可见/胜负/技能)必须以 role 为准，faction 仅用于展示。
+ */
+function unitRoleOf(u) {
+  if (!u) return 'attack';
+  if (u.role) return u.role;
+  if (u.faction) return FACTION_TO_ROLE[u.faction] || 'attack';
+  return 'attack';
+}
+
+/** 将传入的 faction 或 role 统一解析为注册表可用键（role 优先，faction 回退到对应 role） */
+function resolveRegistryKey(key) {
+  if (key == null) return undefined;
+  if (FactionSkillRegistry[key]) return key;            // 已是合法键(role 或 faction 别名)
+  if (FACTION_TO_ROLE[key]) return FACTION_TO_ROLE[key]; // 传入固有阵营 → 对应角色
+  return key;
+}
 
 /**
  * 阵营技能注册表
@@ -389,7 +425,7 @@ const FactionSkillRegistry = {
           };
 
           // 掷骰子决定效果
-          const roll = DamagePipe.rollDice(this.params.dice_sides);
+          const roll = DiceService.roll(this.params.dice_sides);
           const effect = this.params.effects[roll];
           
           result.roll = roll;
@@ -449,7 +485,7 @@ const FactionSkillRegistry = {
         
         execute({ attacker, roll }) {
           // 需要掷骰超过阈值才触发
-          const triggerRoll = DamagePipe.rollDice(10);
+          const triggerRoll = DiceService.roll(10);
           
           if (triggerRoll > 5) {  // >5 触发
             const applied = BuffManager.applyBuff(
@@ -521,11 +557,18 @@ const FactionSkillRegistry = {
   }
 };
 
+// 方案A：将三大阵营技能数据以轮转角色(attack/defense/ambush)暴露为同级键，
+// 使技能严格按战术角色发放；固有阵营键保留为兼容别名（指向同一份数据）。
+FactionSkillRegistry[ROLE_IDS.ATTACK] = FactionSkillRegistry[FACTION_IDS.EARTH];
+FactionSkillRegistry[ROLE_IDS.DEFENSE] = FactionSkillRegistry[FACTION_IDS.BALON];
+FactionSkillRegistry[ROLE_IDS.AMBUSH] = FactionSkillRegistry[FACTION_IDS.MAXION];
+
 /**
  * 获取阵营技能
  */
-function getFactionSkill(faction, skillId) {
-  const factionData = FactionSkillRegistry[faction];
+function getFactionSkill(factionOrRole, skillId) {
+  const key = resolveRegistryKey(factionOrRole);
+  const factionData = key ? FactionSkillRegistry[key] : null;
   if (!factionData) return null;
   return factionData.skills[skillId] || null;
 }
@@ -533,8 +576,9 @@ function getFactionSkill(faction, skillId) {
 /**
  * 获取阵营所有技能
  */
-function getFactionSkills(faction) {
-  const factionData = FactionSkillRegistry[faction];
+function getFactionSkills(factionOrRole) {
+  const key = resolveRegistryKey(factionOrRole);
+  const factionData = key ? FactionSkillRegistry[key] : null;
   if (!factionData) return [];
   return Object.values(factionData.skills);
 }
@@ -542,28 +586,38 @@ function getFactionSkills(faction) {
 /**
  * 获取阵营信息
  */
-function getFactionInfo(faction) {
-  return FactionSkillRegistry[faction] || null;
+function getFactionInfo(factionOrRole) {
+  const key = resolveRegistryKey(factionOrRole);
+  const data = key ? FactionSkillRegistry[key] : null;
+  if (data) return data;
+  // ★ A3 安全兜底锁：未知阵营不再返回 null（避免调用方读取 .color / .id /
+  // .skills 等属性时抛 TypeError 致 /attack 500）。返回与已知阵营同构的安全结构，
+  // 由 getFactionSkills / getFactionBuff 兜底为空，确保引擎安全向下兼容。
+  return { id: factionOrRole, name: factionOrRole, style: '未知', description: '', skills: {}, buff: {} };
 }
 
 /**
- * 检查单位是否拥有某技能
+ * 检查单位是否拥有某技能（按轮转角色判定）
  */
 function unitHasSkill(unit, skillId) {
-  const skill = getFactionSkill(unit.faction, skillId);
+  const skill = getFactionSkill(unitRoleOf(unit), skillId);
   return skill !== null;
 }
 
 /**
- * 获取单位所有可用技能
+ * 获取单位所有可用技能（按轮转角色判定）
  */
 function getUnitSkills(unit) {
-  return getFactionSkills(unit.faction);
+  return getFactionSkills(unitRoleOf(unit));
 }
 
 module.exports = {
   FactionSkillRegistry,
   FACTION_IDS,
+  ROLE_IDS,
+  FACTION_TO_ROLE,
+  unitRoleOf,
+  resolveRegistryKey,
   getFactionSkill,
   getFactionSkills,
   getFactionInfo,

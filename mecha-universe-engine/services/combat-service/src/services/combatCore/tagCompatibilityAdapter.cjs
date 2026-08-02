@@ -73,7 +73,8 @@ class TagCompatibilityAdapter {
         : [unit.faction_skill];
       
       factionSkills.forEach(skillId => {
-        const skill = FactionSkillRegistry.getFactionSkill(unit.faction, skillId);
+        // 方案A：按轮转角色发放阵营技能；回退固有阵营兼容旧数据
+        const skill = FactionSkillRegistry.getFactionSkill(unit.role || unit.faction, skillId);
         if (skill) {
           skills.push({
             ...skill,

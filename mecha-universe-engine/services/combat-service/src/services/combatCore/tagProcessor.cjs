@@ -4,6 +4,7 @@
  */
 
 const tagRegistry = require('./tagRegistry.cjs');
+const DiceService = require('./diceService.cjs');
 
 class TagProcessor {
   constructor() {
@@ -16,7 +17,7 @@ class TagProcessor {
    * @returns {number} 掷骰结果
    */
   rollDice(sides = 6) {
-    return Math.floor(Math.random() * sides) + 1;
+    return DiceService.roll(sides || 6);
   }
 
   /**

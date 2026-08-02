@@ -5,6 +5,13 @@
 
 const { AI_DIFFICULTY } = require('./aiEngine.cjs');
 
+// 方案A：取单位轮转角色，role 优先，faction 回退（逻辑判定唯一依据）
+function unitRoleOf(u) {
+  if (!u) return '';
+  if (u.role != null) return u.role;
+  return u.faction != null ? u.faction : '';
+}
+
 // 六边形网格距离计算（Even-R offset → axial → cube 距离）
 // 注意：坐标本质是偶行偏移(offset)，必须先转轴向再用立方距离，
 // 否则直接对 offset 套轴向公式会得到错误距离。与后端 hexDistanceOffset / skillExecutor._hexDistance 完全一致。
@@ -79,7 +86,7 @@ class AggressiveStrategy extends AIStrategy {
   }
 
   findEnemies(unit, gameState) {
-    return (gameState.units || []).filter(u => u.faction !== unit.faction && u.hp > 0);
+    return (gameState.units || []).filter(u => unitRoleOf(u) !== unitRoleOf(unit) && u.hp > 0);
   }
 
   findEnemiesInRange(unit, enemies, gameState) {
@@ -175,7 +182,7 @@ class DefensiveStrategy extends AIStrategy {
   }
 
   findEnemies(unit, gameState) {
-    return (gameState.units || []).filter(u => u.faction !== unit.faction && u.hp > 0);
+    return (gameState.units || []).filter(u => unitRoleOf(u) !== unitRoleOf(unit) && u.hp > 0);
   }
 
   findEnemiesInRange(unit, enemies, gameState) {
@@ -188,7 +195,8 @@ class DefensiveStrategy extends AIStrategy {
   }
 
   findSafeSpot(unit, gameState) {
-    const allies = (gameState.units || []).filter(u => u.faction === unit.faction && u.id !== unit.id);
+    // 方案A：友军判定按轮转角色归并
+    const allies = (gameState.units || []).filter(u => unitRoleOf(u) === unitRoleOf(unit) && u.id !== unit.id);
     
     // 移动到友军附近
     for (const ally of allies) {
@@ -243,7 +251,7 @@ class BalancedStrategy extends AIStrategy {
   }
 
   findEnemies(unit, gameState) {
-    return (gameState.units || []).filter(u => u.faction !== unit.faction && u.hp > 0);
+    return (gameState.units || []).filter(u => unitRoleOf(u) !== unitRoleOf(unit) && u.hp > 0);
   }
 
   findEnemiesInRange(unit, enemies, gameState) {

@@ -47,6 +47,8 @@ export interface UserProfile {
   role: UserRole;
   /** Phase 29-P1: 每日 AI 形象生成积分 */
   credits: number;
+  /** 续接战局：最近一次创建/加入的房间 id（跨浏览器，存于 DB，登录时下发） */
+  lastRoomId?: EntityId | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
 }
@@ -176,6 +178,10 @@ export interface BattlefieldMap {
 // 五、房间与联机
 // ============================================
 
+// 角色剥离双轨制（2026-07-30）：权限身份与战术席位正交
+export type RoomIdentity = 'player' | 'referee' | 'visitor';
+export type TacticalSlot = 'attack' | 'defense' | 'ambush';
+
 export interface RoomPlayer {
   userId: EntityId;
   username: string;
@@ -183,6 +189,13 @@ export interface RoomPlayer {
   team: number;
   ready: boolean;
   joinedAt: ISODateTime;
+  // 双轨制字段（替代被重载的 room_players.role）
+  identityRole?: RoomIdentity;
+  tacticalSlot?: TacticalSlot | null;
+  // 兼容遗留字段
+  role?: string;
+  isSpectator?: boolean;
+  selectedUnits?: string[];
 }
 
 export interface RoomSettings {
@@ -253,6 +266,8 @@ export interface BattleUnit {
   action_points: Record<string, number>;
   // Phase 30-Cover: 战场端渲染补全字段（由 deploy-unit / initialize 注入，供前端渲染圆标/七视图）
   faction?: string;
+  /** 方案A：轮转角色(attack/defense/ambush)。逻辑判定(敌我/可见/胜负/技能)的唯一依据；faction 仅用于展示。 */
+  role?: string;
   name?: string;
   codename?: string;
   unitCode?: string;
@@ -265,10 +280,25 @@ export interface BattleUnit {
   moveRange?: number;
   /** 阶段二：基准机动（仅机体机动，机动差额基准） */
   mobility?: number;
+  /** 攻击射程（= 1 + floor(射击/25)）：提升为顶层字段，供前端直接读取普通攻击射程（否则默认 1） */
+  range?: number;
+  /** A5-hold_position 契约对齐：与 position 同源暴露顶层坐标，供 victoryChecker 读取占位（部署/移动同步更新） */
+  q?: number;
+  r?: number;
   /** 阶段二规则6 Royroy 浮游辅机（属性模型，非独立单位） */
   royroy?: RoyroyState;
   /** 归一化部件（attributes.parts）：供前端拆解「主机体移动力 + 额外移动力」，装备舍弃时响应式重算 */
   parts?: any;
+  /** 单位体型（体积）：s / m / l / xl，影响 HP/机动/渲染缩放/战斗尺寸修正 */
+  size?: string;
+  /** 顶层 HP 快照（= currentStats.hp 同源，applySizeHp 修正后）：供前端 dead 判定/渲染直接读取，避免 (unit.hp ?? 0) 误判阵亡 */
+  hp?: number;
+  /** 顶层最大 HP 快照（= currentStats.maxHp 同源） */
+  maxHp?: number;
+  /** 临时机动 Buff（被更大机体攻击时获得，下回合移动 +N），由 BuffManager 写入 */
+  mobility_buff?: number;
+  /** 机动 Buff 剩余回合（与 mobility_buff 配套） */
+  mobility_buff_turns?: number;
 }
 
 /** Royroy 浮游辅机状态（随主机行动，非独立 BattleUnit） */
@@ -291,6 +321,9 @@ export interface RoyroyState {
   r?: number;
   /** 回收冷却：battle.round 达到此值前不可再部署、技能不可用 */
   cooldownRound?: number;
+  /** A8 阵营继承：部署时由母机透传，确保 Royroy 被战斗核心的友军/敌军识别与归属逻辑正确处理 */
+  faction?: string;
+  ownerId?: EntityId;
 }
 
 export interface StatusEffect {
@@ -310,11 +343,16 @@ export interface BattleState {
   map: BattlefieldMap;
   log: BattleLogEntry[];
   startedAt: ISODateTime;
-  /** 阶段二规则：阵营行动顺序（攻击→防守→偷袭，空角色跳过），元素为 faction 键 */
+  /**
+   * 阶段二规则：阵营行动顺序（攻击→防守→偷袭，空角色跳过）。
+   * 元素为「角色键」：'attack' | 'defense' | 'ambush'（不再使用 earth/balon/maxion 等势力键）。
+   */
   factionTurnOrder: string[];
-  /** 当前行动阵营（faction 键） */
+  /** 当前行动角色（角色键：attack/defense/ambush） */
   activeFaction: string;
-  /** 当前阵营在 factionTurnOrder 中的索引 */
+  /** faction 键 → 角色键 的映射（决定某棋子归属哪个行动角色）。未列出的势力默认归入 attack。 */
+  factionRoles?: Record<string, string>;
+  /** 当前角色在 factionTurnOrder 中的索引 */
   activeFactionIndex: number;
   /** 战斗回合（一轮 = 所有活跃阵营各行动一次） */
   round: number;

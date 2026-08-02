@@ -16,7 +16,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { setupSocketHandlers, roomStates } from './services/socketService.js';
+import { setupSocketHandlers, roomStates, emitBattleState } from './services/socketService.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -148,6 +148,52 @@ app.get('/api/comm/watch-buffer-status', (req, res) => {
     hasPendingFlush: !!watchFlushTimer,
     maxSize: MAX_BUFFER_SIZE
   });
+});
+
+// ============================================
+// Batch A 任务1.0: Gateway → Comm 内部推送端点
+// 接收 3006 网关推送的权威战斗态，由 comm 做迷雾过滤（P1）后逐客户端广播。
+// 内部端点：校验 x-internal-token，禁止外部调用。
+// ============================================
+app.post('/internal/sync-state', (req, res) => {
+  const token = req.headers['x-internal-token'];
+  const expected = process.env.INTERNAL_SYNC_TOKEN || 'mecha-internal-sync';
+  if (token !== expected) {
+    return res.status(403).json({ error: 'forbidden: internal only' });
+  }
+
+  const { battleId, battleState } = req.body || {};
+  if (!battleId || !battleState) {
+    return res.status(400).json({ error: 'battleId 和 battleState 为必填项' });
+  }
+
+  // 迷雾过滤后逐客户端广播（P1）；推送失败仅记录，不影响网关主链路。
+  emitBattleState(io, battleId, battleState).catch((err) => {
+    console.warn('[comm] emitBattleState 异常:', err?.message || err);
+  });
+
+  res.json({ success: true });
+});
+
+// ============================================
+// 房间名册实时广播：网关在 REST 名册变更后调此内部端点
+// comm 向 `prep-<roomId>` 频道 emit `room-update`，前端整备室据此即时刷新。
+// 内部端点：校验 x-internal-token，禁止外部调用。
+// ============================================
+app.post('/internal/room-update', (req, res) => {
+  const token = req.headers['x-internal-token'];
+  const expected = process.env.INTERNAL_SYNC_TOKEN || 'mecha-internal-sync';
+  if (token !== expected) {
+    return res.status(403).json({ error: 'forbidden: internal only' });
+  }
+
+  const { roomId } = req.body || {};
+  if (!roomId) {
+    return res.status(400).json({ error: 'roomId 为必填项' });
+  }
+
+  io.to(`prep-${roomId}`).emit('room-update', { roomId, serverTime: Date.now() });
+  res.json({ success: true });
 });
 
 // ============================================

@@ -17,9 +17,76 @@
  *   Complement (补语·结果):  base_damage, reduction, bonus, bonus_value, status_effects, post_effects
  */
 
+const DiceService = require('./diceService.cjs');
+
+// ───────────────────── 技能类型 → 默认攻击距离 ─────────────────────
+// 当技能未显式声明 cast_range 时，按「技能类型(category)」推导攻击距离，
+// 确保「攻击距离由技能类型决定」成为唯一真相源，避免手填数值漂移（如远程技能被误填为1格近战距离）。
+// 显式 cast_range 始终优先；此表仅作兜底/缺省。
+const DEFAULT_RANGE_BY_CATEGORY = {
+  melee: 1,       // 近战：1 格
+  ranged: 6,      // 远程：默认取最大射程
+  auto: 0,        // 自动化/自身：0（仅自身）
+  special: 1,     // 特殊：默认 1 格（近战判定）
+  automation: 0,
+  support: 1,
+};
+
 const { getSkillConfig, getSystemConfig, getGlossaryConfig } = require('./configLoader.cjs');
+// H7 实时伤害减免（抗性 + 专注射射）：详见 damageModifiers.cjs
+const { applyDamageModifiers } = require('./damageModifiers.cjs');
 const ConditionEvaluator = require('./conditionEvaluator.cjs');
 const BranchEvaluator = require('./branchEvaluator.cjs');
+const { getHexKey } = require('./hexKey.cjs');
+const BuffManager = require('./buffManager.cjs');
+
+// ───────────────────── 单位体型（体积）换算 ─────────────────────
+// 与 backend-gateway/src/unitSize.ts 内容镜像（s < m < l < xl）
+const SIZE_ORDER = ['s', 'm', 'l', 'xl'];
+const SIZE_LABELS = { s: 'S', m: 'M', l: 'L', xl: 'XL' };
+const SIZE_ALIAS = { s: 's', small: 's', 小: 's', m: 'm', medium: 'm', 中: 'm', l: 'l', large: 'l', 大: 'l', xl: 'xl', xlarge: 'xl', 特大: 'xl', 超大: 'xl' };
+function normSize(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  if (SIZE_ORDER.includes(s)) return s;
+  return SIZE_ALIAS[s] || 'm';
+}
+function sizeDefenseBonus(a, b) {
+  const ai = SIZE_ORDER.indexOf(normSize(a));
+  const di = SIZE_ORDER.indexOf(normSize(b));
+  if (ai < 0 || di < 0) return 0;
+  return ai < di ? di - ai : 0; // 防守方更大 → 减伤
+}
+function sizeMobilityBonus(a, b) {
+  const ai = SIZE_ORDER.indexOf(normSize(a));
+  const di = SIZE_ORDER.indexOf(normSize(b));
+  if (ai < 0 || di < 0) return 0;
+  return ai > di ? ai - di : 0; // 攻击方更大 → 防守方机动补偿
+}
+
+/**
+ * 状态去重：同一来源(source)+类型(action_type)+作用域(applies_on)的状态只保留一份，
+ * 重复施放时刷新持续回合(remaining)而非叠加多层，避免助攻/守护/侦察被无限叠层。
+ */
+function _refreshOrAddStatus(unit, statusInstance) {
+  if (!unit) return statusInstance;
+  unit.statusEffects = unit.statusEffects || [];
+  const existing = unit.statusEffects.find(
+    (s) => s && s.source === statusInstance.source && s.action_type === statusInstance.action_type && s.applies_on === statusInstance.applies_on
+  );
+  if (existing) {
+    existing.consumption = {
+      ...(existing.consumption || {}),
+      remaining: statusInstance.consumption.remaining,
+      max: statusInstance.consumption.max,
+    };
+    existing.remainingTurns = statusInstance.remainingTurns;
+    existing.value = statusInstance.value;
+    existing.label = statusInstance.label;
+    return existing;
+  }
+  unit.statusEffects.push(statusInstance);
+  return statusInstance;
+}
 
 
 class SkillExecutor {
@@ -59,12 +126,19 @@ class SkillExecutor {
             category: cfg.category || 'melee',
             description: cfg.description || '',
             deterministic: cfg.deterministic !== false,
-            trigger: cfg.trigger || '',
+            // 条件触发（Conditional Trigger）：词条库可配 trigger 为对象 {type:'conditional',attack_type:[...],damage_kind:[...]}；
+            // 若配为空字符串/未配，则视为无条件（{type:'unconditional'}）。
+            trigger: (cfg.trigger && typeof cfg.trigger === 'object') ? cfg.trigger : '',
             mode: cfg.mode || '',
+            // 结构化 statusEffects 字段（自动化技能统一模型）
+            applies_on: cfg.applies_on || '',
+            modifier: cfg.modifier || '',
+            consumption: (cfg.consumption && typeof cfg.consumption === 'object') ? cfg.consumption : null,
+            target_scope: cfg.target_scope || 'self',
 
             // 宾语 Object（范围）
             target_filter: cfg.target_filter ?? 'enemy',
-            cast_range: cfg.cast_range ?? 1,
+            cast_range: cfg.cast_range ?? DEFAULT_RANGE_BY_CATEGORY[cfg.category] ?? 1,
             min_cast_range: cfg.min_cast_range ?? (cfg.min_range ?? 0),
             aoe_radius: cfg.aoe_radius ?? 0,
             sector_angle: cfg.sector_angle ?? 60,
@@ -106,6 +180,9 @@ class SkillExecutor {
             reduction: cfg.reduction ?? 0,
             bonus: cfg.bonus ?? 0,
             value: cfg.value ?? 0,
+            mobility_buff: cfg.mobility_buff != null ? Number(cfg.mobility_buff) : 0,
+            expose_radius: cfg.expose_radius != null ? Number(cfg.expose_radius) : 0,
+            expose_damage: cfg.expose_damage != null ? Number(cfg.expose_damage) : 0,
             damage_modifier_precise: cfg.damage_modifier_precise ?? 0,
             damage_multiplier: cfg.damage_multiplier ?? 1.0,
             status_effects: cfg.status_effects || [],
@@ -148,7 +225,9 @@ class SkillExecutor {
      */
     executeUniversalSkill(skillType, unit, target, context = {}, inlineSkillDef = null) {
         let cfg = getSkillConfig(skillType);
-        if (!cfg && inlineSkillDef) cfg = inlineSkillDef;
+        // 网关传入的内联定义（含技能真实 Excel 射程）始终优先，
+        // 确保技能自身射程覆盖词条库默认 cast_range（避免超距打不出伤害）
+        if (inlineSkillDef) cfg = inlineSkillDef;
         const lookupKey = (cfg === inlineSkillDef) ? cfg : skillType;
         const uf = this._getUniversalFields(lookupKey);
 
@@ -262,21 +341,105 @@ class SkillExecutor {
 
     _executeAttackSkill(skillType, unit, target, uf, cfg, dice, heightBonus, heightDiff, context) {
         const baseDamage = uf.base_damage || uf.damage_modifier_precise || 0;
-        const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
+        const diceBonus = Number(uf.success_bonus_damage) || 0;
         const attackType = uf.attack_stat === 'ranged' ? 'ranged' : 'melee';
+        const defenderResistance = (target && (target.resist_kind ?? (target.resistance && target.resistance.resist_kind))) || '无';
 
-        // ── 防御/闪避结算：防御方 evasion_mod 抵消攻击方 accuracy_mod（默认 0 → 不改变既有平衡）──
-        const defenderEvasion = Number(target?.evasion_mod ?? 0);
-        const attackerAccuracy = Number(unit?.accuracy_mod ?? 0);
-        const netDodge = Math.max(0, defenderEvasion - attackerAccuracy);
-        let dodged = false;
-        if (netDodge > 0) {
-            const dodgeRoll = 1 + Math.floor(Math.random() * 6); // 1d6
-            dodged = dodgeRoll <= netDodge;
+        // ── 阶段1.5/3.5/8.5：结构化 statusEffects 条件匹配（blockade 削机动 / assist 增伤 / guard 减伤）──
+        // 统一由遍历 unit.statusEffects + matchTrigger 动态提取，与具体技能名解耦（彻底废弃 executeAssist/Guard/Blockade）。
+        const trigCtx = { attack_type: attackType, damage_kind: uf.damage_kind };
+        const _attackerStatus = (unit && Array.isArray(unit.statusEffects))
+            ? BuffManager.getMatchingStatus(unit, trigCtx, 'attack') : [];
+        const _attackerDebuff = (unit && Array.isArray(unit.statusEffects))
+            ? BuffManager.getMatchingStatus(unit, trigCtx, 'attack_debuff_target') : [];
+        const _defenderStatus = (target && Array.isArray(target.statusEffects))
+            ? BuffManager.getMatchingStatus(target, trigCtx, 'defense') : [];
+        const blockadeMob = _attackerDebuff.reduce((s, b) => s + (Number(b.value) || 0), 0);
+        const assistVal = _attackerStatus.reduce((s, b) => s + (Number(b.value) || 0), 0);
+        const guardVal = _defenderStatus.reduce((s, b) => s + (Number(b.value) || 0), 0);
+
+        // ── 1d6 伤害倍率梯度（替代原二元 dodge：roll1→60% … roll6→110%）──
+        // 仅作用于纯伤害技能（has_dice 分支模型走 _executeBranchModelSkill，豁免本梯度）。
+        // 倍率缩放基础伤害，其后机动/地形/防御仍真实加减（方式A：减伤可见、不被地板吃掉）。
+        const ROLL_MULT = DiceService.config.rollMult;
+        const _roll = Math.min(6, Math.max(1, Number(dice?.roll ?? 4)));
+        const rollMult = ROLL_MULT[_roll - 1] ?? 1.0;
+        const baseScaled = Math.round((baseDamage || 0) * rollMult);
+
+        // ── 机动差修正（用户定义公式核心项）：攻击力 - 双方机动值差 ──
+        // 机动值差 = 防御方机动 - 攻击方机动（带正负号），作为减项；
+        // 攻击方机动高 → 差为负 → 实际增伤；防御方机动高 → 差为正 → 减伤。
+        // 若攻击来源为武器类装备，攻击方有效机动需叠加该武器机动值（context.isWeaponAttack / weaponMobility）。
+        const weaponMobRaw = (context && context.isWeaponAttack) ? Number(context.weaponMobility ?? 0) : 0;
+        const attMobBase = Number(unit?.mobility ?? 0);
+        const attMob = attMobBase + weaponMobRaw;   // 含武器机动的攻击方有效机动
+        const defMobRaw = Number(target?.mobility ?? 0);
+        const defMob = Math.max(0, defMobRaw - blockadeMob);   // 扣除 blockade 机动削弱
+        const mobilityDiff = defMob - attMob;        // 防御方机动优势
+        let mobilityMod = -mobilityDiff;             // 实际并入伤害的符号值（攻击方机动高则为正）
+        // 上限封顶：攻击方机动优势带来的增伤最高 +4；防御方机动优势（减伤）无上限。
+        let mobilityCapped = false;
+        if (mobilityMod > 4) { mobilityMod = 4; mobilityCapped = true; }
+
+        const subtotal = baseScaled + mobilityMod + diceBonus + heightBonus;
+        let finalDamage = subtotal;
+
+        // H7 实时伤害减免（抗性 + 专注射射）：在结算反击前挂一次（详见 damageModifiers.cjs）
+        let resistReduction = 0;
+        let focusedFireBonus = 0;
+        try {
+            // D 修复：传入 subtotal（而非预清零的 finalDamage），让抗性/专注射击分别归因；闪避在应用后统一归零
+            const mod = applyDamageModifiers({
+                caster: unit,
+                target,
+                damage: subtotal,
+                damageKind: uf.damage_kind,
+                attackStat: uf.attack_stat,
+                manualDice: null,
+            });
+            finalDamage = mod.damage;
+            resistReduction = mod.resistanceReduction || 0;
+            focusedFireBonus = mod.focusedFireBonus || 0;
+            if (mod.log && mod.log.length) mod.log.forEach((l) => console.log('[skillExecutor]', l));
+        } catch (e) {
+            console.error('[skillExecutor] applyDamageModifiers 失败:', e.message);
         }
 
-        let finalDamage = baseDamage + diceBonus + heightBonus;
-        if (dodged) finalDamage = 0;
+        // ── Phase 30-Cover 掩体系统实装：地形防御固定减伤（与 damagePipe._calcDefense 语义一致）──
+        // 仅当战斗上下文透传了 terrainMap（"q,r"→terrainId）时生效；无地形图则跳过（向后兼容）。
+        let terrainReduction = 0;
+        let terrainId = null;
+        try {
+            const terrainMap = (context && context.terrainMap) || null;
+            if (terrainMap && target && target.q != null) {
+                terrainId = terrainMap[getHexKey(target.q, target.r)] || null;
+                const tb = this._getTerrainDefenseBonus(target.q, target.r, terrainMap);
+                if (tb > 0) {
+                    const before = finalDamage;
+                    finalDamage = Math.max(0, finalDamage - tb);
+                    terrainReduction = before - finalDamage;
+                    if (finalDamage !== before) {
+                        console.log(`[skillExecutor][cover] 地形减伤 ${tb} → finalDamage ${before}→${finalDamage} (${target.q},${target.r})`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[skillExecutor][cover] 应用失败:', e && e.message);
+        }
+
+        // ── 阶段3.5 / 8.5：assist 增伤 + guard 减伤 ──
+        if (assistVal) finalDamage = finalDamage + assistVal;
+        if (guardVal) finalDamage = Math.max(0, finalDamage - guardVal);
+
+        // === 体型克制：被更小攻击者 → 防守方每档 +1 防御减伤 ===
+        const atkSize = normSize(unit.size);
+        const defSize = normSize(target.size);
+        const sizeDef = sizeDefenseBonus(atkSize, defSize);
+        if (sizeDef > 0) {
+          finalDamage = Math.max(0, finalDamage - sizeDef);
+        }
+        // 体型机动补偿：被更大攻击者 → 防守方下回合机动 +N（Buff 在网关写回处挂；result 构造后赋值）
+        const sizeMob = sizeMobilityBonus(atkSize, defSize);
 
         // ── 反击结算：受击方在反击射程内自动反击（仅当 glossary 配置 'counter' 技能时启用）──
         let counterTriggered = false;
@@ -288,6 +451,22 @@ class SkillExecutor {
                 counterDamage = counterRes.bonus || 0;
             }
         }
+
+        // ── 伤害公式明细（供前端战斗结算弹窗展示）──
+        const formula = [
+            { label: '基础伤害值', value: baseDamage, desc: `${attackType === 'ranged' ? '射击' : '格斗'}属性（机体+装备携带值）` },
+            { label: '投骰倍率', value: baseScaled - baseDamage, desc: `1d6=${_roll} → ×${(rollMult * 100).toFixed(0)}% 基础 ${baseDamage}×${rollMult}=${baseScaled}` },
+            { label: '机动差修正', value: mobilityMod, desc: `攻方机动 ${attMob}${weaponMobRaw > 0 ? `(机体${attMobBase}+武器${weaponMobRaw})` : ''} - 守方机动 ${defMob} = ${mobilityMod}${mobilityCapped ? '（攻击方优势封顶 +4）' : ''}${mobilityMod < 0 ? '（防御方优势减伤无上限）' : ''}` },
+            { label: '骰子加成', value: diceBonus, desc: `成功加成 ${uf.success_bonus_damage || 0}` },
+            { label: '高地加成', value: heightBonus, desc: heightDiff > 0 ? `高度差 ${heightDiff}` : '无高度差' },
+            { label: '小计', value: subtotal, isSubtotal: true },
+            { label: '抗性减伤', value: -resistReduction, desc: `伤害类型 ${uf.damage_kind || '?'} vs 防御 ${defenderResistance}` },
+            ...(focusedFireBonus > 0 ? [{ label: '专注射击加成', value: focusedFireBonus, desc: `${uf.attack_stat === 'ranged' ? '远程' : '近战'}专注射击` }] : []),
+            { label: '地形减伤', value: -terrainReduction, desc: terrainId ? `地形 ${terrainId}` : '无地形减伤' },
+            ...(sizeDef > 0 ? [{ label: '体型减伤', value: -sizeDef, desc: `防守方体型更大（${SIZE_LABELS[defSize]} ▷ ${SIZE_LABELS[atkSize]}），压制 ${sizeDef} 档，每档 −1 伤害`, isSizeDef: true }] : []),
+            { label: '最终伤害', value: finalDamage, isFinal: true },
+        ];
+        if (counterTriggered) formula.push({ label: '反击伤害(反向)', value: counterDamage, desc: '受击方自动反击', isCounter: true });
 
         const result = {
             triggered: true,
@@ -303,13 +482,28 @@ class SkillExecutor {
             height_diff: heightDiff,
             final_damage: finalDamage,
             bonus_value: finalDamage,
-            dodged,
+            dodged: false,
             counter_triggered: counterTriggered,
             counter_damage: counterDamage,
             accuracy_mod: uf.accuracy_mod,
             evasion_mod: uf.evasion_mod,
             status_effects: uf.status_effects,
+            // 本轮结算中被「命中条件且被实际使用」的 statusEffects.id 列表（供调用方扣减层数）
+            triggered_status: [
+                ..._attackerStatus.map(b => b.id),
+                ..._attackerDebuff.map(b => b.id),
+                ..._defenderStatus.map(b => b.id),
+            ],
+            formula,
         };
+
+        // 体型克制信息下沉给网关/前端（防守方更大→减伤横幅；攻击方更大→机动补偿）
+        if (sizeDef > 0) {
+          result.sizeBanner = { kind: 'def', reduction: sizeDef, attackerSize: atkSize, defenderSize: defSize };
+        }
+        if (sizeMob > 0) {
+          result.sizeTactic = { kind: 'mob', amount: sizeMob, attackerSize: atkSize, defenderSize: defSize };
+        }
 
         // 构建消息
         let msgParts = [`${uf.label}`];
@@ -323,8 +517,8 @@ class SkillExecutor {
             }
         }
         if (heightBonus > 0) msgParts.push(`高地+${heightBonus}`);
-        if (dodged) {
-            msgParts.push(`闪避(伤害0)`);
+        if (finalDamage <= 0) {
+            msgParts.push(`未造成伤害`);
         } else {
             msgParts.push(`伤害${finalDamage}`);
         }
@@ -377,7 +571,7 @@ class SkillExecutor {
         const diceBonus = dice.isSuccess ? uf.success_bonus_damage : 0;
         const finalValue = buffValue + diceBonus;
 
-        return {
+        const result = {
             triggered: true,
             type: skillType,
             action_type: 'buff',
@@ -389,6 +583,37 @@ class SkillExecutor {
                 ? `${uf.label}: +${finalValue} [掷${dice.diceType}=${dice.roll}]`
                 : `${uf.label}: +${finalValue}`
         };
+
+        // 侦察类：机动增益（自身，持续 duration）—— 不依赖 applies_on
+        if (uf.mobility_buff && !uf.applies_on) {
+            const mobStatus = BuffManager.buildStatusInstance(skillType, {
+                ...uf,
+                applies_on: 'mobility',
+                modifier: 'mobility_buff',
+                bonus: uf.mobility_buff,
+                value: uf.mobility_buff,
+            });
+            if (!Array.isArray(unit.statusEffects)) unit.statusEffects = [];
+            _refreshOrAddStatus(unit, mobStatus);
+            result.statusEffects_added = [mobStatus];
+            result.buff_value = uf.mobility_buff;
+            result.bonus_value = uf.mobility_buff;
+            result.message = `${uf.label}: 机动 +${uf.mobility_buff}（持续 ${(uf.consumption && uf.consumption.duration) || uf.duration || '?'} 回合）`;
+            return result;
+        }
+
+        // 仅当词条显式声明 applies_on（结构化自动化技能：assist/guard/blockade）时，
+        // 才生成并写回 statusEffects 实例；未声明的旧 buff（stable/sniper 等）
+        // 走原路径，仅返回 buff_value，不持久化，避免影响其语义。
+        if (uf.applies_on) {
+            const destUnit = (uf.target_scope === 'self' || uf.target_scope === 'self_only' || !uf.target_scope) ? unit : target;
+            const statusInstance = BuffManager.buildStatusInstance(skillType, uf);
+            if (!Array.isArray(destUnit.statusEffects)) destUnit.statusEffects = [];
+            _refreshOrAddStatus(destUnit, statusInstance);
+            result.statusEffects_added = [statusInstance];
+        }
+
+        return result;
     }
 
     _executeDebuffSkill(skillType, unit, target, uf, cfg, dice, context) {
@@ -397,7 +622,7 @@ class SkillExecutor {
         const finalValue = debuffValue + diceBonus;
         const statusEffects = uf.status_effects || [];
 
-        return {
+        const result = {
             triggered: true,
             type: skillType,
             action_type: 'debuff',
@@ -411,6 +636,17 @@ class SkillExecutor {
                 ? `${uf.label}: 增伤+${finalValue} [掷${dice.diceType}=${dice.roll}]`
                 : `${uf.label}: 目标周围 ${uf.aoe_range || uf.aoe_radius} 格内所有目标下次伤害 +${finalValue}`
         };
+
+        // 仅当词条显式声明 applies_on（结构化自动化技能：blockade）时生成并写回 statusEffects 实例。
+        if (uf.applies_on) {
+            const destUnit = (uf.target_scope === 'self' || uf.target_scope === 'self_only' || !uf.target_scope) ? unit : target;
+            const statusInstance = BuffManager.buildStatusInstance(skillType, uf);
+            if (!Array.isArray(destUnit.statusEffects)) destUnit.statusEffects = [];
+            _refreshOrAddStatus(destUnit, statusInstance);
+            result.statusEffects_added = [statusInstance];
+        }
+
+        return result;
     }
 
     _executePassiveSkill(skillType, unit, target, uf, cfg, dice, context) {
@@ -475,14 +711,22 @@ class SkillExecutor {
         if (hits.length === 0) {
             result.bonus_value = 0;
             result.damage = 0;
+            result.final_damage = 0;
+            // 公式明细（供前端结算弹窗展示）：未命中无伤害
+            result.formula = [
+                { label: '基础伤害值', value: Number(uf.base_damage) || 0, desc: `机体${uf.attack_stat === 'ranged' ? '射击' : '格斗'}属性（含装备，若技能由装备携带）` },
+                { label: '投骰判定', value: 0, desc: `投${uf.dice.dice_type}=${roll} 未命中任何判定分支` },
+                { label: '最终伤害', value: 0, isFinal: true, warn: true },
+            ];
             result.message = `${uf.name || uf.label}: 投骰=${roll} 未命中任何判定分支，技能未生效`;
             return result;
         }
 
         const bonus = ectx.bonus + (Number(uf.success_bonus_damage) || 0);
+        let finalDamage = 0;
         if (uf.action_type === 'attack' || (ectx.damage > 0 && uf.action_type !== 'heal')) {
             const base = ectx.damage > 0 ? ectx.damage : Number(uf.base_damage) || 0;
-            const finalDamage = base + bonus + heightBonus;
+            finalDamage = base + bonus + heightBonus;
             result.damage = finalDamage;
             result.final_damage = finalDamage;
             result.base_damage = Number(uf.base_damage) || 0;
@@ -490,6 +734,15 @@ class SkillExecutor {
         } else {
             result.bonus_value = bonus;
         }
+        // 公式明细（供前端结算弹窗展示）：有判定效果词条（投骰子分支）逐行呈现
+        const branchesDesc = hits.map(h => h.label || h.action || '分支').join(' / ');
+        result.formula = [
+            { label: '基础伤害值', value: Number(uf.base_damage) || 0, desc: `机体${uf.attack_stat === 'ranged' ? '射击' : '格斗'}属性（含装备，若技能由装备携带）` },
+            { label: '投骰判定', value: 0, desc: `投${uf.dice.dice_type}=${roll} → 命中分支：${branchesDesc}` },
+            ...(bonus > 0 ? [{ label: '效果加成', value: bonus, desc: ectx.log.join('; ') }] : []),
+            { label: '高地加成', value: heightBonus, desc: heightDiff > 0 ? `高度差 ${heightDiff}` : '无高度差' },
+            { label: '最终伤害', value: finalDamage, isFinal: true },
+        ];
 
         if (ectx.heal > 0) {
             result.heal = ectx.heal;
@@ -516,19 +769,9 @@ class SkillExecutor {
     // 骰子系统 (Phase 8)
     // ============================================================
 
-    _parseDice(diceStr) {
-        const m = String(diceStr || '1d6').match(/^(\d+)d(\d+)$/i);
-        if (!m) return { count: 1, sides: 6 };
-        return { count: parseInt(m[1]), sides: parseInt(m[2]) };
-    }
-
+    // 掷骰（统一走 diceService.cjs，支持 "NdM" 与面数）
     _rollDice(diceStr) {
-        const { count, sides } = this._parseDice(diceStr);
-        let total = 0;
-        for (let i = 0; i < count; i++) {
-            total += Math.floor(Math.random() * sides) + 1;
-        }
-        return total;
+        return DiceService.roll(diceStr);
     }
 
     _evaluateDice(skillCfg) {
@@ -825,80 +1068,19 @@ class SkillExecutor {
     }
 
     // ---- 自动化技能 ----
-
-    executeAssist(unit, increment = true) {
-        const uf = this._getUniversalFields('assist');
-        if (!unit || !unit.skills) return { triggered: false };
-        const hasAssist = unit.skills.some(s => s && s.type === 'assist' && s.active);
-        if (!hasAssist) return { triggered: false };
-
-        if (increment) unit.assist_counter = (unit.assist_counter || 0) - 1;
-        if ((unit.assist_counter || 0) <= 0) {
-            unit.assist_counter = 0;
-            return { triggered: false, message: '助攻效果已耗尽' };
-        }
-
-        const bonus = uf.bonus || uf.base_damage || 3;
-        return {
-            triggered: true, type: 'assist', active: true,
-            bonus, bonus_value: bonus,
-            remaining: unit.assist_counter,
-            message: `助攻：伤害 +${bonus}（剩余 ${unit.assist_counter} 次）`
-        };
-    }
-
-    executeGuard(unit, increment = true) {
-        const uf = this._getUniversalFields('guard');
-        if (!unit || !unit.skills) return { triggered: false };
-        const hasGuard = unit.skills.some(s => s && s.type === 'guard' && s.active);
-        if (!hasGuard) return { triggered: false };
-
-        if (increment) unit.guard_counter = (unit.guard_counter || 0) - 1;
-        if ((unit.guard_counter || 0) <= 0) {
-            unit.guard_counter = 0;
-            return { triggered: false, message: '守护效果已耗尽' };
-        }
-
-        const reduction = uf.reduction || 5;
-        return {
-            triggered: true, type: 'guard', active: true,
-            reduction, bonus_value: reduction,
-            remaining: unit.guard_counter,
-            message: `守护：伤害 -${reduction}（剩余 ${unit.guard_counter} 次）`
-        };
-    }
-
-    executeBlockade(unit, target, increment = true) {
-        const uf = this._getUniversalFields('blockade');
-        if (!unit || !unit.skills) return { triggered: false };
-        const hasBlockade = unit.skills.some(s => s && s.type === 'blockade' && s.active);
-        if (!hasBlockade) return { triggered: false };
-
-        if (increment) unit.blockade_counter = (unit.blockade_counter || 0) - 1;
-        if ((unit.blockade_counter || 0) <= 0) {
-            unit.blockade_counter = 0;
-            return { triggered: false, message: '阻碍效果已耗尽' };
-        }
-
-        const mobReduce = uf.value || uf.reduction || 5;
-        return {
-            triggered: true, type: 'blockade', active: true,
-            mobility_reduction: mobReduce, bonus_value: mobReduce,
-            remaining: unit.blockade_counter,
-            message: `阻碍：对方机动值 -${mobReduce}（剩余 ${unit.blockade_counter} 次）`
-        };
-    }
-
-    initAssistCounter(unit) { unit.assist_counter = 5; }
-    initGuardCounter(unit) { unit.guard_counter = 3; }
-    initBlockadeCounter(unit) { unit.blockade_counter = 3; }
+    // 注：executeAssist/executeGuard/executeBlockade 已于 v5 重构中彻底废弃。
+    // 自动化技能（assist/guard/blockade/stable/sniper/scout）一律通过统一的
+    // statusEffects 模型 + BuffManager 动态提取，与具体技能名解耦。
 
     executeScout(unit, ally) {
         const uf = this._getUniversalFields('scout');
         const scoutRange = unit.ranged || unit.attack || 10;
         if (!ally) return { triggered: false };
         const dist = this._hexDistance(unit, ally);
-        if (dist > scoutRange || unit.faction !== ally.faction) return { triggered: false };
+        // 方案A：侦察友军判定按轮转角色归并（同角色=友军）
+        const su = unit.role != null ? unit.role : unit.faction;
+        const sa = ally.role != null ? ally.role : ally.faction;
+        if (dist > scoutRange || su !== sa) return { triggered: false };
         return {
             triggered: true, type: 'scout', active: true,
             evasion_bonus: uf.evasion_mod || 2,
@@ -1069,7 +1251,7 @@ class SkillExecutor {
     _getTerrainDefenseBonus(cellQ, cellR, terrainMap) {
         if (!terrainMap) return 0;
         const terrains = this._getTerrainConfig();
-        const tid = terrainMap[cellQ + ',' + cellR] || 'moon';
+        const tid = terrainMap[getHexKey(cellQ, cellR)] || 'moon';
         const def = terrains[tid];
         return def?.defense_bonus ?? 0;
     }
@@ -1077,7 +1259,7 @@ class SkillExecutor {
     _getTerrainMoveCost(cellQ, cellR, terrainMap) {
         if (!terrainMap) return 1;
         const terrains = this._getTerrainConfig();
-        const tid = terrainMap[cellQ + ',' + cellR] || 'moon';
+        const tid = terrainMap[getHexKey(cellQ, cellR)] || 'moon';
         const def = terrains[tid];
         return def?.move_cost ?? 1;
     }

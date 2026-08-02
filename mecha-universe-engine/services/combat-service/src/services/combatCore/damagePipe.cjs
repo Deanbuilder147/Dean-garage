@@ -21,6 +21,9 @@
 
 // DiceEngine.cjs 已于 Phase 4 废除，直接使用 Math.random()
 
+const { BuffManager } = require('./buffManager.cjs');
+const DiceService = require('./diceService.cjs');
+
 // ============================================================
 // 常量配置
 // ============================================================
@@ -52,17 +55,17 @@ const WEAPON_COUNTER_PENALTY = -2;
 class DamagePipe {
 
     /**
-     * 掷骰（Math.random，DiceEngine 已于 Phase 4 废除）
+     * 掷骰（统一走 diceService.cjs，DiceEngine 已于 Phase 4 废除）
      */
     static rollDice(faces = 6) {
-        return Math.floor(Math.random() * faces) + 1;
+        return DiceService.roll(faces);
     }
 
     /**
-     * 暴击判定：1d6 >= 5 → 33.3% 概率
+     * 暴击判定：1d6 >= 阈值（阈值由骰子配置驱动）
      */
     static checkCrit() {
-        return this.rollDice(6) >= CRIT_THRESHOLD;
+        return DiceService.roll(6) >= DiceService.config.critThreshold;
     }
 
     /**
@@ -96,6 +99,24 @@ class DamagePipe {
         // Step 5: 权威伤害种类——优先 config.damage_kind（词条贡献），缺失回退 weaponType
         const damageKind = config.damage_kind || attacker.weaponType || 'kinetic';
 
+        // ---- 阶段1.5/3.5/8.5：结构化 statusEffects 条件匹配（blockade 削机动 / assist 增伤 / guard 减伤）----
+        // 统一由遍历 statusEffects + matchTrigger 动态提取，与具体技能名解耦。
+        // 若调用方未传入 statusEffects（旧 config 形状），则全部为 0，不影响既有行为。
+        const trigCtx = { attack_type: attackType, damage_kind: damageKind };
+        const _attackerStatus = (attacker.statusEffects && Array.isArray(attacker.statusEffects))
+            ? BuffManager.getMatchingStatus(attacker, trigCtx, 'attack') : [];
+        const _attackerDebuff = (attacker.statusEffects && Array.isArray(attacker.statusEffects))
+            ? BuffManager.getMatchingStatus(attacker, trigCtx, 'attack_debuff_target') : [];
+        const _defenderStatus = (defender.statusEffects && Array.isArray(defender.statusEffects))
+            ? BuffManager.getMatchingStatus(defender, trigCtx, 'defense') : [];
+        const blockadeMob = _attackerDebuff.reduce((s, b) => s + (Number(b.value) || 0), 0);
+        const assistVal = _attackerStatus.reduce((s, b) => s + (Number(b.value) || 0), 0);
+        const guardVal = _defenderStatus.reduce((s, b) => s + (Number(b.value) || 0), 0);
+        // 侦察机动增益（applies_on='mobility'）：计入攻方有效机动
+        const _mobilityBuff = (attacker.statusEffects && Array.isArray(attacker.statusEffects))
+            ? BuffManager.getMatchingStatus(attacker, trigCtx, 'mobility') : [];
+        const mobilityBuffVal = _mobilityBuff.reduce((s, b) => s + (Number(b.value) || 0), 0);
+
         // ---- 阶段 1: 基础攻击力（近战=格斗 / 远程=射击） ----
         const baseAttack = attackType === 'melee'
             ? (attacker.melee || attacker.attack || 10)
@@ -105,13 +126,13 @@ class DamagePipe {
         // ---- 阶段 2: 双方机动值差（阶段二：支持上下文有效机动注入） ----
         const attMobility = (config.attacker_effective_mobility != null)
             ? config.attacker_effective_mobility
-            : (attacker.mobility || 0);
+            : (attacker.mobility || 0) + mobilityBuffVal;
         const defMobility = (config.defender_effective_mobility != null)
             ? config.defender_effective_mobility
             : (defender.mobility || 0);
         // 狙击技能：目标机动值 -2（Excel: 舍弃移动，机动值差计算中目标机动值-2）
         const sniperReduction = config.sniper_mobility_reduction || 0;
-        const effectiveDefMobility = Math.max(0, defMobility - sniperReduction);
+        const effectiveDefMobility = Math.max(0, defMobility - sniperReduction - blockadeMob);
         // 机动值差额 = 攻方有效机动 - 守方有效机动；上限封顶 +5，下限不设限制（允许负数无限放大）
         const mobilityDiff = Math.min(5, attMobility - effectiveDefMobility);
         result.stages.mobility_diff = mobilityDiff;
@@ -127,8 +148,8 @@ class DamagePipe {
         const extraValues = this._calcExtraValues(attacker);
         result.stages.extras = extraValues;
 
-        // ---- 阶段 5: 追加额外值后的攻击力 ----
-        const attackAfterExtras = tempAttack + extraValues.total;
+        // ---- 阶段 5: 追加额外值后的攻击力（含 assist 增伤）----
+        const attackAfterExtras = tempAttack + extraValues.total + assistVal;
         result.stages.attack_after_extras = attackAfterExtras;
 
         // ---- 阶段 6: 高地优势加成 ----
@@ -174,13 +195,20 @@ class DamagePipe {
         result.stages.is_crit = isCrit;
 
         if (isCrit) {
-            const critMult = CRIT_MIN + Math.random() * (CRIT_MAX - CRIT_MIN);
+            const critMult = DiceService.config.critMin + Math.random() * (DiceService.config.critMax - DiceService.config.critMin);
             result.crit_multiplier = parseFloat(critMult.toFixed(2));
             finalDamage = Math.floor(finalDamage * critMult);
         }
 
         result.final_damage = Math.max(GUARANTEED_DAMAGE, finalDamage);
         result.stages.final_damage = result.final_damage;
+
+        // 本轮结算中被「命中条件且被实际使用」的 statusEffects.id 列表（供调用方扣减层数）
+        result.triggered_status = [
+            ..._attackerStatus.map(b => b.id),
+            ..._attackerDebuff.map(b => b.id),
+            ..._defenderStatus.map(b => b.id),
+        ];
 
         return result;
     }
@@ -275,7 +303,7 @@ class DamagePipe {
             : (defender.armor || 0);
         const baseDefense = (defender.defense ?? 0) + armorValue;
         const shieldValue = defender.shield || 0;
-        const defenseBuffs = this._sumBuffs(defender.buffs || [], 'defense');
+        const defenseBuffs = this._sumBuffs(defender.buffs || [], 'defense') + guardVal;
 
         // 泛化地形防御
         const terrainId = defender.terrain || 'moon';
@@ -369,12 +397,8 @@ class DamagePipe {
         const successLine = config.success_line ?? 4;
         const bonusDamage = config.success_bonus_damage ?? 0;
 
-        // 解析骰子字符串
-        const m = String(diceType).match(/^(\d+)d(\d+)$/i);
-        const count = m ? parseInt(m[1]) : 1;
-        const sides = m ? parseInt(m[2]) : 6;
-        let roll = 0;
-        for (let i = 0; i < count; i++) roll += Math.floor(Math.random() * sides) + 1;
+        // 解析并掷骰（统一走 diceService.cjs，支持 "NdM" 与面数）
+        const roll = DiceService.roll(diceType);
 
         const isSuccess = roll >= successLine;
         const bonus = isSuccess ? bonusDamage : 0;

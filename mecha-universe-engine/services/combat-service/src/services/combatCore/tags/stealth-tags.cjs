@@ -55,7 +55,7 @@ module.exports = [
   {
     id: 'stealth_ambush',
     name: '奇袭',
-    faction: 'maxion',
+    faction: 'any',
     description: '隐身状态下攻击造成额外50%伤害',
 
     trigger: {
@@ -79,8 +79,7 @@ module.exports = [
       priority: 80,
       optional: false,
       passive: false,
-      interrupt: false,
-      faction_lock: 'maxion'
+      interrupt: false
     }
   },
 

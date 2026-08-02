@@ -1,7 +1,12 @@
 /**
  * Buff管理器 - BuffManager
  * 负责处理战斗中的临时增益效果
+ *
+ * v5：兼容旧标量 API（attack_buff/defense_buff/mobility_buff + *_turns），
+ * 并新增结构化 statusEffects 列表管理（条件触发 + 次数/回合消耗）。
  */
+
+const { matchTrigger } = require('./conditionTrigger.cjs');
 
 class BuffManager {
   
@@ -269,6 +274,106 @@ class BuffManager {
     }
 
     return cleared;
+  }
+
+  // ============================================================
+  // v5 结构化 statusEffects API（条件触发 + 次数/回合消耗）
+  // ============================================================
+
+  /**
+   * 由词条通用字段（uf）构造一个结构化 statusEffects 实例。
+   * @param {string} skillType - 词条库 key（如 'assist'）
+   * @param {Object} uf - _getUniversalFields 产出的通用字段
+   * @returns {Object} statusEffects 实例
+   */
+  static buildStatusInstance(skillType, uf) {
+    const c = uf && uf.consumption;
+    let consumption;
+    if (c && c.mode === 'duration' && c.duration != null) {
+      consumption = { mode: 'duration', remaining: c.duration, max: c.duration };
+    } else if (c && c.count != null) {
+      consumption = { mode: c.mode || 'counter', remaining: c.count, max: c.count };
+    } else {
+      consumption = { mode: 'counter', remaining: 1, max: 1 };
+    }
+
+    const trigger = (uf && uf.trigger && typeof uf.trigger === 'object' && uf.trigger.type)
+      ? uf.trigger
+      : { type: 'unconditional' };
+
+    const appliesOn = (uf && uf.applies_on) || 'attack';
+    const actionType = (uf && uf.modifier) || 'attack_buff';
+    const value = Number((uf && (uf.base_damage || uf.bonus || uf.value || uf.reduction)) || 0);
+
+    return {
+      id: 'st_' + Date.now().toString(36) + '_' + skillType + '_' + Math.random().toString(36).slice(2, 7),
+      source: skillType,
+      label: (uf && (uf.label || uf.name)) || skillType,
+      action_type: actionType,
+      value,
+      consumption,
+      trigger,
+      applies_on: appliesOn,
+    };
+  }
+
+  /**
+   * 将一个 statusEffects 实例写入单位（去重：同 id 不重复添加）。
+   */
+  static addStatus(unit, instance) {
+    if (!unit) return;
+    if (!Array.isArray(unit.statusEffects)) unit.statusEffects = [];
+    if (instance && !unit.statusEffects.some(s => s && s.id === instance.id)) {
+      unit.statusEffects.push(instance);
+    }
+  }
+
+  /**
+   * 按「生效方向(applies_on) + 条件触发」过滤出当前被命中的 statusEffects。
+   * @param {Object} unit - 单位（含 statusEffects 数组）
+   * @param {Object} ctx - { attack_type, damage_kind }
+   * @param {string} appliesOn - 'attack' | 'defense' | 'attack_debuff_target'
+   * @returns {Object[]}
+   */
+  static getMatchingStatus(unit, ctx, appliesOn) {
+    if (!unit || !Array.isArray(unit.statusEffects)) return [];
+    return unit.statusEffects.filter(s => s && s.applies_on === appliesOn && matchTrigger(s, ctx));
+  }
+
+  /**
+   * 扣减单个 status 的 counter（remaining--），归零则移除。duration 模式不在此扣减。
+   */
+  static consumeStatus(unit, id) {
+    if (!unit || !Array.isArray(unit.statusEffects) || !id) return;
+    const idx = unit.statusEffects.findIndex(s => s && s.id === id);
+    if (idx < 0) return;
+    const s = unit.statusEffects[idx];
+    if (s.consumption && s.consumption.mode === 'counter') {
+      s.consumption.remaining = (s.consumption.remaining || 1) - 1;
+      if (s.consumption.remaining <= 0) unit.statusEffects.splice(idx, 1);
+    }
+  }
+
+  /**
+   * 批量扣减（供调用方拿到 triggered_status 列表后调用）。
+   */
+  static consumeStatuses(unit, ids) {
+    if (!unit || !Array.isArray(unit.statusEffects) || !Array.isArray(ids)) return;
+    for (const id of ids) BuffManager.consumeStatus(unit, id);
+  }
+
+  /**
+   * 回合末：扣减 duration 类 status 的 remaining，归零则移除。
+   */
+  static tickStatus(unit) {
+    if (!unit || !Array.isArray(unit.statusEffects)) return;
+    for (let i = unit.statusEffects.length - 1; i >= 0; i--) {
+      const s = unit.statusEffects[i];
+      if (s && s.consumption && s.consumption.mode === 'duration') {
+        s.consumption.remaining = (s.consumption.remaining || 1) - 1;
+        if (s.consumption.remaining <= 0) unit.statusEffects.splice(i, 1);
+      }
+    }
   }
 }
 

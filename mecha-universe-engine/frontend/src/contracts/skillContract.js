@@ -369,6 +369,35 @@ function emptyContract() {
  * @param {Object} raw
  * @returns {Object} 编辑器 reactive 形状
  */
+// 技能字段定义：驱动编辑器「兼容插槽 / 自动化增益」分区，含完整中文释义
+export const SKILL_FIELD_DEFS = [
+  // —— 兼容插槽（旧专属字段）——
+  { key: 'aoe_radius', label: 'AOE 半径', hint: '范围技能影响半径（格）：0 表示仅命中单体目标', section: 'compat', type: 'number', min: 0, max: 10 },
+  { key: 'range_type', label: '范围类型', hint: '技能作用几何：同心圆 / 地图炮 / 扇形 / 单点', section: 'compat', type: 'select', options: [ { value: 'radial', label: '同心圆 radial' }, { value: 'directional_beam', label: '地图炮 directional_beam' }, { value: 'cone', label: '扇形 cone' }, { value: 'single', label: '单点 single' } ] },
+  { key: 'beam_width', label: '炮宽(格)', hint: '仅地图炮(directional_beam)生效：横向覆盖的格数', section: 'compat', type: 'number', min: 1, max: 10 },
+  { key: 'min_cast_range', label: '最小距离', hint: '施放技能所需的最小格距（格）；专注射击为 4（不可打近身）', section: 'compat', type: 'number', min: 0, max: 20 },
+  { key: 'accuracy_mod', label: '命中修正', hint: '命中率增减（±整数）：正加负减', section: 'compat', type: 'number', min: -10, max: 10 },
+  { key: 'evasion_mod', label: '闪避修正', hint: '闪避率增减（±整数）；侦察原用此字段，新版机动值见「机动值加成」', section: 'compat', type: 'number', min: -10, max: 10 },
+  { key: 'height_bonus_per_diff', label: '高地格加成', hint: '每 1 格高度差提供的额外伤害值', section: 'compat', type: 'number', min: 0, max: 10 },
+  { key: 'attack_stat', label: '攻击属性', hint: '伤害结算使用的攻击属性：格斗 / 射击 / 取最高', section: 'compat', type: 'select', options: [ { value: 'melee', label: '格斗 melee' }, { value: 'ranged', label: '射击 ranged' }, { value: 'max', label: '取最高 max' } ] },
+  { key: 'base_damage', label: '基础伤害', hint: '不依赖武器的固定伤害值；专注射击改为 0（改用百分比加成）', section: 'compat', type: 'number' },
+  { key: 'requires_unmoved', label: '要求未移动', hint: '发动前本单位本回合必须未移动', section: 'compat', type: 'bool' },
+  { key: 'requires_stealth', label: '要求隐身', hint: '发动前本单位必须处于隐匿状态', section: 'compat', type: 'bool' },
+  // —— 自动化 / 增益配置（核心新增）——
+  { key: 'ap_cost', label: '行动点消耗', hint: '发动该技能消耗的战术行动点：1=1 个额度；2=移动+攻击（专注射击）', section: 'automation', type: 'number', min: 0, max: 3 },
+  { key: 'duration', label: '持续回合', hint: '增益/减益持续的阵营回合数；每过一个阵营回合递减 1，归零即清除（防御=1）', section: 'automation', type: 'number', min: 0, max: 20 },
+  { key: 'consumption', label: '消费模型', hint: '消耗语义：{"mode":"duration","duration":N} 按回合，或 {"mode":"counter","count":N} 按事件次数', section: 'automation', type: 'json' },
+  { key: 'bonus', label: '增伤数值', hint: '助攻专用：增益期间每次造成伤害额外 +N（助攻=3）', section: 'automation', type: 'number' },
+  { key: 'reduction', label: '减伤数值', hint: '守护专用：增益期间每次受到伤害额外 -N（守护=5，与百分比减伤不叠加）', section: 'automation', type: 'number' },
+  { key: 'value', label: '修正数值', hint: '阻碍专用：攻击结算时对方机动值 -N（阻碍=5）', section: 'automation', type: 'number' },
+  { key: 'mobility_buff', label: '机动值加成', hint: '侦察专用：为自身增加的机动值（侦察=+2），持续至自身下个回合开始', section: 'automation', type: 'number' },
+  { key: 'applies_on', label: '生效时机', hint: '触发阶段：attack(造成伤害时)/defense(受到伤害时)/attack_debuff_target(攻击计算对方时)', section: 'automation', type: 'select', options: [ { value: '', label: '无' }, { value: 'attack', label: '造成伤害 attack' }, { value: 'defense', label: '受到伤害 defense' }, { value: 'attack_debuff_target', label: '攻击削敌 attack_debuff_target' } ] },
+  { key: 'modifier', label: '修正类型', hint: '数值作用类型：attack_buff(增伤)/defense_buff(减伤)/mobility_debuff(削机动)', section: 'automation', type: 'select', options: [ { value: '', label: '无' }, { value: 'attack_buff', label: '增伤 attack_buff' }, { value: 'defense_buff', label: '减伤 defense_buff' }, { value: 'mobility_debuff', label: '削机动 mobility_debuff' } ] },
+  { key: 'dice_ranges', label: '骰子加成区间', hint: '专注射击专用：[{min,max,bonus_pct}]，bonus_pct 为攻击伤害百分比（1→20%/2-5→50%/6→100%）', section: 'automation', type: 'json' },
+  { key: 'expose_radius', label: '暴露半径', hint: '侦察专用：暴露自身周围 N 格视野（对范围内敌方造成占位伤害）', section: 'automation', type: 'number', min: 0, max: 10 },
+  { key: 'expose_damage', label: '暴露伤害', hint: '侦察暴露造成的伤害值，通常为 0（预留给偷袭阵营隐匿技钩子）', section: 'automation', type: 'number' },
+]
+
 export function hydrateSkill(raw = {}) {
   const n = normalizeSkill(raw);
   const branches = (n.dice.dice_branches || []).map((b, i) => ({
@@ -409,7 +438,31 @@ export function hydrateSkill(raw = {}) {
     trigger: n.trigger,
     has_dice: n.dice.has_dice,
     dice_type: n.dice.dice_type,
-    dice_branches: branches
+    dice_branches: branches,
+    // —— 自动化 / 增益 / 兼容字段：加载时一并保留，确保编辑器可编辑且保存不丢 ——
+    description: raw.description || raw.desc || '',
+    aoe_radius: (raw.aoe_radius != null ? Number(raw.aoe_radius) : 0),
+    range_type: raw.range_type || 'radial',
+    beam_width: (raw.beam_width != null ? Number(raw.beam_width) : 1),
+    height_bonus_per_diff: (raw.height_bonus_per_diff != null ? Number(raw.height_bonus_per_diff) : 0),
+    attack_stat: raw.attack_stat || 'melee',
+    bonus: (raw.bonus != null ? Number(raw.bonus) : 0),
+    reduction: (raw.reduction != null ? Number(raw.reduction) : 0),
+    value: (raw.value != null ? Number(raw.value) : 0),
+    applies_on: raw.applies_on || '',
+    modifier: raw.modifier || '',
+    duration: (raw.duration != null ? Number(raw.duration) : (raw.consumption && raw.consumption.duration != null ? Number(raw.consumption.duration) : 0)),
+    ap_cost: (raw.ap_cost != null ? Number(raw.ap_cost) : 0),
+    mobility_buff: (raw.mobility_buff != null ? Number(raw.mobility_buff) : 0),
+    expose_radius: (raw.expose_radius != null ? Number(raw.expose_radius) : 0),
+    expose_damage: (raw.expose_damage != null ? Number(raw.expose_damage) : 0),
+    bonus_pct: (raw.bonus_pct != null ? Number(raw.bonus_pct) : 0),
+    consumption: raw.consumption != null ? raw.consumption : null,
+    dice_ranges: raw.dice_ranges != null ? raw.dice_ranges : null,
+    deterministic: !!raw.deterministic,
+    once_per_battle: !!raw.once_per_battle,
+    is_auto: (raw.category || '').toLowerCase() === 'auto' || !!raw.is_auto,
+    is_automation: !!raw.is_automation || (raw.category || '').toLowerCase() === 'auto'
   };
 }
 

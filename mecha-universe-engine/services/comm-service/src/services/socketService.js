@@ -18,6 +18,53 @@ if (!JWT_SECRET) {
 // 内存中的房间状态管理
 const roomStates = new Map();
 
+// Batch A 任务1.0/1.1: 最新推送战斗态缓存 + 迷雾过滤（P1）
+export const latestBattleState = new Map();
+
+/**
+ * 迷雾过滤（P1）：依据观察者角色/阵营裁剪可见单位。
+ *  - REFEREE / DOMINATOR：全树可见
+ *  - Visitor：仅见自己 faction，且剔除一切隐身单位（stealth===true）
+ *  - Player ：敌方隐身单位（faction!==观察者 且 stealth===true）不可见
+ */
+export function applyFog(state, faction, role, isHost) {
+  if (!state) return state;
+  const r = (role || '').toString().toUpperCase();
+  // GM / 管理员 / 房主(isHost 代打) 豁免战争迷雾：直接下发全量快照（上帝视角）
+  if (r === 'REFEREE' || r === 'DOMINATOR' || isHost) return state;
+  const units = Array.isArray(state.units) ? state.units : [];
+  const filtered = units.filter((u) => {
+    if (r === 'VISITOR') {
+      if (u.stealth === true) return false;
+      return u.faction === faction;
+    }
+    // 默认（Player / 未定义）按玩家规则
+    if (u.faction !== faction && u.stealth === true) return false;
+    return true;
+  });
+  return { ...state, units: filtered };
+}
+
+/**
+ * 逐客户端广播战斗态：每个 socket 按其阵营/角色拿到迷雾过滤后的视图。
+ */
+export async function emitBattleState(io, battleId, state) {
+  latestBattleState.set(battleId, state);
+  const room = `battle-${battleId}`;
+  try {
+    const sockets = await io.in(room).fetchSockets();
+    for (const socket of sockets) {
+      const { faction, role } = socket.data || {};
+      // 房主(isHost)判定：服务端按 state.hostId 与 socket 登录用户比对，防客户端伪造
+      const isHost = !!(socket.user && state.hostId && String(socket.user.userId) === String(state.hostId));
+      const view = applyFog(state, faction, role, isHost);
+      socket.emit('battle-state', { battleId, battleState: view, serverTime: Date.now() });
+    }
+  } catch (err) {
+    console.warn('[comm] emitBattleState 失败:', err?.message || err);
+  }
+}
+
 /**
  * 获取或创建房间状态
  */
@@ -131,12 +178,33 @@ export function setupSocketHandlers(io) {
     // ========== 战斗事件 ==========
     
     // 加入战斗房间
-    socket.on('join-battle', (battleId) => {
+    // P1 向后兼容：支持旧版 `emit('join-battle', battleId)` 字符串，
+    // 也支持新版 `{ battleId, faction, role }` 对象（Batch C 前端迁移后启用迷雾）。
+    socket.on('join-battle', (payload) => {
+      let battleId = payload;
+      let faction;
+      let role;
+      if (payload && typeof payload === 'object') {
+        battleId = payload.battleId;
+        faction = payload.faction;
+        role = payload.role;
+      }
+      if (!battleId) return;
+
+      // P1 服务端 Faction 鉴权（防越权）：白名单消毒，未知阵营回落 neutral。
+      const ALLOWED = ['earth', 'bylon', 'maxion', 'neutral'];
+      if (faction && ALLOWED.includes(faction)) socket.data.faction = faction;
+      if (role === 'REFEREE' || role === 'DOMINATOR' || role === 'Visitor') {
+        socket.data.role = role;
+      } else {
+        socket.data.role = socket.data.role || 'Player';
+      }
+
       const roomName = `battle-${battleId}`;
       socket.join(roomName);
       socket.currentBattle = battleId;
       
-      console.log(`[Comm] User ${socket.user.username} joined battle ${battleId}`);
+      console.log(`[Comm] User ${socket.user.username} joined battle ${battleId} faction=${socket.data.faction} role=${socket.data.role}`);
       
       // 通知房间内其他人
       socket.to(roomName).emit('player-joined', {
@@ -335,24 +403,6 @@ export function setupSocketHandlers(io) {
     });
     
     // ========== 战斗状态同步 ==========
-    
-    // 同步战斗状态
-    socket.on('sync-battle-state', (data) => {
-      const { battleId, state } = data;
-      const roomName = `battle-${battleId}`;
-      
-      // 更新内存中的战斗状态
-      const roomState = getRoomState(roomName);
-      roomState.battleState = state;
-      
-      // 广播给房间内其他玩家
-      socket.to(roomName).emit('battle-state-synced', {
-        state,
-        syncedBy: socket.user.username,
-        userId: socket.user.userId,
-        timestamp: new Date().toISOString()
-      });
-    });
     
     // 请求同步战斗状态
     socket.on('request-battle-state', (data) => {

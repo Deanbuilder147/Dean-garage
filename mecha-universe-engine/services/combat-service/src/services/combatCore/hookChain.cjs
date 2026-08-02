@@ -11,6 +11,7 @@
 const tagRegistry = require('./tagRegistry.cjs');
 const ConditionEvaluator = require('./conditionEvaluator.cjs');
 const EffectExecutor = require('./effectExecutor.cjs');
+const DiceService = require('./diceService.cjs');
 
 class HookChain {
   constructor() {
@@ -167,7 +168,7 @@ class HookChain {
    * @returns {number}
    */
   rollDice(sides = 6) {
-    return Math.floor(Math.random() * sides) + 1;
+    return DiceService.roll(sides);
   }
 
   /**

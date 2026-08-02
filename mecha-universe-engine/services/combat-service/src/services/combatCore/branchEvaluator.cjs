@@ -13,9 +13,10 @@
  * 命中规则：roll 命中任一 points 条目即视为该分支命中（多分支可同时命中）。
  */
 
+const DiceService = require('./diceService.cjs');
+
 function rollDice(diceType = 6) {
-  const faces = Number(diceType) > 0 ? Number(diceType) : 6;
-  return Math.floor(Math.random() * faces) + 1;
+  return DiceService.roll(diceType);
 }
 
 // 单个点数条目是否命中 roll：number 精确 / [min,max] 区间

@@ -45,7 +45,7 @@ class TerrainMovement {
     void:           { name: '留白',      cost: 999, defense: 0,  can_spawn: false, color: '#000000', is_destructible: false, max_hp: 0, destroyed_transform_to: 'void' },
     desert:         { name: '沙漠',      cost: 1.5, defense: 0,  can_spawn: true,  color: '#EDC9AF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'desert' },
     crystal:        { name: '晶体',      cost: 2,   defense: 10, can_spawn: true,  color: '#88CCFF', is_destructible: true,  max_hp: 3, destroyed_transform_to: 'plain' },
-    fortress:       { name: '堡垒',      cost: 5,   defense: 30, can_spawn: false, color: '#666666', is_destructible: false, max_hp: 0, destroyed_transform_to: 'fortress' },
+    fortress:       { name: '防御圈',     cost: 5,   defense: 30, can_spawn: false, color: '#9c27b0', is_destructible: false, max_hp: 0, destroyed_transform_to: 'fortress' },
     wall:           { name: '墙',        cost: 99,  defense: 0,  can_spawn: false, color: '#555555', is_destructible: false, max_hp: 0, destroyed_transform_to: 'wall' },
     repair_station: { name: '维修站',    cost: 1,   defense: 0,  can_spawn: true,  color: '#44FF44', is_destructible: true,  max_hp: 5, destroyed_transform_to: 'rubble' },
     spawn_earth:    { name: '地球出生点', cost: 0,  defense: 0,  can_spawn: true,  color: '#4488FF', is_destructible: false, max_hp: 0, destroyed_transform_to: 'spawn_earth' },
