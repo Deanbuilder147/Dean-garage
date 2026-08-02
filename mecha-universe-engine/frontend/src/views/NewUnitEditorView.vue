@@ -28,7 +28,7 @@
               <p class="faction">{{ getFactionName(unit.faction) }}</p>
             </div>
             <div class="unit-card-actions">
-              <button @click.stop="deleteUnit(unit.id)" title="删除">×</button>
+              <button class="btn btn-delete btn-mini" @click.stop="deleteUnit(unit.id)" title="删除">×</button>
             </div>
           </div>
         </div>
@@ -49,26 +49,44 @@
           <h3>基础信息</h3>
           <div class="form-row">
             <label for="unit-name-field">机体番号 *</label>
-            <input id="unit-name-field" name="name" v-model="form.name" type="text" placeholder="例如: RX-78-2"
+            <input id="unit-name-field" name="name" v-model="form.name" type="text" class="param-input" placeholder="例如: RX-78-2"
                    :class="{ 'error-input': highlightFields.name }" @input="clearHighlight('name')">
           </div>
           <div class="form-row">
             <label for="unit-codename-field">行动代号</label>
-            <input id="unit-codename-field" name="codename" v-model="form.codename" type="text" placeholder="例如: 高达"
+            <input id="unit-codename-field" name="codename" v-model="form.codename" type="text" class="param-input" placeholder="例如: 高达"
                    :class="{ 'error-input': highlightFields.codename }" @input="clearHighlight('codename')">
           </div>
           <div class="form-row">
             <label for="unit-faction-field">所属阵营</label>
             <div class="faction-row">
-              <select id="unit-faction-field" name="faction" v-model="form.faction" class="faction-select w-48">
+              <select id="unit-faction-field" name="faction" v-model="form.faction" class="faction-select w-48 param-select">
                 <option value="">选择阵营...</option>
                 <option v-for="f in factions" :key="f.code" :value="f.code">{{ f.name }}</option>
               </select>
               <button class="btn btn-accent btn-small" @click="openAddFaction">+ 添加阵营</button>
               <div class="faction-logo-box">
-                <img v-if="getFactionLogo(form.faction)" :src="getFactionLogo(form.faction)" alt="阵营Logo" class="faction-logo-img">
+                <img v-if="factionLogoSrc" :src="factionLogoSrc" alt="阵营Logo" class="faction-logo-img" @error="onFactionLogoError">
                 <span v-else class="faction-logo-placeholder">{{ getFactionName(form.faction)?.[0] || '?' }}</span>
               </div>
+            </div>
+          </div>
+
+          <!-- 体型（体积） -->
+          <div class="form-row">
+            <label for="unit-size-field">体型（体积）</label>
+            <div class="size-row">
+              <select id="unit-size-field" name="size" v-model="form.size" class="faction-select w-48 param-select">
+                <option value="s">S（小型）</option>
+                <option value="m">M（中型）</option>
+                <option value="l">L（大型）</option>
+                <option value="xl">XL（超大型）</option>
+              </select>
+              <span class="size-chip" :class="'size-' + normSize(form.size)">{{ SIZE_LABELS[normSize(form.size)] }}</span>
+            </div>
+            <div class="size-rules">
+              <div>HP：<strong>{{ sizeRuleHp }}</strong> ／ 机动：<strong>{{ sizeRuleMob }}</strong> ／ 战场棋子缩放：<strong>×{{ SIZE_RENDER_SCALE[normSize(form.size)] }}</strong></div>
+              <div class="size-rule-hint">体型克制：被更小机体攻击 → 每档 −1 防御减伤；被更大机体攻击 → 下回合机动每档 +1（临时 Buff）</div>
             </div>
           </div>
           <div class="form-row">
@@ -87,9 +105,20 @@
         <section class="form-section">
           <h3>七视图 (<span class="faction-code">{{ form.codename || form.name || '???' }}</span>)</h3>
           <p class="section-desc">按 0-6 朝向配置精灵图，命名规范: {{ (form.codename || form.name || 'UNIT') }}_[0-6]_idle.png</p>
+          <div class="views-dir-hint">
+            <span class="dir-hint-strong">方向说明：</span>方向 <b>0 = 正面</b>（棋子正对观众），<b>1~6 顺时针每 60°</b>旋转；下图箭头表示「该方向棋子<em>面朝</em>的方位」，上传时请让棋子朝向与箭头一致。
+          </div>
+          <div class="views-actions">
+            <button type="button" class="btn-small btn-danger" :disabled="!hasAnyView" @click="clearAllViews">一键清除全部视图</button>
+            <span v-if="hasAnyView" class="file-hint">将同时清除本地待上传图与已保存到服务端的视图（不可撤销）</span>
+          </div>
           <div class="views-grid">
             <div v-for="dv in directionViews" :key="dv.value" class="view-slot">
-              <div class="view-label">{{ dv.label }}</div>
+              <div class="view-label">
+                {{ dv.label }}
+                <!-- 方向箭头标注：仅正面(0)以外显示，指向该方向棋子面朝的方位 -->
+                <span v-if="dv.value !== 0" class="dir-arrow" :style="{ transform: `rotate(${dv.arrowRotate}deg)` }" title="该方向棋子面朝方位">↑</span>
+              </div>
               <div class="view-drop-zone"
                    @click="triggerViewUpload(dv.value)"
                    @dragover.prevent
@@ -98,12 +127,15 @@
                 <span v-else class="view-placeholder">{{ dv.value }}</span>
               </div>
               <input type="file" :ref="el => viewInputs[dv.value] = el" @change="e => handleViewUpload(e, dv.value)" accept="image/png" class="file-input-hidden">
-              <button class="btn-small btn-accent" @click="clearView(dv.value)" v-if="viewPreviews[dv.value]">清除</button>
+              <div class="view-slot-actions">
+                <button class="btn-small btn-crop" @click.stop="openCrop(dv.value)" v-if="viewPreviews[dv.value]">裁剪</button>
+                <button class="btn-small btn-delete" @click.stop="clearView(dv.value)" v-if="viewPreviews[dv.value]">清除</button>
+              </div>
             </div>
           </div>
           <div class="views-actions">
-            <button class="btn btn-accent" @click="uploadAllViews" :disabled="!allViewsFilled || viewUploading">
-              {{ viewUploading ? '上传中...' : '批量上传七视图' }}
+            <button class="btn btn-accent" @click="uploadAllViews" :disabled="viewUploading">
+              {{ viewUploading ? '上传中...' : '上传已选视图' }}
             </button>
             <button class="btn btn-secondary" @click="generateAIViews" :disabled="viewUploading">
               AI 动态生成七视图
@@ -112,6 +144,28 @@
           <p v-if="viewUploading" class="import-status">正在上传七视图...</p>
           <p v-if="viewError" class="error-text">{{ viewError }}</p>
         </section>
+
+        <!-- Phase 31: 手动裁剪模态框 -->
+        <div v-if="cropModalOpen" class="modal-overlay" @click.self="cropModalOpen = false">
+          <div class="crop-modal">
+            <div class="crop-modal-header">
+              <span>裁剪方向 {{ cropTargetDv }} 的七视图</span>
+              <button class="btn-small btn-delete" @click="cropModalOpen = false">关闭</button>
+            </div>
+            <p class="crop-tip">拖拽选框边缘/四角调整裁剪范围（拖动内部可平移选框）。目标：让棋子内容占满选框、去除四周透明留白，使 7 个方向的棋子大小一致。</p>
+            <div class="crop-canvas-wrap">
+              <canvas ref="cropCanvasRef"
+                      @mousedown="cropPointerDown"
+                      @mousemove="cropPointerMove"
+                      @mouseup="cropPointerUp"
+                      @mouseleave="cropPointerUp"></canvas>
+            </div>
+            <div class="crop-modal-actions">
+              <button class="btn btn-secondary" @click="autoCropAlpha">自动去留白</button>
+              <button class="btn btn-accent" @click="applyCrop">应用裁剪</button>
+            </div>
+          </div>
+        </div>
 
         <!-- 主机体 -->
         <section class="form-section">
@@ -146,7 +200,7 @@
         <section class="form-section">
           <h3>左手装备 <span v-if="form.left_type !== 'none'" class="points-badge">{{ leftTotal }}/15点</span></h3>
           <div class="form-row">
-            <select id="unit-left-type" name="left_type" v-model="form.left_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-left-type" name="left_type" v-model="form.left_type" class="param-select"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.left_type !== 'none'" class="stats-grid">
             <div class="stat-input"><label for="stat-left-格斗">格斗</label><div class="stepper"><button @click="adjustStat('left','格斗',-1)">-</button><input id="stat-left-格斗" name="left_格斗" type="number" v-model.number="form.left_格斗" min="0" max="15"><button @click="adjustStat('left','格斗',1)">+</button></div></div>
@@ -171,7 +225,7 @@
         <section class="form-section">
           <h3>右手装备 <span v-if="form.right_type !== 'none'" class="points-badge">{{ rightTotal }}/15点</span></h3>
           <div class="form-row">
-            <select id="unit-right-type" name="right_type" v-model="form.right_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-right-type" name="right_type" v-model="form.right_type" class="param-select"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.right_type !== 'none'" class="stats-grid">
             <div class="stat-input"><label for="stat-right-格斗">格斗</label><div class="stepper"><button @click="adjustStat('right','格斗',-1)">-</button><input id="stat-right-格斗" name="right_格斗" type="number" v-model.number="form.right_格斗" min="0" max="15"><button @click="adjustStat('right','格斗',1)">+</button></div></div>
@@ -196,7 +250,7 @@
         <section class="form-section">
           <h3>其它装备 <span v-if="form.extra_type !== 'none'" class="points-badge">{{ extraTotal }}/{{ extraPointLimit }}点</span></h3>
           <div class="form-row">
-            <select id="unit-extra-type" name="extra_type" v-model="form.extra_type"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
+            <select id="unit-extra-type" name="extra_type" v-model="form.extra_type" class="param-select"><option value="none">无</option><option value="武器">武器</option><option value="防具">防具</option><option value="载具">载具</option><option value="背包">背包</option></select>
           </div>
           <div v-if="form.extra_type !== 'none'" class="stats-grid">
             <div class="stat-input"><label for="stat-extra-格斗">格斗</label><div class="stepper"><button @click="adjustStat('extra','格斗',-1)">-</button><input id="stat-extra-格斗" name="extra_格斗" type="number" v-model.number="form.extra_格斗" min="0" :max="extraPointLimit"><button @click="adjustStat('extra','格斗',1)">+</button></div></div>
@@ -227,11 +281,11 @@
         <h3>添加阵营</h3>
         <div class="form-row">
           <label for="faction-code-field">阵营 Code *</label>
-          <input id="faction-code-field" name="faction_code" v-model="newFaction.code" type="text" placeholder="如: neon" :disabled="factionUploading">
+          <input id="faction-code-field" name="faction_code" v-model="newFaction.code" type="text" class="param-input" placeholder="如: neon" :disabled="factionUploading">
         </div>
         <div class="form-row">
           <label for="faction-name-field">阵营名称 *</label>
-          <input id="faction-name-field" name="faction_name" v-model="newFaction.name" type="text" placeholder="如: 霓虹战线" :disabled="factionUploading">
+          <input id="faction-name-field" name="faction_name" v-model="newFaction.name" type="text" class="param-input" placeholder="如: 霓虹战线" :disabled="factionUploading">
         </div>
         <div class="form-row">
           <label for="faction-logo-field">阵营 Logo (仅 PNG)</label>
@@ -294,11 +348,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { hangarAPI } from '@/api/client'
 import SkillsEditor from '@/components/SkillsEditor.vue'
+import { normSize, SIZE_LABELS, SIZE_HP_FACTOR, SIZE_MOB_FACTOR, SIZE_RENDER_SCALE } from '@/utils/unitSize.js'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -329,21 +384,26 @@ const factionImageFile = ref(null)
 const newFaction = ref({ code: '', name: '' })
 
 // Phase 28-D: 七视图上传管理
+// 方向语义（真相源 frontend/src/utils/hexUtils.js DIRECTIONS）：
+//   0 = 正面；1=正右 2=右下 3=左下 4=正左 5=左上 6=右上
+// 朝向角按 combat computeDirection 的 6 扇区中心（屏幕坐标 Y 向下，0°=正右，顺时针）：
+//   1=0° 2=60° 3=120° 4=180° 5=240° 6=300°
+// arrowRotate = 朝向角 + 90：因箭头字符 ↑ 默认指向屏幕正上方(=270°)，
+//   旋转 90° 才指向正右(0°)，以此类推。仅正面(dir 0)不标箭头。
 const directionViews = [
-  { value: 0, label: '0 正面' },
-  { value: 1, label: '1 正右' },
-  { value: 2, label: '2 右下' },
-  { value: 3, label: '3 左下' },
-  { value: 4, label: '4 正左' },
-  { value: 5, label: '5 左上' },
-  { value: 6, label: '6 右上' },
+  { value: 0, label: '0 正面', arrowRotate: null },
+  { value: 1, label: '1 正右', arrowRotate: 90 },
+  { value: 2, label: '2 右下', arrowRotate: 150 },
+  { value: 3, label: '3 左下', arrowRotate: 210 },
+  { value: 4, label: '4 正左', arrowRotate: 270 },
+  { value: 5, label: '5 左上', arrowRotate: 330 },
+  { value: 6, label: '6 右上', arrowRotate: 30 },
 ]
 const viewFiles = ref({})       // { 0: File, 1: File, ... }
 const viewPreviews = ref({})    // { 0: dataURL, ... }
 const viewInputs = ref({})      // { 0: inputElement, ... }
 const viewUploading = ref(false)
 const viewError = ref('')
-const allViewsFilled = computed(() => directionViews.every(dv => viewFiles.value[dv.value]))
 
 function triggerViewUpload(dv) {
   const input = viewInputs.value[dv]
@@ -385,30 +445,236 @@ function clearView(dv) {
   if (viewInputs.value[dv]) viewInputs.value[dv].value = ''
 }
 
+// 安全解析 JSON 字符串（用于 view_urls 可能为字符串的场景）
+function safeParse(str) { try { return JSON.parse(str) } catch { return null } }
+
+// 是否存在任何视图（本地待上传 或 已保存服务端），用于启用"一键清除"
+const hasAnyView = computed(() => {
+  if (Object.keys(viewFiles.value || {}).length > 0) return true
+  if (Object.keys(viewPreviews.value || {}).length > 0) return true
+  const vu = form.value.view_urls
+  if (!vu) return false
+  const obj = typeof vu === 'string' ? (safeParse(vu) || {}) : vu
+  return Object.keys(obj || {}).length > 0
+})
+
+// 一键清除全部视图：同时清除本地待上传图与已保存到服务端的 view_urls，并持久化
+async function clearAllViews() {
+  viewFiles.value = {}
+  viewPreviews.value = {}   // 网格立即清空，前端立刻可见变化
+  for (const dv of Object.keys(viewInputs.value)) {
+    if (viewInputs.value[dv]) viewInputs.value[dv].value = ''
+  }
+  form.value.view_urls = {}
+  try {
+    await saveUnit(true)
+    await loadUnits()
+    const toast = document.createElement('div')
+    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1faa59;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;font-weight:700;font-family:monospace;box-shadow:0 4px 16px rgba(0,0,0,.3);'
+    toast.textContent = '已清除全部七视图'
+    document.body.appendChild(toast)
+    setTimeout(() => toast.remove(), 2600)
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || '未知错误'
+    alert('清除后保存失败（前端已临时清空，但服务端可能未生效）: ' + msg)
+  }
+}
+
+// ===== 手动裁剪模态框（Phase 31） =====
+const cropModalOpen = ref(false)
+const cropTargetDv = ref(null)          // 正在裁剪的方向编号
+const cropSrcImg = ref(null)            // 原图 Image 对象
+const cropCanvasRef = ref(null)         // 原图显示 canvas
+const cropRect = reactive({ x: 0, y: 0, w: 0, h: 0 }) // 选框（原图像素坐标）
+const cropDrag = reactive({ mode: '', startX: 0, startY: 0, orig: null })
+
+// 计算 PNG 不透明内容包围盒（用于「自动去留白」）
+function computeContentBBox(img) {
+  const w = img.naturalWidth, h = img.naturalHeight
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  const cx = c.getContext('2d'); cx.drawImage(img, 0, 0)
+  const data = cx.getImageData(0, 0, w, h).data
+  let top = -1, bot = -1, left = -1, right = -1
+  for (let y = 0; y < h; y++) {
+    const rowOff = y * w * 4
+    for (let x = 0; x < w; x++) {
+      if (data[rowOff + x * 4 + 3] > 16) {
+        if (top < 0) top = y
+        bot = y
+        if (left < 0 || x < left) left = x
+        if (x > right) right = x
+      }
+    }
+  }
+  if (top < 0) return null
+  return { top, bot, left, right, w: right - left + 1, h: bot - top + 1 }
+}
+
+function openCrop(dv) {
+  const file = viewFiles.value[dv]
+  if (!file) { viewError.value = `方向 ${dv}: 请先选择图片再裁剪`; return }
+  const img = new Image()
+  img.onload = () => {
+    cropTargetDv.value = dv
+    cropSrcImg.value = img
+    cropRect.x = 0; cropRect.y = 0; cropRect.w = img.naturalWidth; cropRect.h = img.naturalHeight
+    cropModalOpen.value = true
+    nextTick(() => drawCropCanvas())
+  }
+  img.onerror = () => { viewError.value = `方向 ${dv}: 图片加载失败`; return }
+  img.src = URL.createObjectURL(file)
+}
+
+// 把原图绘制到裁剪 canvas（含半透明选框遮罩）
+function drawCropCanvas() {
+  const canvas = cropCanvasRef.value
+  if (!canvas || !cropSrcImg.value) return
+  const img = cropSrcImg.value
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
+  const ctx = canvas.getContext('2d')
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(img, 0, 0)
+  // 选框外暗化遮罩
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'
+  ctx.fillRect(0, 0, canvas.width, cropRect.y)
+  ctx.fillRect(0, cropRect.y + cropRect.h, canvas.width, canvas.height - (cropRect.y + cropRect.h))
+  ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h)
+  ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, canvas.width - (cropRect.x + cropRect.w), cropRect.h)
+  // 选框边框 + 角点
+  ctx.strokeStyle = '#ffc24d'; ctx.lineWidth = 2
+  ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h)
+  const corners = [[cropRect.x, cropRect.y], [cropRect.x + cropRect.w, cropRect.y], [cropRect.x, cropRect.y + cropRect.h], [cropRect.x + cropRect.w, cropRect.y + cropRect.h]]
+  ctx.fillStyle = '#ffc24d'
+  corners.forEach(([cx, cy]) => ctx.fillRect(cx - 4, cy - 4, 8, 8))
+}
+
+function autoCropAlpha() {
+  if (!cropSrcImg.value) return
+  const b = computeContentBBox(cropSrcImg.value)
+  if (!b) return
+  // 留 2px 余量，避免裁掉半透明描边
+  const pad = 2
+  cropRect.x = Math.max(0, b.left - pad)
+  cropRect.y = Math.max(0, b.top - pad)
+  cropRect.w = Math.min(cropSrcImg.value.naturalWidth - cropRect.x, b.w + pad * 2)
+  cropRect.h = Math.min(cropSrcImg.value.naturalHeight - cropRect.y, b.h + pad * 2)
+  drawCropCanvas()
+}
+
+function cropPointerDown(e) {
+  const canvas = cropCanvasRef.value
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height
+  const px = (e.clientX - rect.left) * scaleX
+  const py = (e.clientY - rect.top) * scaleY
+  // 命中哪个手柄：四边中点 + 四角 + 内部
+  const m = 10 * scaleX
+  let mode = ''
+  const onL = Math.abs(px - cropRect.x) <= m, onR = Math.abs(px - (cropRect.x + cropRect.w)) <= m
+  const onT = Math.abs(py - cropRect.y) <= m, onB = Math.abs(py - (cropRect.y + cropRect.h)) <= m
+  if (onL && onT) mode = 'lt'; else if (onR && onT) mode = 'rt'
+  else if (onL && onB) mode = 'lb'; else if (onR && onB) mode = 'rb'
+  else if (onL) mode = 'l'; else if (onR) mode = 'r'; else if (onT) mode = 't'; else if (onB) mode = 'b'
+  else if (px > cropRect.x && px < cropRect.x + cropRect.w && py > cropRect.y && py < cropRect.y + cropRect.h) mode = 'move'
+  if (!mode) return
+  cropDrag.mode = mode
+  cropDrag.startX = px; cropDrag.startY = py
+  cropDrag.orig = { ...cropRect }
+  e.preventDefault()
+}
+
+function cropPointerMove(e) {
+  if (!cropDrag.mode) return
+  const canvas = cropCanvasRef.value
+  const rect = canvas.getBoundingClientRect()
+  const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height
+  const px = (e.clientX - rect.left) * scaleX
+  const py = (e.clientY - rect.top) * scaleY
+  const dx = px - cropDrag.startX, dy = py - cropDrag.startY
+  const o = cropDrag.orig
+  const maxW = cropSrcImg.value.naturalWidth, maxH = cropSrcImg.value.naturalHeight
+  let { x, y, w, h } = o
+  if (cropDrag.mode === 'move') {
+    x = Math.max(0, Math.min(maxW - w, o.x + dx))
+    y = Math.max(0, Math.min(maxH - h, o.y + dy))
+  } else {
+    if (cropDrag.mode.includes('l')) { x = Math.max(0, Math.min(o.x + o.w - 1, o.x + dx)); w = o.x + o.w - x }
+    if (cropDrag.mode.includes('r')) { w = Math.max(1, Math.min(maxW - o.x, o.w + dx)) }
+    if (cropDrag.mode.includes('t')) { y = Math.max(0, Math.min(o.y + o.h - 1, o.y + dy)); h = o.y + o.h - y }
+    if (cropDrag.mode.includes('b')) { h = Math.max(1, Math.min(maxH - o.y, o.h + dy)) }
+  }
+  cropRect.x = Math.round(x); cropRect.y = Math.round(y); cropRect.w = Math.round(w); cropRect.h = Math.round(h)
+  drawCropCanvas()
+}
+
+function cropPointerUp() { cropDrag.mode = '' }
+
+async function applyCrop() {
+  if (!cropSrcImg.value) return
+  const canvas = document.createElement('canvas')
+  canvas.width = cropRect.w; canvas.height = cropRect.h
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(cropSrcImg.value, cropRect.x, cropRect.y, cropRect.w, cropRect.h, 0, 0, cropRect.w, cropRect.h)
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/png'))
+  if (!blob) return
+  const dv = cropTargetDv.value
+  const newFile = new File([blob], `view_${dv}.png`, { type: 'image/png' })
+  viewFiles.value = { ...viewFiles.value, [dv]: newFile }
+  const reader = new FileReader()
+  reader.onload = (ev) => { viewPreviews.value = { ...viewPreviews.value, [dv]: ev.target.result } }
+  reader.readAsDataURL(newFile)
+  cropModalOpen.value = false
+  cropSrcImg.value = null
+}
+
 async function uploadAllViews() {
-  if (!allViewsFilled.value) { viewError.value = '请填充全部 7 个方向的图片'; return }
+  // 支持「只重传选中方向」：只要至少选了 1 张即可上传，其余方向保持不变（满足「只修改正视图」场景）
+  const hasSelection = directionViews.some(dv => viewFiles.value[dv.value])
+  if (!hasSelection) { viewError.value = '请至少选择一个方向的图片'; return }
+  // 优先用单位 UUID（唯一命名空间）；未落库则先保存，确保上传走 UPDATE 而非重复 INSERT
+  let unitId = form.value.id || editingUnit.value?.id
+  if (!unitId) { await saveUnit(); unitId = form.value.id || editingUnit.value?.id }
+  if (!unitId) { viewError.value = '请先保存单位后再上传七视图'; return }
+
+  // 后端 upload-view 以单位 UUID 为命名空间（生产 gateway 用 unitId），此处同时下发 unitCode 作为兜底。
+  // 真正的「改不动」根因是：原代码强制 7 张全选(allViewsFilled) 才允许上传，
+  // 用户只想重传单张（如正视图）时直接被门控拦截，本次已放宽为「至少选 1 张」。
   const unitCode = (form.value.codename || form.value.name || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '')
+
   viewUploading.value = true; viewError.value = ''
 
   try {
     for (const dv of directionViews) {
+      // 仅上传用户已选中的方向，未选中的跳过（保留既有视图不变）
+      if (!viewFiles.value[dv.value]) continue
       const fd = new FormData()
       fd.append('image', viewFiles.value[dv.value])
       fd.append('unitCode', unitCode)
+      fd.append('unitId', unitId)
       fd.append('direction', String(dv.value))
       const { data } = await hangarAPI.uploadUnitView(fd)
-      const url = data?.url
+      const url = data?.url || data?.path
       if (url) {
         form.value.view_urls = { ...(form.value.view_urls || {}), [dv.value]: url }
         viewPreviews.value = { ...viewPreviews.value, [dv.value]: url }
       }
     }
     viewError.value = ''
-    alert('七视图上传成功！')
+      // 系统提示：用应用内 toast 替代原生 alert，确保上传成功有可见反馈
+      const toast = document.createElement('div')
+      toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1faa59;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;font-weight:700;font-family:monospace;box-shadow:0 4px 16px rgba(0,0,0,.3);'
+      toast.textContent = '七视图上传成功！'
+      document.body.appendChild(toast)
+      setTimeout(() => toast.remove(), 3000)
     // 清空临时文件句柄，但保留预览，避免误以为丢失
     viewFiles.value = {}
+    // 关键：把七视图 URL 持久化到数据库，否则仅存于内存，刷新/重开后丢失
+    await saveUnit(true)
   } catch (e) {
-    viewError.value = '上传失败: ' + e.message
+    // 透出后端精确消息（如 413 文件过大 / 500 内部错误），避免只显示 axios 笼统状态码
+    const msg = e?.response?.data?.message || e?.message || '未知错误'
+    viewError.value = '上传失败: ' + msg
   } finally {
     viewUploading.value = false
   }
@@ -444,7 +710,7 @@ const frontViewUrl = computed(() =>
 
 function createEmptyForm() {
   return {
-    name:'', codename:'', faction:'earth', main_type:'机体',
+    name:'', codename:'', faction:'earth', main_type:'机体', size:'m',
     main_格斗:0, main_射击:0, main_结构:0, main_机动:0, main_skills:[],
     has_royroy:false, royroy_image_url:null,
     royroy_格斗:0, royroy_射击:0, royroy_结构:0, royroy_机动:0, royroy_skills:[],
@@ -463,6 +729,15 @@ const mainHP = computed(()=>(form.value.main_结构||0)*10)
 const royroyTotal = computed(()=>(form.value.royroy_格斗||0)+(form.value.royroy_射击||0)+(form.value.royroy_结构||0)+(form.value.royroy_机动||0))
 const royroyHP = computed(()=>(form.value.royroy_结构||0)*3)
 const royroyConstraintMet = computed(()=>(form.value.royroy_格斗||0)>=10||(form.value.royroy_射击||0)>=10||(form.value.royroy_结构||0)>=10||(form.value.royroy_机动||0)>=10)
+// 体型规则展示：HP/机动按系数显示百分比（实际加减分别向上/向下取整）
+const sizeRuleHp = computed(() => {
+  const f = SIZE_HP_FACTOR[normSize(form.value.size)] ?? 1
+  return f === 1 ? '不变' : (f > 1 ? `+${Math.round((f - 1) * 100)}%（向上取整）` : `−${Math.round((1 - f) * 100)}%（向下取整）`)
+})
+const sizeRuleMob = computed(() => {
+  const f = SIZE_MOB_FACTOR[normSize(form.value.size)] ?? 1
+  return f === 1 ? '不变' : (f > 1 ? `+${Math.round((f - 1) * 100)}%（向上取整）` : `−${Math.round((1 - f) * 100)}%（向下取整）`)
+})
 const leftTotal = computed(()=>(form.value.left_格斗||0)+(form.value.left_射击||0)+(form.value.left_结构||0)+(form.value.left_机动||0))
 const rightTotal = computed(()=>(form.value.right_格斗||0)+(form.value.right_射击||0)+(form.value.right_结构||0)+(form.value.right_机动||0))
 const extraPointLimit = computed(()=>form.value.extra_type==='背包'?10:15)
@@ -484,9 +759,15 @@ function getFactionName(code) {
   const f = factions.value.find(x => x.code === code)
   return f ? f.name : (code || '?')
 }
-function getFactionLogo(code) {
-  const f = factions.value.find(x => x.code === code)
-  return f ? f.logo : null
+// 阵营 Logo：优先 logoUrl（后端返回字段），加载失败（如内置 logo 文件缺失）回退到占位字母
+const brokenFactionLogos = ref({})
+const factionLogoSrc = computed(() => {
+  if (!form.faction || brokenFactionLogos.value[form.faction]) return null
+  const f = factions.value.find(x => x.code === form.faction)
+  return f ? (f.logoUrl || f.logo) : null
+})
+function onFactionLogoError() {
+  brokenFactionLogos.value = { ...brokenFactionLogos.value, [form.faction]: true }
 }
 
 function navigateTo(p) { router.push(p) }
@@ -541,8 +822,8 @@ async function submitFaction() {
     fd.append('name', name)
     if (factionImageFile.value) fd.append('image', factionImageFile.value)
 
-    const { data } = await hangarAPI.uploadFactionLogo(fd)
-    if (!data || data.error) { factionError.value = data?.error || '上传失败'; factionUploading.value = false; return }
+    const { data } = await hangarAPI.createFaction(fd)
+    if (!data || data.error || !data.success) { factionError.value = data?.error || data?.message || '创建失败'; factionUploading.value = false; return }
 
     // 即时刷新阵营列表
     await loadFactions()
@@ -613,17 +894,152 @@ async function editUnit(unit) {
 
 function cancelEdit() { editingUnit.value=null; errors.value=[]; highlightFields.value={} }
 
-async function saveUnit() {
+/**
+ * 将手动编辑器的平铺中文字段收敛为与 Excel 归一器（excel-schema-normalizer）同构的
+ * stats / skills / attributes，确保手动单位与 Excel 单位在战局里被同一套代码消费。
+ * 公式严格对齐宪法红线与 Phase 29 普通攻击射程修复：
+ *   攻击 = 总格斗*2+5；射程 = 1+floor(总射击/25)；HP = 结构*5+20；
+ *   护甲 = floor(结构*0.25)；移动力 = 机体机动 + 载具/背包机动。
+ */
+function num(v){ const n=Number(v); return Number.isFinite(n)?n:0 }
+function normalizePartType(t){
+  if(!t) return '未知'
+  const s=String(t).trim()
+  const ALIAS={ '机体':'机体','主机体':'机体','本体':'机体','机甲':'机体','mech':'机体',
+    '武器':'武器','枪':'武器','炮':'武器','剑':'武器','刃':'武器','weapon':'武器',
+    '防具':'防具','盾':'防具','装甲':'防具','护甲':'防具','armor':'防具',
+    '载具':'载具','车':'载具','推进器':'载具','飞行器':'载具','vehicle':'载具',
+    '背包':'背包','包':'背包','backpack':'背包',
+    '跟随':'跟随','royroy':'跟随','随从':'跟随','辅机':'跟随','follower':'跟随' }
+  return ALIAS[s]||ALIAS[s.toLowerCase()]||s
+}
+function parseRange(raw){
+  if(raw===undefined||raw===null||raw==='') return {min:1,max:1,label:'1'}
+  if(typeof raw==='number') return {min:1,max:raw,label:String(raw)}
+  const nums=String(raw).split(/[-~]/).map(Number).filter(n=>!Number.isNaN(n))
+  if(!nums.length) return {min:1,max:1,label:'1'}
+  const min=Math.min(...nums)||1, max=Math.max(...nums)
+  return {min,max,label:min===max?String(max):`${min}~${max}`}
+}
+function inferDamageType(attribute){
+  const a=String(attribute||'').toLowerCase()
+  if(a.includes('能量')||a.includes('beam')) return 'ENERGY'
+  if(a.includes('实弹')||a.includes('物理')) return 'PHYSICAL'
+  if(a.includes('回复')||a.includes('修复')) return 'HEAL'
+  return 'PHYSICAL'
+}
+function makeUnitSkill(s,min,max,label){
+  return {
+    id: (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'sk_'+Math.random().toString(36).slice(2),
+    name: s.name, description: s.effect||s.special||'', effect: s.effect||'',
+    type: s.type||'自动', script:'', cooldown:0, currentCooldown:0, energyCost:0,
+    damageType: inferDamageType(s.attribute),
+    range: max, range_min: min, range_max: max, max_range: max, min_range: min,
+    cast_range: max, min_cast_range: min, rangeLabel: label,
+  }
+}
+function buildUnitPayload(f){
+  const partsInput=[]
+  partsInput.push({ slot:'主机体', type:f.main_type||'机体', normalizedType:'机体', include:true,
+    格斗:num(f.main_格斗), 射击:num(f.main_射击), 结构:num(f.main_结构), 机动:num(f.main_机动), skills:f.main_skills||[] })
+  if(f.has_royroy){
+    partsInput.push({ slot:'跟随', type:'Royroy', normalizedType:'跟随', include:true,
+      格斗:num(f.royroy_格斗), 射击:num(f.royroy_射击), 结构:num(f.royroy_结构), 机动:num(f.royroy_机动), skills:f.royroy_skills||[] })
+  }
+  if(f.left_type && f.left_type!=='none'){
+    partsInput.push({ slot:'左手', type:f.left_type, normalizedType:normalizePartType(f.left_type), include:true,
+      格斗:num(f.left_格斗), 射击:num(f.left_射击), 结构:num(f.left_结构), 机动:num(f.left_机动), skills:f.left_skills||[] })
+  }
+  if(f.right_type && f.right_type!=='none'){
+    partsInput.push({ slot:'右手', type:f.right_type, normalizedType:normalizePartType(f.right_type), include:true,
+      格斗:num(f.right_格斗), 射击:num(f.right_射击), 结构:num(f.right_结构), 机动:num(f.right_机动), skills:f.right_skills||[] })
+  }
+  if(f.extra_type && f.extra_type!=='none'){
+    partsInput.push({ slot:'其它', type:f.extra_type, normalizedType:normalizePartType(f.extra_type), include:true,
+      格斗:num(f.extra_格斗), 射击:num(f.extra_射击), 结构:num(f.extra_结构), 机动:num(f.extra_机动), skills:f.extra_skills||[] })
+  }
+
+  const mainPart=partsInput.find(p=>p.normalizedType==='机体')||partsInput[0]
+  const bodyStructure=mainPart?mainPart.结构:0
+  const bodyMobility=mainPart?mainPart.机动:0
+  const meleeParts=partsInput.filter(p=>['机体','武器'].includes(p.normalizedType))
+  const carrierParts=partsInput.filter(p=>['载具','背包'].includes(p.normalizedType))
+  const totalMelee=meleeParts.reduce((s,p)=>s+p.格斗,0)
+  const totalShooting=meleeParts.reduce((s,p)=>s+p.射击,0)
+  const carrierMobility=carrierParts.reduce((s,p)=>s+p.机动,0)
+
+  const hp=bodyStructure*5+20
+  const moveRange=bodyMobility+carrierMobility
+  const stats={
+    hp, maxHp:hp,
+    armor: Math.floor(bodyStructure*0.25),
+    shield: 0,
+    attack: totalMelee*2+5,
+    defense: 0,
+    speed: moveRange,
+    mobility: bodyMobility,
+    range: 1+Math.floor(totalShooting/25),
+  }
+
+  const flatSkills=[]
+  const skillsByOwner={}
+  for(const part of partsInput){
+    const ownerSkills=(part.skills||[]).filter(s=>s&&s.name)
+    skillsByOwner[part.slot]=ownerSkills.map(s=>{
+      const {min,max,label}=parseRange(s.range)
+      flatSkills.push(makeUnitSkill(s,min,max,label))
+      return { name:s.name, type:s.type||'', attribute:s.attribute||'', effect:s.effect||'', range:s.range||'', special:s.special||'' }
+    })
+  }
+
+  const parts={}
+  for(const part of partsInput){
+    const t=part.normalizedType
+    const isShield=(t==='防具'||t==='背包')
+    const pStruct=part.结构
+    const partHp=isShield?pStruct*2:0
+    const durability=(t==='武器'||t==='载具')?pStruct:(isShield?5:0)
+    parts[part.slot]={
+      type:part.type, normalizedType:t, slot:part.slot,
+      格斗:part.格斗, 射击:part.射击, 结构:part.结构, 机动:part.机动,
+      hp:partHp, maxHp:partHp, durability, maxDurability:durability,
+      destroyed:false, isShield, skillSlots:(part.skills||[]).length,
+    }
+  }
+
+  const t0=String(f.main_type||'').toLowerCase()
+  let category='melee'
+  if(t0.includes('装甲')||t0.includes('盾牌')) category='tank'
+  else if(t0.includes('推进器')||t0.includes('辅助')) category='support'
+  else if(totalShooting>totalMelee*1.3) category='ranged'
+
+  return {
+    ...f,
+    stats, skills:flatSkills,
+    attributes:{ action_points:{MOVE:1,ATTACK:1}, parts, skills_by_owner:skillsByOwner, import_source:'manual', import_version:'2.0' },
+    category, tier:1, sprite_key:null,
+    size: normSize(f.size || 'm'),
+  }
+}
+
+async function saveUnit(silent=false) {
   errors.value=[]; highlightFields.value={}
   try {
     // Phase 30-Cover: 剥离废弃主图字段，封面改由七视图正视图派生
-    const payload = { ...form.value }
+    const payload = buildUnitPayload(form.value)
     delete payload.main_image_url
     const isUpdate=!!editingUnit.value?.id
     if(isUpdate) await hangarAPI.updateUnit(editingUnit.value.id,payload)
-    else await hangarAPI.createUnit(payload)
-    await loadUnits(); editingUnit.value=null
-    alert('保存成功')
+    else {
+      const { data } = await hangarAPI.createUnit(payload)
+      // 关键：把新建返回的 UUID 写回，使后续七视图上传能拿到 unitId（唯一命名空间）
+      if (data?.unit?.id) {
+        editingUnit.value = { ...(editingUnit.value || {}), id: data.unit.id }
+        form.value.id = data.unit.id
+      }
+    }
+    await loadUnits()
+    if(!silent) alert('保存成功')
   } catch(e) {
     const detail=e.response?.data
     errors.value=detail?.details||[detail?.error||'保存失败']
@@ -717,7 +1133,7 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 .btn-primary { background:#ffb000; color:#0a1628; } .btn-primary:hover { background:#ffc840; }
 .btn-secondary { background:transparent; border:1px solid rgba(255,176,0,0.4); color:#ffb000; } .btn-secondary:hover { background:rgba(255,176,0,0.1); }
 .btn-ghost { background:transparent; border:1px solid rgba(159,142,120,0.3); color:#9f8e78; } .btn-ghost:hover { border-color:#ffb000; color:#ffb000; }
-.btn-accent { background:transparent; border:1px solid rgba(19,255,67,0.35); color:#13ff43; } .btn-accent:hover { background:rgba(19,255,67,0.08); border-color:#13ff43; }
+.btn-accent { background:transparent; border:1px solid rgba(255,176,0,0.35); color:#ffb000; } .btn-accent:hover { background:rgba(255,176,0,0.08); border-color:#ffb000; }
 .btn-small { padding:6px 14px; font-size:11px; font-family:'Fira Code',monospace; font-weight:700; cursor:pointer; text-transform:uppercase; letter-spacing:.03em; transition:all .15s; }
 
 /* Unit Cards */
@@ -762,7 +1178,7 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 }
 .btn-file-upload:hover { background: rgba(255,176,0,0.2); border-color: #ffb000; }
 .file-hint { color: rgba(193,232,255,0.35); font-size: 11px; }
-.file-name { color: #13ff43; font-size: 11px; font-family: 'Fira Code', monospace; }
+.file-name { color: #ffd597; font-size: 11px; font-family: 'Fira Code', monospace; }
 .error-input { border-color:#ff7351 !important; background:rgba(255,115,81,0.08) !important; animation:pulse-error 1s ease-in-out; }
 @keyframes pulse-error { 0%,100%{box-shadow:0 0 0 0 rgba(255,115,81,0.3)} 50%{box-shadow:0 0 0 5px rgba(255,115,81,0)} }
 .faction-row { display:flex; gap:8px; align-items:center; }
@@ -819,7 +1235,7 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 .error-text { color: #ff7351; font-size: 12px; margin: 8px 0; font-family: 'Fira Code', monospace; }
 
 /* Footer */
-.footer { position:fixed; bottom:0; left:256px; right:0;
+.footer { position:fixed; bottom:0; left:var(--sidebar-w, 240px); right:0;
   transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background:rgba(2,9,17,0.92); border-top:1px solid rgba(255,176,0,0.1); padding:6px 24px; display:flex; justify-content:space-between; align-items:center; font-family:'Fira Code',monospace; font-size:10px; z-index:50; }
 .footer-left span { color:#ffb000; font-weight:700; letter-spacing:2px; text-transform:uppercase; }
 .footer-right { display:flex; gap:28px; letter-spacing:2px; text-transform:uppercase; }
@@ -843,7 +1259,62 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 .view-drop-zone:hover { border-color: #ffb000; background: rgba(255,176,0,0.05); }
 .view-placeholder { font-size: 24px; font-weight: 700; color: rgba(193,232,255,0.25); font-family: 'Fira Code', monospace; }
 .view-preview-img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.views-actions { display: flex; gap: 10px; margin-top: 8px; }
+/* 方向箭头标注：指向该方向棋子面朝的方位 */
+.dir-arrow {
+  display: inline-block; margin-left: 3px; color: #4fd1ff; font-weight: 900;
+  font-size: 12px; line-height: 1; transform-origin: center; transition: transform 0.15s;
+}
+.views-dir-hint {
+  font-size: 11px; color: rgba(193,232,255,0.6); margin-bottom: 10px; line-height: 1.6;
+  background: rgba(79,209,255,0.06); border-left: 2px solid rgba(79,209,255,0.4);
+  padding: 6px 10px; border-radius: 4px;
+}
+.views-dir-hint .dir-hint-strong { color: #4fd1ff; font-weight: 700; }
+.views-dir-hint b { color: #ffd597; }
+.views-dir-hint em { color: #ffb000; font-style: normal; }
+.view-slot-actions { display: flex; gap: 4px; margin-top: 2px; }
+.btn-small.btn-crop { background: rgba(79,209,255,0.15); color: #4fd1ff; border: 1px solid rgba(79,209,255,0.4); }
+.btn-small.btn-crop:hover { background: rgba(79,209,255,0.3); }
+.btn-small.btn-danger { background: rgba(255,99,99,0.15); color: #ff6363; border: 1px solid rgba(255,99,99,0.45); }
+.btn-small.btn-danger:hover:not(:disabled) { background: rgba(255,99,99,0.32); }
+.btn-small.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.views-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; margin-bottom: 4px; flex-wrap: wrap; }
 .section-desc { font-size: 11px; color: rgba(193,232,255,0.4); margin-bottom: 10px; font-family: 'Fira Code', monospace; }
-.faction-code { color: #13ff43; font-family: 'Fira Code', monospace; }
+.faction-code { color: #ffd597; font-family: 'Fira Code', monospace; }
+
+/* 体型（体积）选择器 */
+.size-row { display: flex; align-items: center; gap: 10px; }
+.size-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 22px; padding: 0 6px; border-radius: 4px;
+  font-weight: 700; font-family: 'Fira Code', monospace; font-size: 12px; color: #001018;
+}
+.size-chip.size-s { background: #4fd1ff; }
+.size-chip.size-m { background: #9aa7b0; }
+.size-chip.size-l { background: #ff9d3c; }
+.size-chip.size-xl { background: #ff5a5a; }
+.size-rules {
+  margin-top: 8px; font-size: 12px; line-height: 1.6; color: rgba(193,232,255,0.75);
+  background: rgba(255,176,0,0.06); border-left: 2px solid rgba(255,176,0,0.4);
+  padding: 6px 10px; border-radius: 4px;
+}
+.size-rules strong { color: #ffb000; font-family: 'Fira Code', monospace; }
+.size-rule-hint { margin-top: 4px; color: rgba(193,232,255,0.5); font-size: 11px; }
+
+/* Phase 31: 手动裁剪模态框 */
+.crop-modal {
+  background: #0a2230; border: 1px solid rgba(255,176,0,0.3); border-radius: 10px;
+  width: min(560px, 92vw); max-height: 90vh; overflow: auto; padding: 16px 18px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+}
+.crop-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #ffd597; font-weight: 700; }
+.crop-tip { font-size: 11px; color: rgba(193,232,255,0.6); line-height: 1.6; margin-bottom: 10px; }
+.crop-canvas-wrap {
+  display: flex; align-items: center; justify-content: center;
+  background: #06202c; border: 1px dashed rgba(159,142,120,0.3); border-radius: 6px;
+  padding: 10px; max-height: 60vh; overflow: auto;
+}
+.crop-canvas-wrap canvas { max-width: 100%; max-height: 56vh; image-rendering: pixelated; cursor: crosshair; background:
+  repeating-conic-gradient(#0c2c3a 0% 25%, #0a2532 0% 50%) 50% / 16px 16px; }
+.crop-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
 </style>

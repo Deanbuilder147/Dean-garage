@@ -11,17 +11,6 @@
     <div class="hex-engine-container" ref="engineContainer">
       <canvas ref="mainCanvas"></canvas>
     </div>
-    <!-- 双轴平移滑槽（界面右侧角落：纵轴=立直滑轮，横轴=横向滑轮） -->
-    <div class="slider-panel" @mousedown.stop @click.stop>
-      <div class="pan-axis pan-axis-v">
-        <span class="pan-axis-label">纵轴</span>
-        <input type="range" class="slider-track slider-v" min="0" max="100" :value="vSlider" @input="onVSlider" title="垂直平移（纵轴）">
-      </div>
-      <div class="pan-axis pan-axis-h">
-        <span class="pan-axis-label">横轴</span>
-        <input type="range" class="slider-track slider-h" min="0" max="100" :value="hSlider" @input="onHSlider" title="水平平移（横轴）">
-      </div>
-    </div>
     <div class="cursor-hint" v-if="hoverLabel">{{ hoverLabel }}</div>
   </div>
 </template>
@@ -187,6 +176,22 @@ const camera = reactive({
   viewport: { width: 0, height: 0 },            // 供略缩图栏读取（§3.5）
 })
 
+// ================================================================
+//  内部非响应式变量（须在任何 watch/immediate 回调之前声明，避免 TDZ）
+// ================================================================
+let ctx = null
+let terrainCache = null      // 离屏 Canvas (地形静态层)
+let terrainDirty = true      // 地形缓存脏标记
+let isDragging = false
+let dragStartX = 0, dragStartY = 0, dragStartOX = 0, dragStartOY = 0
+let _windowDragMove = null
+let _windowDragEnd = null
+let _resizeObserver = null
+let hlQ = -1, hlR = -1
+let isFirstDraw = true
+let animFrameId = null
+let lastClockTick = 0
+
 // 模式切换：planar 强制 PLANAR_CONFIG（顶视）；iso 沿用传入 isoConfig
 const effectiveIso = computed(() =>
   props.mode === 'planar'
@@ -223,30 +228,11 @@ function ensureMaterialImage(url) {
   return img
 }
 
-const hSlider = ref(50)
-const vSlider = ref(50)
 const hoverLabel = ref('')
 const frameClock = ref(0)
 
 // 视口裁剪可见范围
 const visibleRange = reactive({ minQ: 0, maxQ: 0, minR: 0, maxR: 0 })
-
-// ================================================================
-//  内部非响应式变量
-// ================================================================
-let ctx = null
-let terrainCache = null      // 离屏 Canvas (地形静态层)
-let terrainDirty = true      // 地形缓存脏标记
-let isDragging = false
-let dragStartX = 0, dragStartY = 0, dragStartOX = 0, dragStartOY = 0
-let _windowDragMove = null
-let _windowDragEnd = null
-let _resizeObserver = null
-let _sliderSyncing = false
-let hlQ = -1, hlR = -1
-let isFirstDraw = true
-let animFrameId = null
-let lastClockTick = 0
 
 // ================================================================
 //  六角格数学 — 包装 hexUtils，自动注入当前间距
@@ -624,14 +610,18 @@ function computeFitScale() {
     if (c.y < minY) minY = c.y
     if (c.y > maxY) maxY = c.y
   }
-  const pad = HEX_WIDTH
-  minX -= pad; maxX += pad; minY -= pad; maxY += pad
+  // 用户需求：最小缩放下整张网格(含最上/最下排)完整可见，并额外空出约 1 个单元格行的边距。
+  // fit 区域 = 网格包围盒 + 上下各约 1 行(HEX_HEIGHT) + 左右各约 1 列(HEX_WIDTH)。
+  const padX = HEX_WIDTH
+  const padY = HEX_HEIGHT
+  minX -= padX; maxX += padX; minY -= padY; maxY += padY
   const regionW = Math.max(1, maxX - minX)
   const regionH = Math.max(1, maxY - minY)
-  const margin = 0.95
+  const margin = 0.98
   const fitW = (canvas.width / regionW) * margin
   const fitH = (canvas.height / regionH) * margin
-  return Math.max(0.05, Math.min(4, Math.min(fitW, fitH)))
+  // 下限即"整图入框+1 行边距"，不再用固定硬下限(避免大地图无法缩到整图)
+  return Math.max(0.001, Math.min(fitW, fitH))
 }
 
 // 战场默认视角：聚焦"画"正中 sideN×sideN 格（默认 10×10），其余靠玩家缩放/平移
@@ -684,7 +674,7 @@ function focusCentralGrid(sideN = 10) {
   const fitW = (canvas.width / regionW) * margin
   const fitH = (canvas.height / regionH) * margin
   let ns = Math.min(fitW, fitH)
-  ns = Math.max(computeFitScale(), Math.min(4, ns))
+  ns = Math.max(computeFitScale(), Math.min(3, ns))
   scale.value = ns
 
   // 3) 居中该区域
@@ -725,6 +715,25 @@ function initCanvas() {
   updateVisibleRange()
   isFirstDraw = false
   draw()
+  // 布局延迟自愈：路由返回/首帧容器尺寸未稳定（clientWidth=0）时，
+  // 下一帧容器就绪后重新同步尺寸并绘制，避免画布空白。
+  requestAnimationFrame(() => {
+    const canvas = mainCanvas.value
+    const container = engineContainer.value
+    if (canvas && container) {
+      const cw = container.clientWidth, ch = container.clientHeight
+      if (cw > 0 && ch > 0 && (Math.abs(canvas.width - cw) > 1 || Math.abs(canvas.height - ch) > 1)) {
+        canvas.width = cw
+        canvas.height = ch
+        camera.viewport.width = cw
+        camera.viewport.height = ch
+        if (props.mode === 'iso') focusCentralGrid(10)
+        else centerGrid()
+        invalidateTerrain()
+        draw()
+      }
+    }
+  })
 }
 
 // ================================================================
@@ -784,7 +793,6 @@ function draw() {
   }
 
   ctx.restore()
-  syncSlidersFromOffset()
 }
 
 /** 不使用缓存时的内联地形渲染 */
@@ -828,6 +836,12 @@ function renderTerrainInline(ctx2d) {
         continue
       }
 
+      // 需求④ 材质：实时渲染分支也平铺素材，与缓存分支(renderTerrainCache)保持一致。
+      // 素材仅在图片已成功加载(complete 且未失败)时使用，否则回退纯色。
+      const matUrl = props.terrainMaterials ? props.terrainMaterials[terrainId] : null
+      const matImg = matUrl ? ensureMaterialImage(matUrl) : null
+      const matPattern = (matImg && matImg.complete && !matImg.__failed) ? ctx2d.createPattern(matImg, 'repeat') : null
+
       // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：等距逐顶点绘制。
       if (props.mode === 'planar') {
         drawHexPath(ctx2d, flatX, flatY)
@@ -836,7 +850,7 @@ function renderTerrainInline(ctx2d) {
       } else {
         drawIsoHexPath(ctx2d, flatX, flatY, ISO)
       }
-      ctx2d.fillStyle = terrainInfo.color
+      ctx2d.fillStyle = matPattern || terrainInfo.color
       ctx2d.fill()
       ctx2d.strokeStyle = 'rgba(255,255,255,0.08)'
       ctx2d.lineWidth = 0.5
@@ -1019,49 +1033,6 @@ function getGridDims() {
   return { gridW: Math.max(gridW, 200), gridH: Math.max(gridH, 200) }
 }
 
-function getSliderRange() {
-  const canvas = mainCanvas.value
-  if (!canvas) return { minX: -500, maxX: 500, minY: -500, maxY: 500 }
-  const { gridW, gridH } = getGridDims()
-  const scaledW = gridW * scale.value
-  const scaledH = gridH * scale.value
-  const cw = canvas.width
-  const ch = canvas.height
-  return {
-    minX: -scaledW + cw * 0.2,
-    maxX: cw * 0.8,
-    minY: -scaledH + ch * 0.2,
-    maxY: ch * 0.8,
-  }
-}
-
-function syncSlidersFromOffset() {
-  if (_sliderSyncing) return
-  const { minX, maxX, minY, maxY } = getSliderRange()
-  if (maxX > minX) hSlider.value = Math.round(((offsetX.value - minX) / (maxX - minX)) * 100)
-  if (maxY > minY) vSlider.value = Math.round(((offsetY.value - minY) / (maxY - minY)) * 100)
-}
-
-function onHSlider(e) {
-  const val = parseFloat(e.target.value)
-  const { minX, maxX } = getSliderRange()
-  _sliderSyncing = true
-  offsetX.value = minX + (maxX - minX) * (val / 100)
-  updateVisibleRange()
-  draw()
-  _sliderSyncing = false
-}
-
-function onVSlider(e) {
-  const val = parseFloat(e.target.value)
-  const { minY, maxY } = getSliderRange()
-  _sliderSyncing = true
-  offsetY.value = minY + (maxY - minY) * (val / 100)
-  updateVisibleRange()
-  draw()
-  _sliderSyncing = false
-}
-
 // ================================================================
 //  事件绑定
 // ================================================================
@@ -1194,7 +1165,7 @@ function zoomReset() {
   const viewW = wrapper.clientWidth
   const viewH = wrapper.clientHeight
   const fitScale = Math.min((viewW - 40) / cw, (viewH - 40) / ch)
-  const ns = Math.max(0.2, Math.min(3, fitScale))
+  const ns = Math.max(computeFitScale(), Math.min(3, fitScale))
   const wc = canvasPosToWorld(canvas.width / 2, canvas.height / 2)
   offsetX.value += (scale.value - ns) * wc.wx
   offsetY.value += (scale.value - ns) * wc.wy
@@ -1204,7 +1175,26 @@ function zoomReset() {
 }
 
 /** 强制重绘 */
-function redraw() { draw() }
+function redraw() {
+  // 尺寸自愈：若容器尺寸已变化（如路由返回后布局时机导致初始尺寸为 0/错误），
+  // 重设 canvas 物理尺寸并重算相机，避免「返回战局后画布空白」。
+  const canvas = mainCanvas.value
+  const container = engineContainer.value
+  if (canvas && container) {
+    const cw = container.clientWidth, ch = container.clientHeight
+    if (cw > 0 && ch > 0 && (Math.abs(canvas.width - cw) > 1 || Math.abs(canvas.height - ch) > 1)) {
+      canvas.width = cw
+      canvas.height = ch
+      camera.viewport.width = cw
+      camera.viewport.height = ch
+      // 战场(iso)重聚焦默认视角；编辑器回到整图居中
+      if (props.mode === 'iso') focusCentralGrid(10)
+      else centerGrid()
+      invalidateTerrain()
+    }
+  }
+  draw()
+}
 
 /** 标记地形缓存失效并重绘 */
 function invalidateTerrain() {
@@ -1365,75 +1355,5 @@ onUnmounted(() => {
   pointer-events: none;
   user-select: none;
   z-index: 10;
-}
-
-/* 双轴平移滑槽（界面右侧角落） */
-.slider-panel {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  background: rgba(6, 18, 24, 0.82);
-  border: 1px solid rgba(255, 176, 0, 0.18);
-  border-radius: 8px;
-  padding: 10px 12px;
-  backdrop-filter: blur(4px);
-}
-
-.pan-axis {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-}
-
-.pan-axis-label {
-  color: rgba(255, 176, 0, 0.75);
-  font-size: 10px;
-  font-family: 'Fira Code', monospace;
-  letter-spacing: 1px;
-  user-select: none;
-}
-
-.slider-track {
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(255, 176, 0, 0.12);
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-
-/* 横轴：横向滑轮 */
-.slider-h { width: 140px; height: 4px; }
-
-/* 纵轴：立直滑轮（垂直方向） */
-.slider-v {
-  width: 4px;
-  height: 130px;
-  writing-mode: vertical-lr;
-  direction: rtl;
-  -webkit-appearance: slider-vertical;
-}
-
-.slider-track::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px; height: 13px;
-  border-radius: 50%;
-  background: #ffb000;
-  border: 1.5px solid #0d1f2d;
-  cursor: grab;
-}
-.slider-track::-moz-range-thumb {
-  width: 13px; height: 13px;
-  border-radius: 50%;
-  background: #ffb000;
-  border: 1.5px solid #0d1f2d;
-  cursor: grab;
 }
 </style>

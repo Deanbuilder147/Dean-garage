@@ -82,28 +82,28 @@
       <div class="spacing-bar">
         <div class="spacing-group">
           <span class="spacing-label">水平间距</span>
-          <button class="spacing-btn" @click="adjustSpacing('h', -2)">-</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('h', -2)">-</button>
           <span class="spacing-val">{{ spacingH.toFixed(2) }}</span>
-          <button class="spacing-btn" @click="adjustSpacing('h', 2)">+</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('h', 2)">+</button>
         </div>
         <div class="spacing-group">
           <span class="spacing-label">垂直间距</span>
-          <button class="spacing-btn" @click="adjustSpacing('v', -2)">-</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('v', -2)">-</button>
           <span class="spacing-val">{{ spacingV.toFixed(2) }}</span>
-          <button class="spacing-btn" @click="adjustSpacing('v', 2)">+</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('v', 2)">+</button>
         </div>
         <div class="spacing-group">
           <span class="spacing-label">偏移系数</span>
-          <button class="spacing-btn" @click="adjustSpacing('o', -2)">-</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('o', -2)">-</button>
           <span class="spacing-val">{{ offsetFactor.toFixed(2) }}</span>
-          <button class="spacing-btn" @click="adjustSpacing('o', 2)">+</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="adjustSpacing('o', 2)">+</button>
         </div>
-        <button class="spacing-reset" @click="resetSpacing">重置间距</button>
+        <button class="spacing-reset btn btn-reload" @click="resetSpacing">重置间距</button>
 
         <div class="zoom-group">
-          <button class="spacing-btn" @click="hexGrid?.zoomIn()">🔍+</button>
-          <button class="spacing-btn" @click="hexGrid?.zoomOut()">🔍-</button>
-          <button class="spacing-btn" @click="hexGrid?.zoomReset()">1:1</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="hexGrid?.zoomIn()">🔍+</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="hexGrid?.zoomOut()">🔍-</button>
+          <button class="spacing-btn btn btn-reload btn-mini" @click="hexGrid?.zoomReset()">1:1</button>
         </div>
       </div>
     </div>
@@ -114,11 +114,11 @@
       <div class="terrain-mgr-panel" style="max-width: 420px;">
         <div class="terrain-mgr-header">
           <span>[ 新建地图 ]</span>
-          <button class="tm-close" @click="showNewMapModal=false">✕</button>
+          <button class="tm-close btn btn-ghost btn-mini" @click="showNewMapModal=false">✕</button>
         </div>
         <div class="terrain-mgr-body" style="display:flex;flex-direction:column;gap:16px;padding:20px;">
           <div style="color:rgba(241,243,252,0.7);font-size:13px;text-align:center;padding:14px 0;">
-            固定战场尺寸：<b style="color:#ffd479;">100 × 100</b> = 10,000 格
+            固定战场尺寸：<b style="color:#ffd479;">50 × 50</b> = 2,500 格
           </div>
           <div v-if="newMapError" style="color:#ff4d4d;font-size:11px;text-align:center;">{{ newMapError }}</div>
         </div>
@@ -132,7 +132,7 @@
       <div class="terrain-mgr-panel">
         <div class="terrain-mgr-header">
           <span>[ 自定义地形管理 ]</span>
-          <button class="tm-close" @click="showTerrainMgr=false">✕</button>
+          <button class="tm-close btn btn-ghost btn-mini" @click="showTerrainMgr=false">✕</button>
         </div>
         <div class="terrain-mgr-body">
           <div v-for="(def, key) in editableTerrains" :key="key" class="tm-item">
@@ -162,9 +162,9 @@
                 <input type="file" accept="image/*" class="tm-file-input" @change="onMaterialChange($event, key)" />
               </label>
               <img v-if="editableTerrains[key].material_url" :src="editableTerrains[key].material_url" class="tm-thumb" alt="素材预览" />
-              <button v-if="editableTerrains[key].material_url" class="tm-clear" @click="clearTerrainMaterial(key)">清除</button>
+              <button v-if="editableTerrains[key].material_url" class="tm-clear btn btn-delete btn-mini" @click="clearTerrainMaterial(key)">清除</button>
             </div>
-            <button class="tm-delete" @click="deleteTerrainType(key)">删除</button>
+            <button class="tm-delete btn btn-delete" @click="deleteTerrainType(key)">删除</button>
           </div>
           <div class="tm-add-row">
             <input v-model="newTerrainKey" class="tm-input-name" placeholder="新地形KEY" />
@@ -186,7 +186,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { mapAPI, glossaryAPI, terrainAPI } from '@/api/client'
 import {
   DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR,
-  UNIVERSAL_TERRAIN_MAP,
+  UNIVERSAL_TERRAIN_MAP, syncTerrainFromGlossary,
   ISO_DEFAULTS,
   parseCoord, parseCoordRange, colToLetter,
 } from '../utils/hexUtils.js'
@@ -277,17 +277,25 @@ const gridData = computed(() => ({
 // ================================================================
 const editorHighlights = ref([])
 
-// ---- 地形调色板 (从全项目唯一真理 UNIVERSAL_TERRAIN_MAP 派生) ----
-const terrainTypes = Object.entries(UNIVERSAL_TERRAIN_MAP).map(([id, def]) => ({
-  id,
-  name: def.name,
-  color: def.color,
-  moveCost: def.cost,
-}))
+// ---- 地形调色板 (方案A：从 glossary terrains 单一真相源派生) ----
+// terrainTypes 改为响应式 ref；加载 glossary 后通过 syncTerrainFromGlossary 把词条库地形
+// 同步进 UNIVERSAL_TERRAIN_MAP，再重建调色板，使编辑器新增/修改的地形即时反映到画笔。
+function buildTerrainPalette() {
+  return Object.entries(UNIVERSAL_TERRAIN_MAP).map(([id, def]) => ({
+    id,
+    name: def.name,
+    color: def.color,
+    moveCost: def.cost,
+  }))
+}
+const terrainTypes = ref(buildTerrainPalette())
+function rebuildTerrainPalette() {
+  terrainTypes.value = buildTerrainPalette()
+}
 
-const allTerrainTypes = computed(() => terrainTypes)
+const allTerrainTypes = computed(() => terrainTypes.value)
 const brushName = computed(() => {
-  const t = terrainTypes.find(t => t.id === brush.value)
+  const t = terrainTypes.value.find(t => t.id === brush.value)
   return t ? t.name : '未知'
 })
 
@@ -298,21 +306,46 @@ const editableTerrains = reactive({})
 const newTerrainKey = ref('')
 const terrainSaveMsg = ref('')
 
-// 从 glossary API 加载全量地形定义
+// 用 palette (UNIVERSAL_TERRAIN_MAP) 定义补全缺失的地形默认值
+function seedTerrain(key, def) {
+  return {
+    name: def?.name || key,
+    color: def?.color || '#888888',
+    material_url: `/api/terrain/materials/${key}.png`,
+    move_cost: def?.cost ?? 1,
+    defense_bonus: 0,
+    is_destructible: false,
+    max_hp: 0,
+    destroyed_transform_to: key,
+    damage_kind_modifiers: { beam: 1.0, kinetic: 1.0, explosive: 1.0, corrosive: 1.0, thermal: 1.0 }
+  }
+}
+
+// 从 glossary API 加载全量地形定义；补全 palette 中存在但 glossary 缺失的地形，
+// 使所有可在调色板绘制的地形都可在「自定义地形管理」中编辑（含素材上传/战斗参数）。
 async function loadTerrainDefinitions() {
+  let terrains = null
   try {
     const { data } = await glossaryAPI.getConfig()
     // Phase 29-GlossaryMerge: API 返回 { glossary: { terrains: {...} } }，修正取值路径
-    const terrains = data.glossary?.terrains || data.terrains
-    if (terrains) {
-      Object.keys(editableTerrains).forEach(k => delete editableTerrains[k])
-      Object.entries(terrains).forEach(([k, v]) => {
-        editableTerrains[k] = { ...v }
-      })
-    }
+    terrains = data.glossary?.terrains || data.terrains
   } catch (e) {
-    console.warn('加载地形定义失败, 使用默认值', e)
+    console.warn('加载地形定义失败, 用 palette 全量兜底', e)
   }
+  const merged = {}
+  // 1) palette 全量优先（保证顺序与可绘制地形一致），glossary 已有的用其配置覆盖
+  Object.entries(UNIVERSAL_TERRAIN_MAP).forEach(([k, def]) => {
+    merged[k] = (terrains && terrains[k]) ? { ...terrains[k] } : seedTerrain(k, def)
+  })
+  // 2) 仅存在于 glossary 但不在 palette 的地形也保留，避免遗漏
+  if (terrains) {
+    Object.keys(terrains).forEach(k => { if (!merged[k]) merged[k] = { ...terrains[k] } })
+  }
+  Object.keys(editableTerrains).forEach(k => delete editableTerrains[k])
+  Object.assign(editableTerrains, merged)
+  // 方案A：把 glossary 地形同步进前端唯一地形表，并重建画笔调色板
+  syncTerrainFromGlossary(terrains)
+  rebuildTerrainPalette()
 }
 
 function addTerrainType() {
@@ -364,6 +397,9 @@ async function saveTerrainConfig() {
     current._meta = current._meta || {}
     current._meta.date = new Date().toISOString().replace('T',' ').substring(0,19)
     await glossaryAPI.saveConfig(current)
+    // 方案A：保存后立即把最新地形同步进前端唯一地形表，使新增/修改的地形即时反映到画笔
+    syncTerrainFromGlossary(editableTerrains)
+    rebuildTerrainPalette()
     terrainSaveMsg.value = '地形库保存成功!'
     addLog('terrain', '地形库配置已保存')
   } catch (e) {
@@ -376,7 +412,7 @@ async function saveTerrainConfig() {
 loadTerrainDefinitions()
 
 const currentTerrainColor = computed(() => {
-  const t = terrainTypes.find(t => t.id === brush.value)
+  const t = terrainTypes.value.find(t => t.id === brush.value)
   return t ? t.color : '#888888'
 })
 
@@ -384,11 +420,15 @@ const currentTerrainColor = computed(() => {
 // Phase 13: 地形ID提取 — 兼容旧版字符串和新版结构化对象
 function extractTerrainId(cellValue) {
   if (!cellValue) return 'moon'
-  if (typeof cellValue === 'string') return cellValue
-  if (typeof cellValue === 'object' && cellValue.terrain_id) return cellValue.terrain_id
-  if (typeof cellValue === 'object' && cellValue.terrain) return cellValue.terrain
-  if (typeof cellValue === 'object' && cellValue.type) return cellValue.type
-  return 'moon'
+  let id
+  if (typeof cellValue === 'string') id = cellValue
+  else if (typeof cellValue === 'object' && cellValue.terrain_id) id = cellValue.terrain_id
+  else if (typeof cellValue === 'object' && cellValue.terrain) id = cellValue.terrain
+  else if (typeof cellValue === 'object' && cellValue.type) id = cellValue.type
+  else return 'moon'
+  // 归一化已移除的冗余地形 id（lunar / empty 曾与 moon 同名"月面"），保证旧存档正常加载
+  if (id === 'lunar' || id === 'empty') return 'moon'
+  return id
 }
 
 // Phase 13: 地形名称提取 — 兼容新版结构化对象
@@ -709,7 +749,7 @@ async function saveMap() {
     })
     await mapAPI.updateBattlefield(battlefield.value.id, {
       terrain: terrainData,
-      terrain_defs: terrainTypes,
+      terrain_defs: terrainTypes.value.map(t => ({ id: t.id, name: t.name, color: t.color, moveCost: t.moveCost })),
       hex_config: {
         spacingH: spacingH.value,
         spacingV: spacingV.value,
@@ -789,7 +829,10 @@ function exportJSON() {
         offsetFactor: offsetFactor.value,
       },
       terrainData: JSON.parse(JSON.stringify(paintedMap)),
-      terrainTypes: Object.entries(UNIVERSAL_TERRAIN_MAP).map(([id, d]) => ({ id, ...d })),
+      terrainTypes: terrainTypes.value.map(t => ({
+        id: t.id, name: t.name, color: t.color,
+        cost: t.moveCost, height: UNIVERSAL_TERRAIN_MAP[t.id]?.height ?? 0,
+      })),
       cellCount: totalCellCount.value,
       terrainCount: Object.keys(paintedMap).length,
     },
@@ -1047,10 +1090,10 @@ function exportJSON() {
 .footer {
   position: fixed;
   bottom: 0;
-  left: 256px;
+  left: var(--sidebar-w, 240px);
   right: 0;
   background: rgba(2,9,17,0.92);
-  border-top: 1px solid rgba(0,255,65,0.18);
+  border-top: 1px solid rgba(255,176,0,0.1);
   padding: 6px 24px;
   display: flex;
   justify-content: space-between;
@@ -1061,14 +1104,14 @@ function exportJSON() {
   pointer-events: auto;
 }
 .footer-left span {
-  color: #00ff41;
+  color: #ffb000;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
 }
 .footer-right { display: flex; gap: 28px; letter-spacing: 2px; text-transform: uppercase; }
 .footer-right .good { color: rgba(122,236,255,0.8); }
-.footer-right .muted { color: rgba(0,255,65,0.35); }
+.footer-right .muted { color: #c9bda5; }
 /* ===== Phase9: 批量地形修改器 ===== */
 .batch-panel {
   padding: 10px 0;
@@ -1138,7 +1181,7 @@ function exportJSON() {
 }
 .batch-result {
   font-size: 10px;
-  color: #00ff41;
+  color: #13ff43;
   font-family: 'Fira Code', monospace;
   margin-left: 8px;
 }

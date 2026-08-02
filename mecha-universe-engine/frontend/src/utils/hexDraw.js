@@ -212,3 +212,45 @@ export function drawIsoHexColumn(ctx, cx, cy, iso, height, topColor, topFill) {
   ctx.lineWidth = 0.5
   ctx.stroke()
 }
+
+// ================================================================
+// 空投 groundItems 道具层绘制（卡8 前端表现）
+// ================================================================
+
+/**
+ * 绘制空投道具标记（降落伞 + 补给箱），用于 HexGridCanvasEngine 道具层。
+ * @param ctx Canvas 2D context
+ * @param cx,cy 该格在屏幕(ISO)下的中心坐标
+ * @param iso ISO 变换参数
+ * @param opts { color, label }
+ */
+export function drawGroundItemToken(ctx, cx, cy, iso, opts = {}) {
+  const color = opts.color || '#ffd24a'
+  const r = HEX_RADIUS * 0.42
+  // 降落伞顶（半圆）
+  ctx.beginPath()
+  ctx.arc(cx, cy - r * 1.1, r * 0.9, Math.PI, 0)
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.fill()
+  // 伞绳
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(cx - r * 0.8, cy - r * 1.1)
+  ctx.lineTo(cx, cy - r * 0.2)
+  ctx.moveTo(cx + r * 0.8, cy - r * 1.1)
+  ctx.lineTo(cx, cy - r * 0.2)
+  ctx.stroke()
+  // 补给箱
+  ctx.fillStyle = color
+  ctx.fillRect(cx - r * 0.6, cy - r * 0.2, r * 1.2, r * 0.9)
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.strokeRect(cx - r * 0.6, cy - r * 0.2, r * 1.2, r * 0.9)
+  // 高亮描边
+  ctx.beginPath()
+  ctx.arc(cx, cy - r * 0.2, r * 1.4, 0, Math.PI * 2)
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+}

@@ -106,6 +106,11 @@
           />
         </div>
 
+        <div class="perm-hint">
+          <span class="perm-icon">i</span>
+          <span>新账号默认权限等级：<strong>Player（普通玩家）</strong> — 可加入并创建战场；裁判 / 管理员等高级权限由系统分配。</span>
+        </div>
+
         <div v-if="error" class="error-msg">{{ error }}</div>
         <button type="submit" class="btn-login" :disabled="loading">{{ loading ? '注册中...' : '创建档案' }}</button>
       </form>
@@ -134,7 +139,14 @@ async function handleLogin() {
   loading.value = true
   try {
     const { data } = await authAPI.login({ username: loginForm.value.username, password: loginForm.value.password })
-    localStorage.setItem('token', data.token)
+    // 关键：写入 store 的 token（同步 localStorage），保证 userStore.isLoggedIn 正确
+    userStore.setToken(data.token)
+    // 同步注入 user 对象（id/role），否则准备房页面的房主/GM 门禁 isHost/isGM 全为 false，
+    // 导致无法删除房间、无法开始战斗
+    if (data.user) {
+      localStorage.setItem('user', JSON.stringify(data.user))
+      userStore.setUser(data.user)
+    }
     router.push('/home')
   } catch (e) {
     error.value = e.response?.data?.message || '凭据验证失败，请重试'
@@ -187,6 +199,9 @@ async function handleRegister() {
 .btn-login:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .error-msg { background: rgba(255,77,77,0.1); border-left: 3px solid #ff4d4d; padding: 10px 14px; color: #ff6b6b; font-size: 12px; font-family: 'Fira Code', monospace; }
+.perm-hint { display: flex; align-items: flex-start; gap: 8px; background: rgba(255,176,0,0.08); border-left: 3px solid #ffb000; padding: 10px 14px; color: rgba(193,232,255,0.7); font-size: 11px; font-family: 'Fira Code', monospace; line-height: 1.5; margin-bottom: 8px; }
+.perm-hint strong { color: #ffb000; }
+.perm-icon { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: #ffb000; color: #0a1628; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; font-family: monospace; }
 .modal-footer-dec { padding: 14px 32px; border-top: 1px solid rgba(255,176,0,0.08); }
 .status-row { font-family: 'Fira Code', monospace; font-size: 10px; color: rgba(193,232,255,0.4); display: flex; align-items: center; justify-content: center; gap: 10px; letter-spacing: 0.05em; }
 .dot { width: 6px; height: 6px; background: #13ff43; border-radius: 50%; animation: pulse 2s infinite; }

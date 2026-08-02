@@ -20,21 +20,21 @@
       </div>
     </header>
 
-    <section class="hero-banner" @click="router.push('/battlefields')">
-      <div class="hero-inner">
-        <div class="hero-text">
-          <div class="hero-title-row">
-            <svg class="icon icon-xl" style="color:#ffb000" viewBox="0 0 24 24"><path d="M19.93 7.03l-2.9-2.9-1.41 1.41 1.41 1.41-4.89 4.89-2.83-2.83-1.41 1.41 1.41 1.41-2.82 2.83-1.42-1.42-1.41 1.42 1.41 1.41L3 18.66l1.41 1.41 1.42-1.41 1.41 1.41 1.42-1.41-1.42-1.42 2.83-2.83 1.41 1.41 1.42-1.42-2.83-2.83 4.89-4.89 1.41 1.41 1.41-1.41z"/></svg>
-            <h2>战术部署</h2>
-          </div>
-          <p class="hero-desc">选择战场，组建机甲编队，投入高强度战术战斗行动。</p>
-        </div>
-        <button class="btn-hero">启动</button>
-      </div>
-      <div class="scanline"></div>
-    </section>
-
     <div class="cards-grid">
+
+      <div class="card" @click="router.push('/battlefields')">
+        <div class="card-text">
+          <div class="card-icon">
+            <svg class="icon icon-xl" viewBox="0 0 24 24"><path d="M19.93 7.03l-2.9-2.9-1.41 1.41 1.41 1.41-4.89 4.89-2.83-2.83-1.41 1.41 1.41 1.41-2.82 2.83-1.42-1.42-1.41 1.42 1.41 1.41L3 18.66l1.41 1.41 1.42-1.41 1.41 1.41 1.42-1.41-1.42-1.42 2.83-2.83 1.41 1.41 1.42-1.42-2.83-2.83 4.89-4.89 1.41 1.41 1.41-1.41z"/></svg>
+          </div>
+          <div class="card-title-group">
+            <h3>战术部署</h3>
+            <p>选择战场，组建机甲编队，投入高强度战术战斗行动。</p>
+          </div>
+        </div>
+        <button class="card-btn">启动</button>
+        <div class="scanline"></div>
+      </div>
 
       <div class="card" @click="router.push('/units')">
         <div class="card-text">
@@ -173,59 +173,7 @@ function handleLogout() {
 .meta-divider { color: #9f8e78; }
 .meta-highlight { color: #ffd597; }
 
-.hero-banner {
-  position: relative;
-  background: #001e2b;
-  border: 1px solid rgba(255,176,0,0.25);
-  margin-bottom: 32px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.hero-banner:hover { background: #002e3f; }
-.hero-banner::before {
-  content: ''; position: absolute; left: 0; top: 0;
-  width: 4px; height: 100%; background: #ffb000;
-}
-.hero-inner {
-  padding: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-.hero-text { flex: 1; }
-.hero-title-row {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 10px;
-}
-.hero-title-row h2 {
-  font-size: 20px;
-  font-weight: 700;
-  color: #c1e8ff;
-  letter-spacing: 0.02em;
-}
-.hero-desc {
-  font-size: 14px;
-  color: rgba(193,232,255,0.7);
-  line-height: 1.6;
-  max-width: 480px;
-}
-.btn-hero {
-  flex-shrink: 0;
-  background: #ffb000;
-  color: #0a1628;
-  padding: 12px 24px;
-  font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  border: none;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
-}
-.btn-hero:hover { background: #ffc840; }
-.btn-hero:active { transform: scale(0.96); }
+/* 首页卡片统一使用 .card / .card-btn（含战术部署，已并入 cards-grid） */
 
 .cards-grid {
   display: flex;
@@ -343,7 +291,7 @@ function handleLogout() {
 .status-bar .sep { color: #9f8e78; }
 
 .footer {
-  position: fixed; bottom: 0; left: 256px; right: 0;
+  position: fixed; bottom: 0; left: var(--sidebar-w, 240px); right: 0;
   transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   background: rgba(2,9,17,0.92);
   border-top: 1px solid rgba(255,176,0,0.18);

@@ -1,0 +1,417 @@
+/* ============================================================================
+   词条库中枢 · 统一前端风格 (glossary-theme.css)
+   ----------------------------------------------------------------------------
+   单一真相源：所有子页面复用以下 按钮 / 面板 / 卡片 / 输入框 / 弹窗 样式，
+   保证跨页面的视觉标准一致（配色、形状、聚焦发光、层级区分）。
+   配色规范：
+     · 主琥珀   #ffb000 / 浅琥珀文字 #ffd597 / 渐变 #ffb000→#ff8a00
+     · 暖灰边框 rgba(159,142,120, …)         · 青(信息) #7fb3d5 / #00d4ec
+     · 红(危险) #ff6e81 / #ff8e9b            · 紫(AI)   #b14bff
+     · 天蓝(上传) #7fdcff / #00b4ff
+   本文件在 main.js 中最后导入，配合 !important 以稳定覆盖各页 scoped 样式。
+   ========================================================================== */
+
+/* ----------------------------- 面板 (panel) ----------------------------- */
+.panel {
+  background: rgba(0, 0, 0, 0.1) !important;
+  border: 1px solid rgba(159, 142, 120, 0.12) !important;
+  border-radius: 6px !important;
+  padding: 16px !important;
+  margin-bottom: 16px !important;
+}
+.panel-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 12px !important;
+}
+.panel-header h2 {
+  margin: 0 !important;
+  font-size: 15px !important;
+  letter-spacing: 1px !important;
+  color: #ffb000 !important;
+  font-weight: 700 !important;
+}
+.panel-badge {
+  font-size: 10px !important;
+  padding: 2px 8px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 176, 0, 0.12) !important;
+  color: #ffd597 !important;
+  border: 1px solid rgba(255, 176, 0, 0.3) !important;
+}
+.panel-body { /* 透传父级背景 */ }
+
+/* ----------------------------- 卡片 (card) ------------------------------ */
+.card {
+  border: 1px solid rgba(159, 142, 120, 0.12) !important;
+  background: rgba(0, 0, 0, 0.1) !important;
+  padding: 20px !important;
+  border-radius: 6px !important;
+}
+.card h2 {
+  margin: 0 0 6px !important;
+  font-size: 15px !important;
+  color: #ffb000 !important;
+  letter-spacing: 1px !important;
+}
+.card-hint {
+  margin: 0 0 12px !important;
+  font-size: 11px !important;
+  color: rgba(193, 232, 255, 0.45) !important;
+  line-height: 1.5 !important;
+}
+
+/* ----------------------------- 基础按钮 (btn) --------------------------- */
+.btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 8px 16px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 1px !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid rgba(159, 142, 120, 0.25) !important;
+  border-radius: 4px !important;
+  color: #c1e8ff !important;
+  cursor: pointer !important;
+  font-family: 'Fira Code', monospace !important;
+  text-transform: none !important;
+  transition: all 0.2s ease !important;
+}
+.btn:hover {
+  border-color: rgba(255, 176, 0, 0.4) !important;
+  color: #ffd597 !important;
+}
+.btn:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+}
+.btn.active {
+  background: rgba(255, 176, 0, 0.2) !important;
+  color: #ffd597 !important;
+  border-color: rgba(255, 176, 0, 0.5) !important;
+}
+
+/* 变体：新增（青） */
+.btn-add {
+  border-color: rgba(0, 210, 255, 0.4) !important;
+  color: #7fb3d5 !important;
+}
+.btn-add:hover {
+  background: rgba(0, 210, 255, 0.12) !important;
+  color: #00d4ec !important;
+  border-color: rgba(0, 210, 255, 0.6) !important;
+}
+
+/* 变体：保存 / 主操作（琥珀渐变，全大写强调） */
+.btn-save,
+.btn.primary {
+  background: linear-gradient(135deg, #ffb000, #ff8a00) !important;
+  border: none !important;
+  color: #1a1a1a !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1px !important;
+}
+.btn-save:hover,
+.btn.primary:hover {
+  background: linear-gradient(135deg, #ffc233, #ff9a1a) !important;
+  color: #1a1a1a !important;
+}
+.btn-save:disabled,
+.btn.primary:disabled {
+  opacity: 0.5 !important;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #ffb000, #ff8a00) !important;
+  border: none !important;
+  color: #1a1a1a !important;
+  text-transform: uppercase !important;
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #ffc233, #ff9a1a) !important;
+}
+.btn-primary:disabled {
+  opacity: 0.5 !important;
+}
+
+/* 变体：删除 / 危险（红） */
+.btn-delete,
+.btn.danger,
+.btn-danger {
+  background: rgba(255, 110, 129, 0.15) !important;
+  border-color: rgba(255, 110, 129, 0.4) !important;
+  color: #ff8e9b !important;
+}
+.btn-delete:hover,
+.btn.danger:hover,
+.btn-danger:hover {
+  background: rgba(255, 110, 129, 0.25) !important;
+  color: #ff6e81 !important;
+  border-color: rgba(255, 110, 129, 0.7) !important;
+}
+
+/* 变体：刷新 / 重置（暖灰） */
+.btn-reload {
+  border-color: rgba(159, 142, 120, 0.35) !important;
+  color: #c1e8ff !important;
+}
+.btn-reload:hover {
+  background: rgba(255, 176, 0, 0.12) !important;
+  color: #ffd597 !important;
+}
+
+/* 变体：幽灵（透明描边） */
+.btn-ghost,
+.btn.ghost {
+  background: transparent !important;
+  border-color: rgba(159, 142, 120, 0.35) !important;
+  color: #c1e8ff !important;
+}
+.btn-ghost:hover,
+.btn.ghost:hover {
+  background: rgba(255, 176, 0, 0.08) !important;
+  color: #ffd597 !important;
+}
+
+/* 变体：次要（琥珀淡底） */
+.btn-secondary {
+  background: rgba(255, 176, 0, 0.12) !important;
+  border-color: rgba(255, 176, 0, 0.35) !important;
+  color: #ffd597 !important;
+}
+.btn-secondary:hover {
+  background: rgba(255, 176, 0, 0.2) !important;
+  color: #ffd597 !important;
+}
+
+/* 变体：强调（紫） */
+.btn-accent {
+  background: linear-gradient(135deg, #6b1fb3, #b14bff) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.btn-accent:hover {
+  filter: brightness(1.12) !important;
+}
+
+/* 变体：AI 导入（深紫） */
+.btn-ai-import {
+  background: linear-gradient(135deg, #8e2de2, #4a00e0) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.btn-ai-import:hover {
+  filter: brightness(1.12) !important;
+}
+
+/* 变体：上传（天蓝） */
+.btn-upload {
+  background: rgba(0, 180, 255, 0.18) !important;
+  border-color: rgba(0, 180, 255, 0.5) !important;
+  color: #7fdcff !important;
+}
+.btn-upload:hover {
+  background: rgba(0, 180, 255, 0.3) !important;
+}
+.btn-upload:disabled {
+  opacity: 0.5 !important;
+}
+
+/* 变体：小型 */
+.btn-mini,
+.btn.small,
+.btn-small {
+  padding: 4px 10px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* --------------------- 页面专用按钮（统一为系统配色） -------------------- */
+.btn-export {
+  background: rgba(0, 210, 255, 0.15) !important;
+  border-color: rgba(0, 210, 255, 0.4) !important;
+  color: #7fb3d5 !important;
+}
+.btn-export:hover {
+  background: rgba(0, 210, 255, 0.25) !important;
+  color: #00d4ec !important;
+}
+.btn-batch {
+  background: rgba(255, 176, 0, 0.12) !important;
+  border-color: rgba(255, 176, 0, 0.35) !important;
+  color: #ffd597 !important;
+}
+.btn-batch:hover {
+  background: rgba(255, 176, 0, 0.2) !important;
+}
+.btn-join,
+.btn-deploy {
+  background: linear-gradient(135deg, #ffb000, #ff8a00) !important;
+  border: none !important;
+  color: #1a1a1a !important;
+  text-transform: uppercase !important;
+}
+.btn-join:hover,
+.btn-deploy:hover {
+  filter: brightness(1.08) !important;
+}
+.btn-login {
+  display: block !important;
+  width: 100% !important;
+  padding: 14px !important;
+  background: linear-gradient(135deg, #ffb000, #ff8a00) !important;
+  border: none !important;
+  color: #1a1a1a !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  cursor: pointer !important;
+  border-radius: 4px !important;
+}
+.btn-resume {
+  background: rgba(255, 176, 0, 0.15) !important;
+  border-color: rgba(255, 176, 0, 0.4) !important;
+  color: #ffd597 !important;
+}
+.btn-resume:hover {
+  background: rgba(255, 176, 0, 0.25) !important;
+}
+.btn-resume-dismiss {
+  background: transparent !important;
+  border-color: rgba(159, 142, 120, 0.35) !important;
+  color: #c1e8ff !important;
+}
+.btn-delete-map {
+  background: rgba(255, 110, 129, 0.15) !important;
+  border-color: rgba(255, 110, 129, 0.4) !important;
+  color: #ff8e9b !important;
+}
+.btn-delete-map:hover {
+  background: rgba(255, 110, 129, 0.25) !important;
+}
+/* 首页专用 */
+.btn-hero {
+  display: inline-block !important;
+  padding: 14px 36px !important;
+  background: linear-gradient(135deg, #ffb000, #ff8a00) !important;
+  border: none !important;
+  color: #1a1a1a !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+}
+.card-btn {
+  display: inline-block !important;
+  padding: 8px 18px !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid rgba(159, 142, 120, 0.25) !important;
+  color: #c1e8ff !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  font-size: 11px !important;
+  letter-spacing: 1px !important;
+  font-family: 'Fira Code', monospace !important;
+}
+.card-btn:hover {
+  border-color: rgba(255, 176, 0, 0.4) !important;
+  color: #ffd597 !important;
+}
+
+/* ----------------------- 输入框 / 下拉 (param-*) ----------------------- */
+.param-input,
+.param-select {
+  background: rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid rgba(159, 142, 120, 0.2) !important;
+  border-radius: 4px !important;
+  padding: 8px 10px !important;
+  color: #ffd597 !important;
+  font-size: 12px !important;
+  font-family: 'Fira Code', monospace !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+.param-input:focus,
+.param-select:focus {
+  outline: none !important;
+  border-color: rgba(255, 176, 0, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(255, 176, 0, 0.15) !important;
+}
+.param-select {
+  cursor: pointer !important;
+}
+.param-select option {
+  background: #001620 !important;
+  color: #ffd597 !important;
+}
+
+/* --------------------- 编辑块（框中框层级区分） ------------------------- */
+.edit-block {
+  border: 1px solid rgba(159, 142, 120, 0.12) !important;
+  border-radius: 6px !important;
+  background: rgba(0, 0, 0, 0.1) !important;
+  margin-bottom: 16px !important;
+  overflow: hidden !important;
+}
+.block-title {
+  background: rgba(255, 176, 0, 0.08) !important;
+  border-bottom: 1px solid rgba(255, 176, 0, 0.15) !important;
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  color: #ffd597 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.5px !important;
+}
+.block-body {
+  border: 1px solid rgba(159, 142, 120, 0.08) !important;
+  border-radius: 4px !important;
+  padding: 14px !important;
+  background: rgba(0, 0, 0, 0.18) !important;
+  margin: 14px !important;
+}
+
+/* ----------------------------- 弹窗 (modal) ---------------------------- */
+.modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  background: rgba(0, 0, 0, 0.7) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 1000 !important;
+}
+.modal {
+  background: rgba(0, 0, 0, 0.92) !important;
+  border: 1px solid rgba(255, 176, 0, 0.25) !important;
+  border-radius: 6px !important;
+  padding: 24px !important;
+  width: 90% !important;
+  max-width: 480px !important;
+}
+.modal h3 {
+  margin: 0 0 12px !important;
+  font-size: 16px !important;
+  color: #ffb000 !important;
+  letter-spacing: 1px !important;
+}
+.modal p {
+  margin: 0 0 16px !important;
+  font-size: 13px !important;
+  color: #c1e8ff !important;
+  line-height: 1.6 !important;
+}
+.modal input[type='file'] {
+  width: 100% !important;
+  margin-bottom: 16px !important;
+  color: #c1e8ff !important;
+}
+.modal-actions {
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 12px !important;
+}

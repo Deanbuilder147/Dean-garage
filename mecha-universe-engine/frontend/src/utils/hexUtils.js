@@ -18,6 +18,14 @@ export const DEFAULT_OFFSET_FACTOR = 0.00  // 行偏移量（尖顶 Even-R 自�
 
 // ---- 坐标系转换工具 ----
 
+/**
+ * A2 坐标 Key 唯一真相源（与后端 services/combat-service 的 hexKey.cjs 同构）。
+ * 所有「地形/占用/友军」字典 Key 必须统一调用本函数，杜绝 `${q},${r}` 与 `${q}_${r}` 拼写漂移。
+ */
+export function getHexKey(q, r) {
+  return q + ',' + r
+}
+
 /** 数字列号转字母（0→A, 1→B, ..., 25→Z, 26→AA, ...） */
 export function colToLetter(q) {
   let result = ''
@@ -313,8 +321,7 @@ export function getHexNeighborsFlatTop(q, r) {
 export const TERRAIN_COLORS = {
   space:       { name: '宇宙',     color: '#1a1a2e' },
   moon:        { name: '月面',     color: '#888888' },
-  lunar:       { name: '月面',     color: '#888888' },
-  empty:       { name: '月面',     color: '#888888' },
+  lunar:       { name: '月面',     color: '#888888' }, // 旧存档别名，等同 moon（修复主战场灰色格渲染）
   // ★ 留白地形：透明（引擎跳过绘制，露出画布背景）、移动消耗 999 不可通行。
   // 作为 100×100 画布对"画"之外的填充物，替代原 moon 填充。
   void:        { name: '留白',     color: 'rgba(120,140,180,0.06)' },
@@ -339,16 +346,17 @@ export const TERRAIN_COLORS = {
 }
 
 // ================================================================
-//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（21 种）
+//  UNIVERSAL_TERRAIN_MAP — 全项目唯一地形真理（20 种）
 //  Phase 29-GlossaryMerge: +5 词条库复活地形 (plain/ruins/crystal/rubble/city_building)
 //  规则：TERRAIN_COLORS 提供颜色/名称，此处统一追加 cost
 //  新增或修改地形时，只需改此处与 TERRAIN_COLORS 即可。
+//  注：lunar / empty 曾作为 moon 的重复项（同名"月面"），已从前端表移除；
+//      旧存档若残留这两个 id，由 NewBattlefieldView.extractTerrainId 归一化为 moon。
 // ================================================================
 export const UNIVERSAL_TERRAIN_MAP = {
   space:       { ...TERRAIN_COLORS.space, cost: 1, height: 6 },
   moon:        { ...TERRAIN_COLORS.moon, cost: 1, height: 8 },
-  lunar:       { ...TERRAIN_COLORS.lunar, cost: 1, height: 8 },
-  empty:       { ...TERRAIN_COLORS.empty, cost: 1, height: 6 },
+  lunar:       { ...TERRAIN_COLORS.lunar, cost: 1, height: 8 }, // 旧存档别名，等同 moon
   void:        { ...TERRAIN_COLORS.void, cost: 999, height: 0 }, // 留白：不可通行
   fortress:    { ...TERRAIN_COLORS.fortress, cost: 5, height: 16 },
   base:        { ...TERRAIN_COLORS.base, cost: 1, height: 8 },
@@ -368,6 +376,41 @@ export const UNIVERSAL_TERRAIN_MAP = {
   crystal:      { ...TERRAIN_COLORS.crystal, cost: 2, height: 12 },
   rubble:       { ...TERRAIN_COLORS.rubble, cost: 2, height: 6 },
   city_building:{ ...TERRAIN_COLORS.city_building, cost: 1, height: 14 }
+}
+
+/**
+ * 方案A：将词条库(glossary) terrains 同步进前端地形表(UNIVERSAL_TERRAIN_MAP / TERRAIN_COLORS)。
+ * glossary terrains 为单一真相源(S3)，前端调色板/着色据此派生。
+ *  - 更新已有地形：name / color；cost 取 glossary.move_cost（缺省保留原 cost）
+ *  - 新增地形（编辑器动态添加的）：自动加入，使画笔可调出
+ *  - height 由前端静态表提供（glossary 无此字段），保留不覆盖
+ *
+ * @param {Object} terrains  glossary.config.terrains
+ */
+export function syncTerrainFromGlossary(terrains) {
+  if (!terrains || typeof terrains !== 'object') return;
+  for (const [id, def] of Object.entries(terrains)) {
+    if (!def) continue;
+    const color = def.color || (UNIVERSAL_TERRAIN_MAP[id] && UNIVERSAL_TERRAIN_MAP[id].color) || '#888888';
+    const name = def.name || (UNIVERSAL_TERRAIN_MAP[id] && UNIVERSAL_TERRAIN_MAP[id].name) || id;
+    const cost = typeof def.move_cost === 'number'
+      ? def.move_cost
+      : (UNIVERSAL_TERRAIN_MAP[id] ? UNIVERSAL_TERRAIN_MAP[id].cost : 1);
+    if (!TERRAIN_COLORS[id]) {
+      TERRAIN_COLORS[id] = { name, color };
+    } else {
+      TERRAIN_COLORS[id].name = name;
+      TERRAIN_COLORS[id].color = color;
+    }
+    if (!UNIVERSAL_TERRAIN_MAP[id]) {
+      UNIVERSAL_TERRAIN_MAP[id] = { name, color, cost, height: 0 };
+    } else {
+      UNIVERSAL_TERRAIN_MAP[id].name = name;
+      UNIVERSAL_TERRAIN_MAP[id].color = color;
+      UNIVERSAL_TERRAIN_MAP[id].cost = cost;
+      if (UNIVERSAL_TERRAIN_MAP[id].height === undefined) UNIVERSAL_TERRAIN_MAP[id].height = 0;
+    }
+  }
 }
 
 /**
@@ -660,4 +703,93 @@ export function computeDirectionStrict(fromQ, fromR, toQ, toR, getNeighborsFn) {
 
   // 统一使用 atan2 角度量化法计算方向（绝杀奇偶行 Delta 歧义）
   return computeDirection(fromQ, fromR, toQ, toR)
+}
+
+// ============= 联防 blockade_line 共享纯函数（前后端数学真理一致） =============
+// D5 已拍板：「并列」= 严格立方共线（(q,r,s=-q-r) 轴向）。
+// 仅当 >=3 同阵营单位严格共线，且移动方穿越其中两 blocker 之间的公共边时禁止该步。
+
+/** 轴向(q,r) → 立方(x,y,z) */
+export function axialToCube(q, r) {
+  return { x: q, y: -q - r, z: r }
+}
+
+/** 两立方坐标是否同轴共线 */
+export function areCubeCollinear(a, b) {
+  return a.x === b.x || a.y === b.y || a.z === b.z
+}
+
+/** 取 >=3 同阵营严格共线且"连续无空挡"的直线集合 */
+export function blockerLines(units) {
+  const byFaction = {}
+  for (const u of units) {
+    if (!u || !u.position) continue
+    const f = u.faction || 'neutral'
+    ;(byFaction[f] = byFaction[f] || []).push(axialToCube(u.position.q, u.position.r))
+  }
+  const lines = []
+  for (const f in byFaction) {
+    const arr = byFaction[f]
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        if (!areCubeCollinear(arr[i], arr[j])) continue
+        const line = arr.filter(c => areCubeCollinear(c, arr[i]) && areCubeCollinear(c, arr[j]))
+        const sorted = line.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y) || (a.z - b.z))
+        let consecutive = sorted.length >= 3
+        for (let k = 1; k < sorted.length; k++) {
+          const d = Math.max(
+            Math.abs(sorted[k].x - sorted[k - 1].x),
+            Math.abs(sorted[k].y - sorted[k - 1].y),
+            Math.abs(sorted[k].z - sorted[k - 1].z)
+          )
+          if (d !== 1) { consecutive = false; break }
+        }
+        if (consecutive) lines.push(sorted)
+      }
+    }
+  }
+  return lines
+}
+
+/** 线段 cur→next 在 cube 空间是否穿越两 consecutive blocker 之间的公共边（落在二者之间） */
+function crossesBlockerSeam(cur, next, line) {
+  const N = 8
+  const ac = axialToCube(cur.q, cur.r)
+  const bc = axialToCube(next.q, next.r)
+  for (let i = 1; i < N; i++) {
+    const t = i / N
+    const px = ac.x + (bc.x - ac.x) * t
+    const py = ac.y + (bc.y - ac.y) * t
+    const pz = ac.z + (bc.z - ac.z) * t
+    if (line.some(c => Math.abs(c.x - px) < 1e-6 && Math.abs(c.y - py) < 1e-6 && Math.abs(c.z - pz) < 1e-6)) {
+      return false
+    }
+    for (let k = 1; k < line.length; k++) {
+      const m = {
+        x: (line[k].x + line[k - 1].x) / 2,
+        y: (line[k].y + line[k - 1].y) / 2,
+        z: (line[k].z + line[k - 1].z) / 2,
+      }
+      if (Math.abs(m.x - px) < 1e-6 && Math.abs(m.y - py) < 1e-6 && Math.abs(m.z - pz) < 1e-6) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * 严格共线联防边阻塞判定（前端寻路 BFS 与后端 tsFindPath 共用此规则）。
+ * @param cur 移动起点 {q,r}
+ * @param next 移动终点 {q,r}
+ * @param units 全部单位（含 faction/position）
+ * @returns Boolean 是否禁止该步
+ */
+export function isCollinearBlockade(cur, next, units) {
+  if (!cur || !next || !Array.isArray(units)) return false
+  const lines = blockerLines(units)
+  for (const line of lines) {
+    if (crossesBlockerSeam(cur, next, line)) return true
+  }
+  return false
 }

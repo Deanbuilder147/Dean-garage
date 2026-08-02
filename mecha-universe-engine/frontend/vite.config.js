@@ -13,6 +13,13 @@ const SERVICE_HOSTS = {
   online: process.env.ONLINE_SERVICE_HOST || 'localhost',
 };
 
+// 本地 E2E 联调覆盖：设置 PROXY_TARGET（host:port，如 106.54.197.69:8081）后，
+// 所有 /api 与 /socket.io 代理统一指向该目标（与线上 nginx 入口一致），
+// 绕过逐服务端口分流，方便本地 dev server 直连远程后端做全链路验证。
+const PROXY_TARGET = process.env.PROXY_TARGET
+  ? `http://${process.env.PROXY_TARGET}`
+  : null
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -24,48 +31,46 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 8081,
     proxy: {
-      // Auth 服务
+      // 大一统后端网关 (3006)：认证/房间/单位/地图/战斗/词条 全部收归此处
+      // ⚠️ 旧微服务端口 3001~3004 已随 Phase 29 大一统被废除，本地 dev 无 PROXY_TARGET 时统一指向 3006，
+      //    否则 /api/auth 等会被代理到不存在的 3001 导致 CONNECTION_REFUSED（端口漂移根因）。
       '/api/auth': {
-        target: `http://${SERVICE_HOSTS.auth}:3001`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.auth}:3006`,
         changeOrigin: true
       },
-      // Hangar 服务 (单位/棋子管理)
       '/api/hangar': {
-        target: `http://${SERVICE_HOSTS.hangar}:3002`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.hangar}:3006`,
         changeOrigin: true
       },
-      // Map 服务 (战场地图)
       '/api/map': {
-        target: `http://${SERVICE_HOSTS.map}:3003`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.map}:3006`,
         changeOrigin: true
       },
-      // Combat 服务 (战斗)
       '/api/combat': {
-        target: `http://${SERVICE_HOSTS.combat}:3004`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.combat}:3006`,
         changeOrigin: true
       },
-      // Campaign 战役服务 (Phase 19-C: 与 combat 共用同一后端)
       '/api/campaign': {
-        target: `http://${SERVICE_HOSTS.combat}:3004`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.combat}:3006`,
         changeOrigin: true
       },
-      // Comm 服务 (通信/房间)
+      // Comm 服务 (通信/房间实时) — 仍为 3005
       '/api/comm': {
-        target: `http://${SERVICE_HOSTS.comm}:3005`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.comm}:3005`,
         changeOrigin: true
       },
       // Socket.io (Comm Service)
       '/socket.io': {
-        target: `http://${SERVICE_HOSTS.comm}:3005`,
+        target: PROXY_TARGET || `http://${SERVICE_HOSTS.comm}:3005`,
         ws: true
       },
       // Phase 29-C: Online Battle Service (多人联机对战, Port 3006)
-      '/api/matchmaking': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
-      '/api/rooms': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
-      '/api/leaderboard': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
-      '/api/battles': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/matchmaking': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/rooms': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/leaderboard': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
+      '/api/battles': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true },
       // Phase 29-HangarRestoration: 单位/棋子管理 (大一统网关, Port 3006)
-      '/api/units': { target: `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
+      '/api/units': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
     }
   },
   preview: {

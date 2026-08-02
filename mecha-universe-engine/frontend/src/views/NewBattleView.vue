@@ -1,7 +1,7 @@
 <template>
 <div class="dm-battle-layout flex flex-row w-full h-full absolute inset-0">
     <!-- ===== CENTER: Battlefield ===== -->
-    <div class="dm-main flex-1 flex flex-col h-full overflow-hidden">
+    <div class="dm-main flex-1 flex flex-col h-full overflow-hidden" ref="dmMainRef">
       <!-- Header -->
       <div class="battle-header">
         <h1>{{ battleMapName || '战场' }}</h1>
@@ -131,9 +131,9 @@
             <button class="jump-cancel-btn" @click="jumpVisible[faction.key] = false; clearJump(faction.key)">✕</button>
           </div>
           <!-- 阵营技能按钮 -->
-          <div class="faction-skills-row" v-if="getFactionSkills(faction.key).length > 0">
+          <div class="faction-skills-row" v-if="getFactionSkills(faction.role || faction.key).length > 0">
             <button
-              v-for="skill in getFactionSkills(faction.key)"
+              v-for="skill in getFactionSkills(faction.role || faction.key)"
               :key="skill.key"
               class="faction-skill-btn"
               :class="{ disabled: isSkillDisabled(faction.key, skill.key) }"
@@ -148,12 +148,12 @@
             <div
               v-for="unit in faction.units"
               :key="unit.id"
-              :class="['faction-unit-card', { 'selected': (isDeployPhase ? selectedDeployUnit?.id : selectedUnit?.id) === unit.id }]"
-              @click="isDeployPhase ? startDeployUnit(unit) : selectUnitById(unit)"
+              :class="['faction-unit-card', { 'selected': (isDeployPhase ? selectedDeployUnit?.id : selectedUnit?.id) === unit.id, 'dead': isUnitDead(unit) }]"
+              @click="isUnitDead(unit) ? null : (isDeployPhase ? startDeployUnit(unit) : selectUnitById(unit))"
             >
               <div class="fu-name">{{ unit.name || ('Unit-' + unit.id) }}</div>
               <div class="fu-bars">
-                <div class="fu-bar" title="HP"><span class="fu-fill hp" :style="{width: (unit.hp || 100) + '%'}"></span></div>
+                <div class="fu-bar" title="HP"><span class="fu-fill hp" :style="{width: ((unit.hp || 0) / (unit.maxHp || unit.hp || 100) * 100) + '%'}"></span></div>
                 <div class="fu-bar" title="护盾"><span class="fu-fill shield" :style="{width: (unit.shield || 0) + '%'}"></span></div>
               </div>
               <div class="fu-pos" v-if="unit.q !== undefined">
@@ -237,17 +237,35 @@
         </div>
 
         <div class="ap-stats">
-          <div class="ap-stat-row"><span>HP</span><span class="ap-stat-val">{{ selectedUnit.hp || '?' }}/100</span></div>
+          <div class="ap-stat-row"><span>HP</span><span class="ap-stat-val">{{ selectedUnit.hp ?? '?' }}/{{ selectedUnit.maxHp || selectedUnit.hp || 100 }}</span></div>
           <div class="ap-stat-row"><span>护盾</span><span class="ap-stat-val">{{ selectedUnit.shield || 0 }}</span></div>
           <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedUnit.attack ?? '?' }}</span></div>
           <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedUnit.defense ?? '?' }}</span></div>
           <div class="ap-mobility-block">
-            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || '—' }}</span></div>
+            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || '—' }}<span v-if="selectedUnit.mobility_buff && selectedUnit.mobility_buff_turns > 0" class="mob-buff-chip">+{{ selectedUnit.mobility_buff }}</span></span></div>
             <div class="ap-stat-sub"><span>主机体移动力</span><span>{{ mobilityBreakdown.mainBody || 0 }}</span></div>
             <div class="ap-stat-sub"><span>额外移动力{{ mobilityBreakdown.extraType ? '(' + mobTypeLabel(mobilityBreakdown.extraType) + ')' : '' }}</span><span>{{ mobilityBreakdown.extra || 0 }}</span></div>
           </div>
-          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedUnit.range ?? 1 }}</span></div>
+          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ basicAttackRange(selectedUnit) }}</span></div>
           <div class="ap-stat-row" v-if="selectedUnit.q !== undefined"><span>位置</span><span class="ap-stat-val">{{ formatCoord(selectedUnit.q, selectedUnit.r) }}</span></div>
+        </div>
+
+        <!-- 状态效果（自动化技能 statusEffects：剩余次数/回合 + 条件标签） -->
+        <div class="ap-status-effects" v-if="selectedUnit.statusEffects && selectedUnit.statusEffects.length">
+          <div class="ap-panel-subtitle">状态效果</div>
+          <div
+            v-for="se in selectedUnit.statusEffects"
+            :key="se.id"
+            class="se-chip"
+            :class="['se-' + (se.applies_on || 'attack')]"
+          >
+            <span class="se-label">{{ se.label || se.source }}</span>
+            <span class="se-val" v-if="se.value">{{ se.applies_on === 'defense' ? ('减伤' + se.value) : (se.applies_on === 'attack' ? ('增伤' + se.value) : (se.applies_on === 'attack_debuff_target' ? ('削敌机动' + se.value) : '')) }}</span>
+            <span class="se-count" :title="(se.consumption && se.consumption.mode === 'counter') ? '剩余生效次数' : '剩余生效回合'">
+              {{ se.consumption && se.consumption.mode === 'counter' ? ('剩' + se.consumption.remaining + '次') : ('剩' + (se.consumption ? se.consumption.remaining : '?') + '回合') }}
+            </span>
+            <span class="se-cond" v-if="se.trigger && se.trigger.type === 'conditional'" :title="conditionLabel(se.trigger)">{{ conditionLabel(se.trigger) }}</span>
+          </div>
         </div>
 
         <!-- 被动/防御技能 -->
@@ -259,14 +277,14 @@
           </div>
         </div>
 
-        <div class="ap-actions">
+        <div class="ap-actions" v-if="!isVisitor">
           <div class="ap-section-title">可用行动</div>
 
           <button
             class="ap-action-btn"
             :class="{ active: actionMode === 'move' }"
             @click="startAction('move')"
-            :disabled="selectedUnit.has_moved"
+            :disabled="selectedUnit.has_moved || selectedUnit.standby"
           >
             <span class="ap-action-icon">➤</span>
             <span class="ap-action-label">移动</span>
@@ -277,23 +295,25 @@
             class="ap-action-btn"
             :class="{ active: actionMode === 'tactical' }"
             @click="startAction('tactical')"
-            :disabled="selectedUnit.has_acted"
+            :disabled="selectedUnit.has_acted || selectedUnit.standby"
           >
             <span class="ap-action-icon">⚔</span>
             <span class="ap-action-label">战术行动</span>
             <span class="ap-action-hint">{{ activeSkillCount + 1 }}种方式</span>
           </button>
 
-          <button class="ap-action-btn" @click="startAction('defend')" :disabled="selectedUnit.has_acted">
+          <button class="ap-action-btn" @click="startAction('defend')" :disabled="selectedUnit.has_defended || selectedUnit.standby">
             <span class="ap-action-icon">🛡</span>
             <span class="ap-action-label">防御</span>
             <span class="ap-action-hint">+护盾</span>
           </button>
 
-          <button class="ap-action-btn" @click="startAction('wait')" :disabled="selectedUnit.has_acted">
+          <button class="ap-action-btn" @click="startAction('wait')" :disabled="selectedUnit.standby">
             <span class="ap-action-icon">⏸</span>
             <span class="ap-action-label">待机</span>
           </button>
+
+          <div v-if="selectedUnit.standby" class="ap-standby-badge">该单位已完成回合（待机）</div>
         </div>
 
         <!-- Tactical action: skill/weapon selection -->
@@ -310,7 +330,7 @@
               <span class="sk-name">⚔ 普通攻击</span>
             </div>
             <div class="sk-meta">
-              <span class="sk-attrinfo">{{ weaponAttrLabel }} 范围{{ selectedUnit.range || 1 }}</span>
+              <span class="sk-attrinfo">{{ weaponAttrLabel }} 范围{{ basicAttackRange(selectedUnit) }}</span>
               <span class="skill-type-badge badge-basic">基础</span>
               <span class="sk-durability-label" v-if="selectedUnit.right_hand_durability !== undefined">右:{{ selectedUnit.right_hand_durability }} 左:{{ selectedUnit.left_hand_durability !== undefined ? selectedUnit.left_hand_durability : '?' }}</span>
             </div>
@@ -333,14 +353,14 @@
                 active: selectedAttackSkill?.id === skill.id,
                 'skill-disabled': group.durability !== undefined && group.durability <= 0
               }"
-              @click="selectTacticalSkill(skill)"
+              @click="onTacticalSkillClick(skill)"
               :disabled="group.durability !== undefined && group.durability <= 0"
             >
               <div class="sk-top">
                 <span class="sk-name">{{ skill.name }}</span>
               </div>
               <div class="sk-meta">
-                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 范围{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || skill.range || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '1')) }}</span>
+                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 范围{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '') || (skill.cast_range ?? skill.range) || '1') }}</span>
                 <span class="skill-type-badge" :class="'badge-' + (skill.category || 'special')">{{ skill.typeLabel || skill.type || skill.category }}</span>
                 <span class="sk-durability-label" v-if="group.durability !== undefined">耐久 <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b></span>
               </div>
@@ -426,6 +446,63 @@
       </div>
       </div><!-- end floating-card-body -->
     </div><!-- end floating-card -->
+
+    <!-- ===== Phase: 行动记录面板 (Floating Draggable Collapsible) ===== -->
+    <div
+      class="floating-card floating-action-log"
+      :class="{ collapsed: actionLogCollapsed }"
+      :style="{ left: actionLogPos.left + 'px', top: actionLogPos.top + 'px' }"
+      ref="actionLogRef"
+    >
+      <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'actionLog')">
+        <span class="floating-card-title">📋 行动记录</span>
+        <span class="log-count">{{ sidebarActionLog.length }}</span>
+        <button class="floating-card-collapse-btn" @click.stop="toggleActionLog" :title="actionLogCollapsed ? '展开' : '折叠'">
+          {{ actionLogCollapsed ? '▶' : '◀' }}
+        </button>
+      </div>
+      <div class="floating-card-body action-log-body" v-show="!actionLogCollapsed" :style="{ maxHeight: actionLogHeight + 'px' }" ref="logContainer">
+        <div v-for="(entry, i) in sidebarActionLog" :key="i" :class="['log-entry', 'log-' + entry.type]">
+          <span class="log-time">{{ entry.time }}</span>
+          <span class="log-msg">{{ entry.message }}</span>
+        </div>
+        <div v-if="!sidebarActionLog.length" class="log-empty">等待行动...</div>
+      </div>
+    </div><!-- end floating-card -->
+  </div>
+
+  <!-- 实时胜利结算遮罩（后端 evaluateVictory 触发） -->
+  <div v-if="battleResult && battleResult.victory" class="victory-overlay" @click.self="closeBattleResult">
+    <div class="victory-card">
+      <div class="victory-title">🏆 战斗结束</div>
+      <div class="victory-winner">获胜阵营：{{ battleResult.winner }}</div>
+      <div class="victory-cond">胜利方式：{{ victoryCondLabel(battleResult.condition) }}</div>
+      <div class="victory-msg" v-if="battleResult.message">{{ battleResult.message }}</div>
+      <button class="victory-close" @click="closeBattleResult">关闭</button>
+    </div>
+  </div>
+
+  <!-- Phase 31: 战斗结算弹窗 -->
+  <AttackReportModal v-if="showAttackReport" :report="attackReport" @close="closeAttackReport" />
+
+  <!-- Batch D-4.3: 反应奇袭 QTE 面板 + 暗绿 Screen Tone 滤镜 -->
+  <div v-if="screenToneOn" class="surprise-screen-tone"></div>
+  <div v-if="surpriseUI" class="surprise-qte-overlay">
+    <div class="surprise-qte-card">
+      <div class="surprise-qte-title">⚡ 反应奇袭！</div>
+      <div class="surprise-qte-sub">你的单位处于伏击之中，是否发动反应奇袭？</div>
+      <div class="surprise-qte-timer">剩余 {{ surpriseSeconds }} 秒（超时自动放弃）</div>
+      <div class="surprise-qte-actions">
+        <button class="surprise-btn replace" :disabled="surpriseUI.available_choices && !surpriseUI.available_choices.includes('replace')" @click="submitSurprise('replace')">发动（替换）</button>
+        <button class="surprise-btn counter" :disabled="surpriseUI.available_choices && !surpriseUI.available_choices.includes('counter')" @click="submitSurprise('counter')">反击</button>
+        <button class="surprise-btn giveup" @click="submitSurprise('giveup')">放弃</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch D-4.2: 移动伏击红屏警报 -->
+  <div v-if="ambushAlert" class="ambush-alert-overlay">
+    <div class="ambush-alert-text">⚠ 你已陷入伏击！</div>
   </div>
 </template>
 
@@ -445,14 +522,30 @@
 //  ✅ 所有入口已对账: 逆变换原子化、防爆清洗器激活、Canvas崩溃边界捕获
 // ================================================================
 import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { drawHexPath } from '../utils/hexDraw.js'
-import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection } from '../utils/hexUtils.js'
+import { drawHexPath, drawGroundItemToken } from '../utils/hexDraw.js'
+import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection, syncTerrainFromGlossary } from '../utils/hexUtils.js'
 import HexGridCanvasEngine from '../components/HexGridCanvasEngine.vue'
+import { applySizeMobility, sizeRenderScale, normSize, SIZE_LABELS, sizeSevenBox } from '../utils/unitSize.js'
 import BattleMinimap from '../components/BattleMinimap.vue'
 import { unitSpriteResolver } from '../resolvers/unitSpriteResolver.js'
 import { useUserStore } from '../stores/user'
+import { connectBattleSocket, disconnectBattleSocket } from '../utils/battleSocket.js'
+import { useApStore } from '../stores/apStore.js'
+import { useMoveStore } from '../stores/moveStore.js'
+import { useLogStore } from '../stores/logStore.js'
+import { enqueueState, freezeQueue, unfreezeQueue } from '../utils/animationQueue.js'
 import { useRoute, useRouter } from 'vue-router'
+// ===== 特殊触发词条反应弹窗（斩杀/决斗/抢夺/幸运/援助/再动/空投）=====
+import ExecuteDialog from '../components/reactions/ExecuteDialog.vue'
+import DuelDialog from '../components/reactions/DuelDialog.vue'
+import SnatchDialog from '../components/reactions/SnatchDialog.vue'
+import LuckyRoll from '../components/reactions/LuckyRoll.vue'
+import CoverWindow from '../components/reactions/CoverWindow.vue'
+import ReactivateBanner from '../components/reactions/ReactivateBanner.vue'
+import AirdropInfo from '../components/reactions/AirdropInfo.vue'
+import AttackReportModal from '../components/AttackReportModal.vue'
 import { combatAPI, hangarAPI, glossaryAPI, mapAPI } from '@/api/client'
+import { rollDice as rollDiceUtil, parseDiceType as parseDiceTypeUtil } from '../utils/diceUtil.js'
 
 // ================================================================
 //  Phase 13: 地形数据向后兼容转换层 (Sanitizer)
@@ -670,6 +763,51 @@ const router = useRouter()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
 
+// ===== Batch C/D: 实时推送消费（socket 叠加在 refreshState 之上）=====
+const surpriseUI = ref(null)      // 反应奇袭 QTE 数据
+// 模块3：全端暗绿滤镜（Spectator Tone）改为 computed——只要存在活跃的 pendingSurprise
+// （无论触发方 C、非操作方 A/B 或观战者 Visitor），全员叠加滤镜掩盖 10 秒挂起等待。
+const screenToneOn = computed(() => {
+  const s = battleState.value?.surprise || battleState.value?.pendingSurprise
+  return !!(s && !s.settled && s.phase !== 'done' && s.phase !== 'settled')
+})
+const ambushAlert = ref(false)    // 移动伏击红屏警报
+const surpriseSeconds = ref(10)   // QTE 倒计时
+let surpriseTimer = null
+
+// Batch C-2: Pinia stores（行动点 / 移动 / 战报）
+const apStore = useApStore()
+const moveStore = useMoveStore()
+const logStore = useLogStore()
+
+// Batch C-4: 我的阵营推导（方案A：factionRoles 已是 faction→role，绝不能用 userId 当 key 查）
+// 优先级：① userStore.user.faction ② 部署池/已部署单位中 ownerId===当前用户 的 faction
+// 注意：必须查「初始数据源」(deployPool/units)，不能只查场上 units，否则开局部署期玩家会被误判 Visitor 死锁部署 UI
+const myFaction = computed(() => {
+  const f = userStore.user?.faction || user.value?.faction
+  if (f) return f
+  const myId = userStore.user?.id || user.value?.id
+  if (!myId) return null
+  // 优先部署池（含未部署单位），其次已部署 units；按 ownerId 匹配当前玩家
+  const poolMine = (deployPool.value || []).filter(u => String(u.ownerId) === String(myId))
+  const deployedMine = (allUnits.value || []).filter(u => String(u.ownerId) === String(myId))
+  const mine = poolMine.length ? poolMine : deployedMine
+  if (mine.length) return mine[0].faction || null
+  return null
+})
+
+// 访客视图——GM 或 myFaction 属于当前战局合法参战阵营(在 factionRoles 的 keys 中)则非访客
+const isVisitor = computed(() => {
+  const myId = userStore.user?.id || user.value?.id
+  if (!myId) return true
+  const role = userStore.user?.role
+  if (role === 'REFEREE' || role === 'DOMINATOR') return false
+  const faction = myFaction.value
+  if (!faction) return true
+  // 方案A：factionRoles 的 key 即所有合法参战 faction
+  return !(factionRoles.value && Object.prototype.hasOwnProperty.call(factionRoles.value, faction))
+})
+
 // === Phase 6: 词条库配置动态同步（前端UI全量动态绑定）===
 const glossaryConfig = ref(null)
 
@@ -688,6 +826,10 @@ async function loadGlossaryConfig() {
   try {
     const res = await glossaryAPI.getConfig()
     glossaryConfig.value = res.data
+    // 方案A：把词条库地形同步进前端唯一地形表(UNIVERSAL_TERRAIN_MAP)，
+    // 使战场配色/移动预览(cost)以 glossary.move_cost 为准，与后端真实移动路径同源。
+    const gc = res.data?.glossary || res.data
+    syncTerrainFromGlossary(gc?.terrains || {})
     // Phase 29-H: 合并 glossarySkills 填充，消除 onMounted 重复请求
     if (res.data?.skills) glossarySkills.value = res.data.skills
   } catch (e) {
@@ -834,7 +976,7 @@ function getActiveSkillTooltip(skill) {
 }
 
 
-const battleState = ref(null)
+const battleState = ref({})
 const hexGrid = ref(null)
 // 需求③ 战场挤出开关（默认开启，营造 2.5D 立体感）
 const extrudeEnabled = ref(true)
@@ -858,6 +1000,36 @@ function getUnitVisual(unit) {
 
 // === Phase 30-Cover: 七视图图片缓存与解析（按方向移动方向选帧，不全则回退正视图） ===
 const _sevenViewCache = new Map()
+/**
+ * 计算 PNG 底部不透明像素行（脚底）的源坐标 y。
+ * 从底向上扫描，返回最靠下且有 alpha 的行；失败（如跨域污染）返回 -1。
+ * 结果挂到 img._footY / img._ih，供绘制时按真实脚底重新锚定（消除伪浮空）。
+ */
+/**
+ * 计算 PNG 底部不透明像素行（脚底）的源坐标 y。
+ * 从底向上扫描，返回最靠下且有 alpha 的行；失败（如跨域污染）返回 -1。
+ * 结果挂到 img._footY / img._ih，供绘制时按真实脚底重新锚定（消除伪浮空）。
+ */
+function computeSevenFootRow(img) {
+  try {
+    const w = img.naturalWidth, h = img.naturalHeight
+    if (!w || !h) return -1
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    const cx = c.getContext('2d')
+    cx.drawImage(img, 0, 0)
+    const data = cx.getImageData(0, 0, w, h).data
+    for (let y = h - 1; y >= 0; y--) {
+      const rowOff = y * w * 4
+      for (let x = 0; x < w; x++) {
+        if (data[rowOff + x * 4 + 3] > 16) return y
+      }
+    }
+    return h - 1
+  } catch (e) {
+    return -1 // 异常（跨域污染等）→ 回退到不重锚定
+  }
+}
 function resolveSevenView(viewUrls, direction = 0) {
   if (!viewUrls) return null
   let map = viewUrls
@@ -868,7 +1040,12 @@ function resolveSevenView(viewUrls, direction = 0) {
   let img = _sevenViewCache.get(url)
   if (!img) {
     img = new Image()
-    img.onload = () => { if (hexGrid.value) hexGrid.value.redraw() }
+    img.onload = () => {
+      // 加载完成后算一次脚底行，缓存到元素上（只算一次）
+      img._footY = computeSevenFootRow(img)
+      img._ih = img.naturalHeight
+      if (hexGrid.value) hexGrid.value.redraw()
+    }
     // 加固：单张七视图 404 时也要触发重绘，让棋盘落到圆标+字母降级，避免画面卡在空帧
     img.onerror = () => {
       console.warn(`[resolveSevenView] 加载失败，降级回退: ${url}`)
@@ -915,7 +1092,8 @@ function resolveUnitMobility(raw) {
       }
     }
   }
-  if (partsSum > 0) return partsSum
+  // 体型机动修正：s +10% / m 0 / l -5% / xl -10%（与后端 computeMobility 同源）
+  if (partsSum > 0) return applySizeMobility(partsSum, raw.size)
   const candidates = [
     toNum(stats.mobility),
     toNum(stats.speed),
@@ -925,6 +1103,18 @@ function resolveUnitMobility(raw) {
   ]
   for (const c of candidates) if (c != null) return c
   return 0
+}
+
+// 阵亡判定（稳健版）：显式 dead 标记为真才判死；hp 字段缺失/0 一律视为存活（后端部署池单位历史上无 hp 字段，
+// 旧逻辑 (unit.hp ?? 0) <= 0 会把所有待部署单位误判为阵亡，导致标灰划掉无法部署）。
+// 仅当 hp 是有效正数且 <= 0 时才判死（真打死的场面由战斗结算写回 currentStats.hp）。
+function isUnitDead(unit) {
+  if (!unit || typeof unit !== 'object') return false
+  if (unit.dead === true) return true
+  const h = Number(unit.hp)
+  // 只有真正拿到有效 HP 数值且 <= 0 才算死；NaN / 0 / undefined 都视为未死
+  if (!isNaN(h) && h > 0) return false
+  return false
 }
 
 // === 机动拆解（行动面板专用，响应式）：主机体移动力 + 额外移动力（载具/背包）===
@@ -958,12 +1148,23 @@ function calcMobilityBreakdown(unit) {
       else if (type === '载具' || type === '背包') { if (!extraType) extraType = type; extra += Math.ceil(m / 3) }
     }
   }
-  return { mainBody, extra, extraType, total: mainBody + extra }
+  // 体型机动修正（与 resolveUnitMobility / 后端 computeMobility 同源）
+  const size = unit.size || 'm'
+  return { mainBody: applySizeMobility(mainBody, size), extra: applySizeMobility(extra, size), extraType, total: applySizeMobility(mainBody, size) + applySizeMobility(extra, size) }
 }
 function mobTypeLabel(t) {
   if (t === '载具') return '载具'
   if (t === '背包') return '背包'
   return t || ''
+}
+// 状态效果条件标签：将 trigger 配置翻译为人类可读文案（仅 近战/远程 · 仅 x伤害）
+function conditionLabel(t) {
+  if (!t || t.type !== 'conditional') return ''
+  const at = (t.attack_type && t.attack_type.length)
+    ? t.attack_type.map(a => (a === 'melee' ? '近战' : a === 'ranged' ? '远程' : a)).join('/')
+    : '任意攻击'
+  const dk = (t.damage_kind && t.damage_kind.length) ? t.damage_kind.join('/') : '任意伤害'
+  return '仅 ' + at + ' · ' + dk
 }
 function normalizeBattleState(state) {
   if (!state || !state.units) return state
@@ -986,7 +1187,8 @@ function normalizeBattleState(state) {
       if (u.range === undefined && cs.range !== undefined) u.range = cs.range
       if (u.shield === undefined && cs.shield !== undefined) u.shield = cs.shield
       if (u.armor === undefined && cs.armor !== undefined) u.armor = cs.armor
-      if (u.maxHp === undefined && cs.maxHp !== undefined) u.maxHp = cs.maxHp
+      // maxHp 兜底：currentStats 未携带时回退到当前 hp（载入时多为满血），避免 HP 条按 /100 误显为残血
+      if (u.maxHp === undefined) u.maxHp = cs.maxHp ?? u.hp
     }
     // 阶段修复：统一解析「机动」，消除 ? 与错误的 0
     // 兼容 stats.mobility / stats.speed / attributes.parts.*.机动（合计）/ 顶层 mobility / 机动 / main_机动
@@ -996,6 +1198,13 @@ function normalizeBattleState(state) {
     if (u.view_urls !== undefined && u.viewUrls === undefined) {
       u.viewUrls = typeof u.view_urls === 'string' ? safeParseJson(u.view_urls) : u.view_urls
     }
+    // 行动点 → 旧布尔按钮字段（保持模板 :disabled 逻辑不变）：移动/战术/防御三类点用尽即置灰
+    if (u.has_moved === undefined) u.has_moved = (u.action_points?.MOVE ?? 1) <= 0
+    if (u.has_acted === undefined) u.has_acted = (u.action_points?.ATTACK ?? 1) <= 0
+    if (u.has_defended === undefined) u.has_defended = (u.action_points?.DEFEND ?? 1) <= 0
+    // 体型机动补偿 Buff：被更大机体攻击后下回合移动 +N（由后端 BuffManager 写入）
+    if (u.mobility_buff === undefined) u.mobility_buff = 0
+    if (u.mobility_buff_turns === undefined) u.mobility_buff_turns = 0
   }
   return state
 }
@@ -1073,6 +1282,56 @@ function getUnitDrawFlat(unit) {
   const { flatX, flatY } = pointyTopCenter(unit.q, unit.r, HEX_RADIUS, spacingH.value, spacingV.value)
   return { flatX, flatY }
 }
+
+// ===== 模块4：动画队列基建（视觉特效队列 + 提交门控）=====
+// 收到新状态变更时禁止粗暴覆写：先把机甲开火/受击/奇袭爆闪特效推入队列播放，
+// 播放完毕后再同步硬数值（HP/AP）到 battleState。
+const visualEffects = reactive([])     // [{ id, type, flatX, flatY, faction, bornAt, ttl }]
+let _effId = 0
+let _effTickId = null
+const GATE_MS = 520                    // 特效播放窗口：硬数值延迟同步时长
+const stateFrozen = ref(false)         // 伏击红警期间：刷新状态直接提交，不门控
+let _commitTimer = null
+let _pendingRaw = null
+
+function enqueueEffect(type, q, r, faction) {
+  if (q === undefined || r === undefined) return
+  const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, spacingH.value, spacingV.value)
+  visualEffects.push({ id: ++_effId, type, flatX, flatY, faction, bornAt: performance.now(), ttl: type === 'burst' ? 720 : 520 })
+  if (!_effTickId) _effTickId = requestAnimationFrame(_tickEffects)
+}
+function _tickEffects() {
+  const now = performance.now()
+  let alive = false
+  for (let i = visualEffects.length - 1; i >= 0; i--) {
+    if (now - visualEffects[i].bornAt > visualEffects[i].ttl) visualEffects.splice(i, 1)
+    else alive = true
+  }
+  hexGrid.value?.redraw()
+  _effTickId = alive ? requestAnimationFrame(_tickEffects) : null
+}
+// 比对前后战局：抽取 HP 下降的单位 -> 受击(hit)特效
+function diffBattleEffects(prev, next) {
+  const out = []
+  if (!prev || !prev.units || !next || !next.units) return out
+  const prevArr = Array.isArray(prev.units) ? prev.units : Object.values(prev.units)
+  const nextArr = Array.isArray(next.units) ? next.units : Object.values(next.units)
+  const prevMap = {}
+  prevArr.forEach(u => { if (u && u.id != null) prevMap[u.id] = u })
+  nextArr.forEach(u => {
+    if (!u || u.q === undefined) return
+    const before = prevMap[u.id]
+    if (before && (before.hp ?? 0) - (u.hp ?? 0) > 0) out.push({ type: 'hit', q: u.q, r: u.r, faction: u.faction })
+  })
+  return out
+}
+function flushCommit() {
+  _commitTimer = null
+  const next = _pendingRaw
+  _pendingRaw = null
+  if (next) commitState(next)
+}
+
 const hoverCoord = ref('')
 // Deploy phase
 const isDeployPhase = ref(false)
@@ -1092,6 +1351,17 @@ const selectedAttackSkill = ref(null)
 // 行动面板机动拆解（响应式：依赖 selectedUnit/selectedDeployUnit 的 parts，装备舍弃即重算）
 const mobilityBreakdown = computed(() => calcMobilityBreakdown(selectedUnit.value))
 const deployMobilityBreakdown = computed(() => calcMobilityBreakdown(selectedDeployUnit.value))
+// ===== 特殊触发词条反应 UI 状态机（消费后端回传的 reaction_* 字段）=====
+const reactionUI = reactive({
+  execute: null,    // { targetId, roll, hp, targetName }
+  reactivate: null, // { unitId, name }
+  lucky: null,      // { effect, roll }
+  snatch: null,     // { attackerId, targetId, damage, bestWeaponAttack, targetWeapon, attackerName, targetName }
+  cover: null,      // { attackerId, victimId, helperId, expireAt, options, attackerName, victimName, helperName }
+  duel: null,       // { attackerId, defenderId, attackerName, defenderName }
+  airdropInfo: null // { q, r, kind, label }
+})
+
 // Phase8: 手动掷骰拦截状态机
 const diceRollState = reactive({
   active: false,
@@ -1117,6 +1387,48 @@ const sidebarActionLog = inject('sidebarActionLog')
 const factionCooldowns = ref({})
 const aceUnits = ref({})
 const victoryInfo = ref(null)
+// 实时胜利结算结果（来自 /attack 与 /end-turn 响应的 victory 字段）
+const battleResult = ref(null)
+function closeBattleResult() { battleResult.value = null }
+function victoryCondLabel(c) {
+  const m = { annihilate: '歼灭', assassinate: '斩首', hold_position: '据守', capture: '占领', destroy_facility: '摧毁设施' }
+  return m[c] || c || '未知'
+}
+
+// Phase 31: 战斗结算弹窗（攻击发起时展示双方机体视图 / HP / 伤害公式）
+const attackReport = ref(null)
+const showAttackReport = ref(false)
+function closeAttackReport() { showAttackReport.value = false }
+// 从行动面板/地图单位快照出弹窗所需的最小字段
+function unitSnapshot(u) {
+  if (!u) return {}
+  return {
+    id: u.id || u.unitId,
+    name: u.name || u.codename || ('Unit-' + (u.id || u.unitId)),
+    faction: u.faction,
+    hp: safeHp(u),
+    maxHp: safeHp(u),
+    viewUrls: u.viewUrls || u.view_urls || {},
+    size: u.size || 'm',
+  }
+}
+// 拦截弹窗：攻击方阵营与当前行动阵营不符（回合制门控）
+function showBlockedAttackReport(attacker, target) {
+  attackReport.value = {
+    blocked: true,
+    reason:
+      `当前是「${getRoleLabel(battleState.value?.activeFaction)}」阵营的回合，\n` +
+      `你选择的攻击单位「${attacker?.name || '?'}(${getFactionLabel(attacker?.faction)})」不属于该阵营，无法在其回合之外发起攻击。\n\n` +
+      `请先结束当前回合，待该单位所属阵营成为行动阵营后，再选中它发起攻击；\n` +
+      `或当前就选中「${getRoleLabel(battleState.value?.activeFaction)}」阵营的单位去攻击对方。`,
+    attacker: unitSnapshot(attacker),
+    target: unitSnapshot(target),
+    formula: null,
+    finalDamage: 0,
+    dodged: false,
+  }
+  showAttackReport.value = true
+}
 
 // 坐标跳转（每个阵营独立）
 const jumpVisible = reactive({})
@@ -1162,6 +1474,14 @@ const factionPanelRef = ref(null)
 const factionPanelCollapsed = ref(false)
 const factionPanelPos = reactive({ left: 0, top: 0 })
 
+// 行动记录面板状态（战报栏浮动窗：锚定战场左侧边缘）
+const actionLogRef = ref(null)
+const dmMainRef = ref(null)
+const actionLogCollapsed = ref(false)
+const actionLogPos = reactive({ left: 2, top: 120 })
+const actionLogHeight = ref(480)
+const logContainer = ref(null)
+
 // 拖拽状态 (共享)
 const dragState = reactive({
   active: false,
@@ -1184,6 +1504,21 @@ function initFloatingCardPositions() {
   // 阵营面板: 底部区域
   factionPanelPos.left = Math.max(0, (vw - 600) / 2)
   factionPanelPos.top = vh - 240
+
+  // 行动记录面板: 锚定战场左侧边缘
+  // 垂直滚动条贴地图左缘（卡片左缘 = 地图左缘），水平滚动条贴地图下缘（卡片底 = 地图底 - 12）
+  const dm = dmMainRef.value
+  if (dm) {
+    const rect = dm.getBoundingClientRect()
+    actionLogPos.left = Math.round(rect.left + 2)
+    const h = Math.min(Math.max(rect.height - 140, 200), 560)
+    actionLogHeight.value = Math.round(h)
+    actionLogPos.top = Math.round(rect.bottom - h - 12)
+  } else {
+    actionLogPos.left = 2
+    actionLogPos.top = 120
+    actionLogHeight.value = 480
+  }
 }
 
 // 开始拖拽
@@ -1193,7 +1528,9 @@ function startDrag(event, panelId) {
   dragState.startMouseX = event.clientX
   dragState.startMouseY = event.clientY
   
-  const pos = panelId === 'actionPanel' ? actionPanelPos : factionPanelPos
+  const pos = panelId === 'actionPanel' ? actionPanelPos
+            : panelId === 'factionPanel' ? factionPanelPos
+            : actionLogPos
   dragState.startLeft = pos.left
   dragState.startTop = pos.top
   
@@ -1208,8 +1545,11 @@ function onDragMove(event) {
   const dx = event.clientX - dragState.startMouseX
   const dy = event.clientY - dragState.startMouseY
   
-  const pos = dragState.target === 'actionPanel' ? actionPanelPos : factionPanelPos
-  pos.left = Math.max(0, Math.min(window.innerWidth - 220, dragState.startLeft + dx))
+  const pos = dragState.target === 'actionPanel' ? actionPanelPos
+            : dragState.target === 'factionPanel' ? factionPanelPos
+            : actionLogPos
+  const cardW = dragState.target === 'actionLog' ? 270 : 220
+  pos.left = Math.max(0, Math.min(window.innerWidth - cardW, dragState.startLeft + dx))
   pos.top = Math.max(0, Math.min(window.innerHeight - 40, dragState.startTop + dy))
 }
 
@@ -1229,6 +1569,11 @@ function toggleActionPanel() {
 // 切换阵营面板折叠状态
 function toggleFactionPanel() {
   factionPanelCollapsed.value = !factionPanelCollapsed.value
+}
+
+// 切换行动记录面板折叠状态
+function toggleActionLog() {
+  actionLogCollapsed.value = !actionLogCollapsed.value
 }
 
 
@@ -1294,9 +1639,10 @@ async function loadFactionLogos() {
     let loadCount = 0
     const allFactions = data.factions || []
     allFactions.forEach(f => {
-      if (f.logo) {
+      const logoUrl = f.logoUrl || f.logo
+      if (logoUrl) {
         const img = new Image()
-        img.src = f.logo
+        img.src = logoUrl
         logos[f.code] = img
         loadCount++
         img.onload = () => {
@@ -1356,8 +1702,13 @@ function loadFactionRoles() {
     }
   } catch (e) {}
 }
-function getFactionRole(factionKey) {
-  return factionRoles.value[factionKey] || DEFAULT_ROLES[factionKey] || 'attack'
+function getFactionRole(key) {
+  // 方案A：角色名或单位对象(带 role)直接采用 role，无需再经 faction→role 映射
+  if (key && typeof key === 'object') {
+    return key.role || DEFAULT_ROLES[key.faction] || key.faction || 'attack'
+  }
+  if (key === 'attack' || key === 'defense' || key === 'ambush') return key
+  return factionRoles.value[key] || DEFAULT_ROLES[key] || 'attack'
 }
 function getFactionSkills(factionKey) {
   const role = getFactionRole(factionKey)
@@ -1428,14 +1779,14 @@ async function useFactionSkill(factionKey, skillKey) {
         params: {
           centerQ: selectedUnit.value.q,
           centerR: selectedUnit.value.r,
-          unit_id: String(selectedUnit.value.id)
+          unitId: String(selectedUnit.value.id)
         }
       })
       addLog('action', `🔥 火力覆盖发动！中心: ${formatCoord(selectedUnit.value.q, selectedUnit.value.r)}`)
     } else if (skillKey === 'fog_system') {
       if (!confirm('使用迷雾系统？每3轮只能使用一次。')) return
       await combatAPI.fogSystem(route.params.id, {
-        unit_id: String(selectedUnit.value.id)
+        unitId: String(selectedUnit.value.id)
       })
       addLog('action', '🌫 迷雾系统发动！')
     } else if (skillKey === 'surprise') {
@@ -1447,7 +1798,7 @@ async function useFactionSkill(factionKey, skillKey) {
       if (!confirm('使用隐匿？该单位将进入隐匿状态（持续3轮）。')) return
       await combatAPI.action(route.params.id, {
         actionType: 'conceal',
-        unit_id: String(selectedUnit.value.id)
+        unitId: String(selectedUnit.value.id)
       })
       addLog('action', `👻 ${selectedUnit.value.name} 进入隐匿状态`)
     } else if (skillKey === 'reinforcement') {
@@ -1477,6 +1828,18 @@ function getFactionColor(faction) {
 
 function getFactionLabel(faction) {
   return getFactionConfig(faction).label
+}
+
+/** 角色键 → 中文名（activeFaction 现已是角色键 attack/defense/ambush） */
+function getRoleLabel(role) {
+  const idx = ['attack', 'defense', 'ambush'].indexOf(role)
+  return ['攻击', '防守', '偷袭'][idx] || role || ''
+}
+
+/** 角色键 → 主色（战术化阵营配色，替代固有阵营 Logo 以避免 404） */
+function getRoleColor(role) {
+  const map = { attack: '#13ff43', defense: '#4da6ff', ambush: '#ff4d4d' }
+  return map[role] || '#ffb000'
 }
 
 // ===== Data =====
@@ -1574,13 +1937,21 @@ const isoConfig = computed(() => ({
   bottomFlat: ISO_DEFAULTS.bottomFlat,
 }))
 
+// 稳健 HP 兜底：对 0 / undefined / null / NaN 都回退（后端部署池单位历史上无 hp 字段，曾被误判阵亡标灰）
+function safeHp(u) {
+  const h = Number(u?.hp)
+  if (h > 0) return h
+  const ch = Number(u?.currentStats?.hp)
+  if (ch > 0) return ch
+  return 100
+}
 async function loadDeployPool() {
   try {
       // 优先尝试后端部署池 API
   try {
     const poolRes = await combatAPI.getDeployPool(route.params.id)
     if (poolRes.data.units && poolRes.data.units.length > 0) {
-      deployPool.value = poolRes.data.units.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
+      deployPool.value = poolRes.data.units.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u), hp: safeHp(u), maxHp: safeHp(u) }))
       console.log('[loadDeployPool] 后端部署池返回棋子数:', deployPool.value.length)
       return
     }
@@ -1595,9 +1966,9 @@ async function loadDeployPool() {
     try {
       const selectedIds = JSON.parse(localStorage.getItem('selectedUnitIds') || '[]')
       if (selectedIds.length > 0) {
-        deployPool.value = allUnits.filter(u => selectedIds.includes(u.id)).map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
+        deployPool.value = allUnits.filter(u => selectedIds.includes(u.id)).map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u), hp: safeHp(u), maxHp: safeHp(u) }))
       } else {
-        deployPool.value = allUnits.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u) }))
+        deployPool.value = allUnits.map(u => ({ ...u, mobility: u.mobility ?? resolveUnitMobility(u), hp: safeHp(u), maxHp: safeHp(u) }))
       }
     } catch {
       deployPool.value = allUnits
@@ -1616,30 +1987,35 @@ async function loadDeployPool() {
 }
 
 const factionGroups = computed(() => {
+  // 方案A 战术化：按「战术角色 role」(attack/defense/ambush) 分组，不再按固有阵营 faction 分组。
+  // 这样来自其他界面部署、但同属一个战术角色的友军单位会归到同一组，避免「看不到友军」。
+  const ROLE_KEYS = ['attack', 'defense', 'ambush']
   const groups = {}
-  // Add deployed units from battlefield state
+  ROLE_KEYS.forEach(r => { groups[r] = [] })
+  // 已部署单位
   allUnits.value.forEach(u => {
-    const f = u.faction || 'unknown'
-    if (!groups[f]) groups[f] = []
-    groups[f].push(u)
+    const r = u.role || getFactionRole(u.faction) || 'unknown'
+    if (!groups[r]) groups[r] = []
+    groups[r].push(u)
   })
-  // During deployment, also include undeployed units from deployPool
-  // so faction boxes show all available units
+  // 部署期：把部署池中尚未下场的单位也并入对应战术组，保证列表完整
   if (isDeployPhase.value) {
     deployPool.value.forEach(u => {
-      const f = u.faction || 'unknown'
-      if (!groups[f]) groups[f] = []
-      const exists = groups[f].some(existing => existing.id === u.id)
-      if (!exists) groups[f].push(u)
+      const r = u.role || getFactionRole(u.faction) || 'unknown'
+      if (!groups[r]) groups[r] = []
+      const exists = groups[r].some(existing => existing.id === u.id)
+      if (!exists) groups[r].push(u)
     })
   }
   return Object.entries(groups)
+    .filter(([key]) => ROLE_KEYS.includes(key)) // 仅展示合法战术角色组
     .map(([key, units]) => ({
       key,
-      label: getFactionLabel(key),
-      color: getFactionColor(key),
+      role: key,
+      label: getRoleLabel(key),                  // 攻击方 / 防守方 / 奇袭方（文字，避免固有阵营 Logo 404）
+      color: getRoleColor(key),
       units,
-      order: getFactionConfig(key).order,
+      order: ['attack', 'defense', 'ambush'].indexOf(key),
     }))
     .sort((a, b) => a.order - b.order)
 })
@@ -1687,8 +2063,15 @@ function addLog(type, message) {
   const time = now.toTimeString().slice(0, 8)
   sidebarActionLog.value.unshift({ type, message, time })
   if (sidebarActionLog.value.length > 200) sidebarActionLog.value.pop()
-  // Auto-scroll handled by TheSidebar.vue
+  // 自动滚到顶部（最新记录在上）：由下方 watch 监听 sidebarActionLog 处理
 }
+
+// 行动记录自动滚动到顶部（最新在上）
+watch(sidebarActionLog, () => {
+  nextTick(() => {
+    if (logContainer.value) logContainer.value.scrollTop = 0
+  })
+}, { deep: true })
 
 // Phase 29-P0: ctx 已由 HexGridCanvasEngine 应用完整 CTM (translate→scale→ISO shear)
 // 引擎已负责：地形填充、坐标标签、悬停高亮 → drawFn 只绘制战斗专用叠加层
@@ -1711,7 +2094,9 @@ function drawBattleScene(ctx, opts) {
     // 移动力即移动值预算（移动点）：普通地形 1 点/格，特殊地形更多（与后端 tsFindPath 对齐）。
     // 优先取 moveRange（机体+载具+背包合计），回退 mobility（仅机体），最后兜底 3。不再 /10。
     const rawMob = su.moveRange || su.mobility || su['机动'] || 3
-    const movePoints = Math.max(1, Math.round(rawMob))
+    // 体型机动补偿 Buff：被更大机体攻击后下回合移动 +N（与后端 /move 对齐）
+    const buffMob = (su.mobility_buff && su.mobility_buff_turns > 0) ? (su.mobility_buff || 0) : 0
+    const movePoints = Math.max(1, Math.round(Number(rawMob) + Number(buffMob)))
     const startKey = `${su.q},${su.r}`
     const visited = new Set([startKey])
     const queue = [{ q: su.q, r: su.r, cost: 0 }]
@@ -1905,10 +2290,32 @@ function drawBattleScene(ctx, opts) {
 
   unitsWithScreenY.forEach(({ unit, flatX, flatY }) => {
     if (unit.q === undefined) return
+    // 幽灵清理：血条归零或显式 dead 的单位直接从战场消失，不绘制机体与血条
+    if (isUnitDead(unit)) return
 
-    const isSelected = selectedUnit.value?.id === unit.id
+    // ===== 模块1：物理迷雾（Fog of War Masking）=====
+    // 敌方隐匿单位：绝不在 Canvas 上绘制其机体模型与血条，确保绝对隐形。
+    // （后端暴露字段为 unit.stealth；ownerId/faction 判定的「我方单位」仍可见自己的隐匿单位）
+    const isStealth = unit.stealth === true
+    const myId = user.value?.userId
+    const myFactionResolved = myFaction.value
+    // 方案A：友军判定基于「战术角色 role」而非固有 faction。
+    // myRole = 当前玩家固有 faction 经 factionRoles 翻译出的战术角色；与 unit.role 比对，
+    // 这样其他界面部署但同角色的友军（即使 faction 不同）也能正确解盲、不被迷雾截断。
+    const myRole = getFactionRole(myFactionResolved)
+    const unitRole = unit.role || getFactionRole(unit.faction)
+    const isMyUnit = unit.ownerId === myId || (myRole && unitRole === myRole)
+    // 上帝视角豁免（2026-07-30）：房主(isHost)或 DOMINATOR/REFEREE 管理员可见全部 stealth 单位
+    const isGod = !!(
+      (battleState.value?.hostId && myId && String(battleState.value.hostId) === String(myId)) ||
+      ['dominator', 'referee'].includes((user.value?.role || '').toString().toLowerCase())
+    )
+    if (isStealth && !isMyUnit && !isGod) return
+    const isConcealed = isStealth && !isGod
+
+    // 阵营主色与选中态（供下方矢量降级圆标 / 选中环使用）
     const fc = getFactionColor(unit.faction)
-    const isConcealed = unit.concealed === true
+    const isSelected = selectedUnit.value?.id === unit.id || selectedDeployUnit.value?.id === unit.id
 
     // === Step A: 计算屏幕空间锚点 (unit 脚底中心) ===
     const screenX = ox + s * (iso.scaleX * flatX + iso.shearX * flatY)
@@ -1921,6 +2328,10 @@ function drawBattleScene(ctx, opts) {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.translate(screenX, screenY)
     ctx.scale(s, s)  // 只缩放，不倾斜
+    // 像素风锐化：禁用平滑插值，确保 S/M/L/XL 放大单位保持硬朗边缘（含浏览器前缀兜底）
+    ctx.imageSmoothingEnabled = false
+    ctx.webkitImageSmoothingEnabled = false
+    ctx.mozImageSmoothingEnabled = false
 
     // === Step C2: 脚底投影椭圆（需求③：挤出 + 有高度时阴影加深；否则轻量） ===
     const _tid = (cellMap[`${unit.q},${unit.r}`]?.terrain) || 'void'
@@ -1939,15 +2350,32 @@ function drawBattleScene(ctx, opts) {
     const fallbackCode = 'DEFAULT'
 
     // === Phase 30-Cover: 七视图棋子优先渲染（不全则回退圆标+字母） ===
+    const sizeScale = sizeRenderScale(unit.size)
     const _sevenImg = resolveSevenView(unit.viewUrls || unit.view_urls, visual.direction)
     const _hasSeven = !!(_sevenImg && _sevenImg.complete && _sevenImg.naturalWidth > 0 && !isConcealed)
     if (_hasSeven) {
       const iw = _sevenImg.naturalWidth, ih = _sevenImg.naturalHeight
-      const maxH = HEX_RADIUS * 1.7, maxW = HEX_RADIUS * 1.5
+      // 体型工坊：每档尺寸锁定固定基础盒子（×1.6 放大），消除原图比例窜改体型层级
+      const box = sizeSevenBox(unit.size)
+      const maxW = box.w, maxH = box.h
       const aspect = iw / ih
       let dw, dh
       if (aspect > maxW / maxH) { dw = maxW; dh = dw / aspect } else { dh = maxH; dw = dh * aspect }
-      ctx.drawImage(_sevenImg, -dw / 2, -dh, dw, dh)
+      // 盒子整体放大 60%（图片等比放大，保持原有盒子↔图片缩放比例）
+      const BOX_ENLARGE = 1.6
+      dw *= BOX_ENLARGE; dh *= BOX_ENLARGE
+      // 锚定：默认把真实脚底(底部不透明行)钉在地面(FOOT_GAP=0)，作为非飞行单位标准。
+      // 飞行单位保留原高度（盒子底边钉在地面，脚底随透明留白自然悬浮）。
+      const FOOT_GAP = 0
+      let topY = -dh
+      const footY = _sevenImg._footY
+      const isFlying = unit.flying === true || unit.flying === 'true' || unit.type === 'air'
+      if (!isFlying && typeof footY === 'number' && footY >= 0 && footY < ih) {
+        const pad = ih - footY // 脚底到画布底的透明留白（源像素）
+        const bottomY = -FOOT_GAP + (pad / ih) * dh
+        topY = bottomY - dh
+      }
+      ctx.drawImage(_sevenImg, -dw / 2, topY, dw, dh)
     }
 
     const sprite = !isConcealed
@@ -1961,8 +2389,8 @@ function drawBattleScene(ctx, opts) {
       ctx.drawImage(
         sprite.image,
         sprite.sx, sprite.sy, sprite.sw, sprite.sh,
-        -sprite.anchorX, -sprite.anchorY,
-        sprite.renderW, sprite.renderH
+        -sprite.anchorX * sizeScale, -sprite.anchorY * sizeScale,
+        sprite.renderW * sizeScale, sprite.renderH * sizeScale
       )
     } else if (!_hasSeven && !isConcealed) {
       // ================================================================
@@ -1998,7 +2426,7 @@ function drawBattleScene(ctx, opts) {
         ctx.restore()  // ← 恢复旋转，后续 HP/选中环绝对正立
       } else {
         // Layer 3: 绝对死锁防御 — 纯矢量圆形 + 首字母（不旋转）
-        const r = HEX_RADIUS * 0.4
+        const r = HEX_RADIUS * 0.4 * sizeScale
         ctx.beginPath()
         ctx.arc(0, 0, r, 0, Math.PI * 2)
         ctx.fillStyle = hexToRGBA(fc, 0.45)
@@ -2056,7 +2484,8 @@ function drawBattleScene(ctx, opts) {
     }
 
     // HP bar (在 billboard 空间内绘制，保证不变形、不旋转)
-    const hpPct = Math.max(0, (unit.hp || 100) / 100)
+    const _maxHp = unit.maxHp || unit.hp || 100
+    const hpPct = Math.max(0, Math.min(1, (unit.hp || 0) / _maxHp))
     const barW = HEX_RADIUS * 0.6
     const barH = 3
     const barY = HEX_RADIUS * 0.32
@@ -2100,6 +2529,50 @@ function drawBattleScene(ctx, opts) {
     ctx.fillText("R", rcx, rcy)
   })
 
+  // === Step F: 空投补给 token（卡8）===
+  const groundItems = battleState.value?.groundItems || []
+  for (const item of groundItems) {
+    const { flatX: gX, flatY: gY } = pointyTopCenter(item.q, item.r, HEX_RADIUS, spacingH, spacingV)
+    drawGroundItemToken(ctx, gX, gY, null, { kind: item.kind, label: item.label })
+  }
+
+  // 模块4：绘制视觉特效叠层（开火/受击/奇袭爆闪），特效在屏幕像素空间绘制
+  drawVisualEffects(ctx)
+}
+
+// 模块4：视觉特效渲染（逃逸 ISO 矩阵，屏幕像素空间绘制）
+function drawVisualEffects(ctx) {
+  const now = performance.now()
+  const iso = hexGrid.value?.ISO || ISO_DEFAULTS
+  const s = hexGrid.value?.scale || 1
+  const ox = hexGrid.value?.offsetX || 0
+  const oy = hexGrid.value?.offsetY || 0
+  for (const e of visualEffects) {
+    const age = (now - e.bornAt) / e.ttl
+    if (age > 1) continue
+    const screenX = ox + s * (iso.scaleX * e.flatX + iso.shearX * e.flatY)
+    const screenY = oy + s * (iso.shearY * e.flatX + iso.scaleY * e.flatY)
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.translate(screenX, screenY)
+    ctx.scale(s, s)
+    const alpha = 1 - age
+    if (e.type === 'hit') {
+      const radius = HEX_RADIUS * (0.3 + age * 0.9)
+      ctx.strokeStyle = `rgba(255,70,70,${alpha})`
+      ctx.lineWidth = 3 * alpha
+      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke()
+    } else if (e.type === 'muzzle') {
+      ctx.fillStyle = `rgba(255,220,90,${alpha})`
+      ctx.beginPath(); ctx.arc(0, -HEX_RADIUS * 0.35, HEX_RADIUS * 0.45 * alpha, 0, Math.PI * 2); ctx.fill()
+    } else if (e.type === 'burst') {
+      const radius = HEX_RADIUS * (0.3 + age * 1.4)
+      ctx.strokeStyle = `rgba(105,240,174,${alpha})`
+      ctx.lineWidth = 4 * alpha
+      ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke()
+    }
+    ctx.restore()
+  }
 }
 
 // ===== HexGridCanvas 事件处理器 =====
@@ -2132,6 +2605,13 @@ function onHexClick({ q, r }) {
     return
   }
 
+  // 空投补给 info（卡8）：点击地面补给箱优先弹出信息
+  const gItem = (battleState.value?.groundItems || []).find(it => it.q === q && it.r === r)
+  if (gItem) {
+    reactionUI.airdropInfo = gItem
+    return
+  }
+
   // Action mode: move（阵营轮转门控）
   if (actionMode.value === 'move' && selectedUnit.value) {
     if (!isMyTurn(selectedUnit.value)) { addLog('warn', `当前行动阵营为 ${battleState.value?.activeFaction}，无法操作该单位`); return }
@@ -2141,13 +2621,16 @@ function onHexClick({ q, r }) {
   // Check if clicked on a unit
   const clickedUnit = findUnitAt(q, r)
   if (clickedUnit) {
-    if (actionMode.value === 'tactical' && selectedUnit.value) {
-      if (clickedUnit.id !== selectedUnit.value.id) {
+    // 选中己方单位后点击「敌方单位」(不同阵营)：仅当处于战术模式(actionMode==='tactical')
+    // 或已选中攻击技能(selectedAttackSkill)时才发起攻击；否则默认按选择处理(查看信息)
+    if (selectedUnit.value && clickedUnit.id !== selectedUnit.value.id && clickedUnit.faction !== selectedUnit.value.faction) {
+      if (actionMode.value === 'tactical' || selectedAttackSkill.value) {
         if (selectedAttackSkill.value) { executeSkillAttack(clickedUnit, selectedAttackSkill.value) }
         else { executeAttack(clickedUnit) }
         return
       }
     }
+    // 否则（默认点击敌方=查看信息 / 点己方另一单位 / 未选单位时点敌人）按选择处理
     selectUnit(clickedUnit)
     return
   }
@@ -2228,24 +2711,22 @@ async function executeAction(type, params = {}) {
   const unit = selectedUnit.value
   try {
     if (type === 'defend') {
-      addLog('action', `${unit.name} 进入防御姿态 (+15 护盾)`)
+      addLog('action', `${unit.name} 进入防御姿态（受击 -3，直到下个自己回合）`)
       // Phase 2: 防御姿态视觉
       setUnitVisual(unit.unitId || unit.id, null, 'defend')
-      // Attempt backend call
-      try {
-        await combatAPI.action(route.params.id, { actionType: 'defend', params: { unit_id: String(unit.id) } })
-      } catch (e) { /* offline fallback */ }
+      // 真实后端调用：清零行动点 + 写入持续减伤 statusEffect（后端无 defend 分支时抛错由外层捕获）
+      await combatAPI.action(route.params.id, { actionType: 'defend', params: { unitId: String(unit.id) } })
     } else if (type === 'wait') {
       addLog('action', `${unit.name} 原地待机`)
       // Phase 2: 待命视觉
       setUnitVisual(unit.unitId || unit.id, null, 'wait')
       try {
-        await combatAPI.action(route.params.id, { actionType: 'wait', params: { unit_id: String(unit.id) } })
+        await combatAPI.action(route.params.id, { actionType: 'wait', params: { unitId: String(unit.id) } })
       } catch (e) { /* offline fallback */ }
     } else if (type === 'skill') {
       addLog('action', `${unit.name} 使用技能: ${params.skill_id}`)
       try {
-        await combatAPI.action(route.params.id, { actionType: 'skill', params: { unit_id: String(unit.id), skill_id: String(params.skill_id) } })
+        await combatAPI.action(route.params.id, { actionType: 'skill', params: { unitId: String(unit.id), skill_id: String(params.skill_id) } })
       } catch (e) { /* offline fallback */ }
     }
     actionMode.value = null
@@ -2382,6 +2863,18 @@ const weaponAttrLabel = computed(() => {
   return map[(selectedUnit.value?.weaponType || '').toLowerCase()] || '实体'
 })
 
+// 基础攻击射程：以基础攻击技能自身属性(cast_range)为准，不再使用单位"范围" stat。
+// 范围(range)仅保留作近战/远程分类信号（range>1 视为远程单位）。
+// 数值与 skillExecutor.DEFAULT_RANGE_BY_CATEGORY 对齐（melee=1 / ranged=6）。
+const BASIC_MELEE_RANGE = 1
+const BASIC_RANGED_RANGE = 6
+function isBasicRanged(unit) {
+  return (unit?.range || 1) > 1
+}
+function basicAttackRange(unit) {
+  return isBasicRanged(unit) ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE
+}
+
 // 选择战术行动的技能（null = 普通攻击）
 function selectTacticalSkill(skill) {
   royroyDeployMode.value = false
@@ -2390,15 +2883,47 @@ function selectTacticalSkill(skill) {
   hexGrid.value?.redraw()
 }
 
+// 自动化技能（助攻/守护/阻碍/侦察）：自身增益/减益，统一走 /skill 路由直接施放
+const AUTOMATION_SELF_KEYS = new Set(['assist', 'guard', 'blockade', 'scout'])
+
+// 战术技能点击分发：自动化自身技能直接施放，其余走原有攻击流程
+function onTacticalSkillClick(skill) {
+  const key = skill && (skill.key || skill.id)
+  if (AUTOMATION_SELF_KEYS.has(key)) {
+    castAutomationSkill(skill, null)
+    return
+  }
+  selectTacticalSkill(skill)
+}
+
+// 施放自动化技能（POST /combat/:id/skill）
+async function castAutomationSkill(skill, target) {
+  if (!selectedUnit.value) return
+  const unit = selectedUnit.value
+  const payload = { skillType: skill.key || skill.id, casterUnitId: String(unit.id) }
+  if (target) payload.targetUnitId = String(target.id)
+  try {
+    const res = await combatAPI.skill(route.params.id, payload)
+    const r = res.data || {}
+    addLog('action', `${unit.name} 发动 [${skill.name}]${target ? ` → ${target.name}` : ''}`)
+    actionMode.value = null
+    selectedAttackSkill.value = null
+    await refreshState()
+  } catch (e) {
+    addLog('error', `技能发动失败: ${e.response?.data?.error || e.message}`)
+  }
+}
+
 // 获取技能的施放范围（hex距离）
 function getSkillRange(skill) {
   if (!skill) {
-    // 普通攻击：使用单位的 range 属性
-    return selectedUnit.value?.range || 1
+    // 普通攻击：射程以基础攻击技能属性(cast_range)为准，不再使用单位"范围" stat
+    return basicAttackRange(selectedUnit.value)
   }
-  // 优先读取技能自身施加范围字段（与后端 resolveSkillRange 对齐：
-  // range / range_max / max_range / cast_range，支持数字、"1-3" 字符串、{min,max} 对象）
-  const maxFields = ['range', 'range_max', 'max_range', 'cast_range']
+  // 优先读取技能自身施加范围字段（与后端 resolveSkillRange 对齐）：
+  // cast_range 为权威攻击距离，缺省时回退 max_range / range_max / range。
+  // 支持数字、"1-3" 字符串、{min,max} 对象。
+  const maxFields = ['cast_range', 'max_range', 'range_max', 'range']
   for (const f of maxFields) {
     const v = skill[f]
     if (v === undefined || v === null) continue
@@ -2415,10 +2940,12 @@ function getSkillRange(skill) {
   if (skill.range_min !== undefined) {
     return Math.max(skill.range_min, skill.range_max || skill.range_min)
   }
-  // 默认：近战=1, 远程=单位射程
+  // 默认：近战=1, 远程=技能分类默认射程（不再使用单位"范围" stat）
+  // auto/automation(自动化) 默认 0（仅自身），与后端 DEFAULT_RANGE_BY_CATEGORY 对齐
   if (skill.category === 'melee') return 1
-  if (skill.category === 'ranged' || skill.category === 'auto') return selectedUnit.value?.range || 2
-  return selectedUnit.value?.range || 1
+  if (skill.category === 'ranged') return BASIC_RANGED_RANGE
+  if (skill.category === 'auto' || skill.category === 'automation') return 0
+  return 1
 }
 
 // 获取技能的最小施放距离（hex距离）— 审计报告 #4 修复：范围预览需排除 min_range 内格
@@ -2463,7 +2990,7 @@ function deployRoyroyAt(q, r) {
   const unit = selectedUnit.value
   combatAPI.action(route.params.id, {
     actionType: 'deploy_royroy',
-    params: { unit_id: String(unit.id), q, r, unit_data: unit }
+    params: { unitId: String(unit.id), q, r, unit_data: unit }
   }).then(() => {
     addLog('deploy', `${unit.name} 部署 RoyRoy → ${formatCoord(q, r)}`)
     cancelAction()
@@ -2480,7 +3007,7 @@ async function retrieveRoyroy() {
   try {
     const resp = await combatAPI.action(route.params.id, {
       actionType: 'retrieve_royroy',
-      params: { unit_id: String(unit.id) }
+      params: { unitId: String(unit.id) }
     })
     const cd = resp?.data?.cooldownRound ?? resp?.cooldownRound ?? (unit.royroy.cooldownRound || 0)
     addLog('deploy', `${unit.name} 回收 RoyRoy（回血至满，第 ${cd} 轮前不可再部署）`)
@@ -2491,21 +3018,25 @@ async function retrieveRoyroy() {
   }
 }
 
-// 当前阵营行动标签（攻击/防守/偷袭 + faction 名）
+// 当前阵营行动标签（攻击/防守/偷袭）
 const currentFactionLabel = computed(() => {
-  const order = battleState.value?.factionTurnOrder || []
   const af = battleState.value?.activeFaction
   if (!af) return '准备中'
-  const idx = order.indexOf(af)
-  const roleName = ['攻击', '防守', '偷袭'][idx] || '行动'
-  return `${roleName}: ${getFactionLabel(af)}`
+  return getRoleLabel(af)
 })
 
-// 阵营轮转门控：unit 是否为当前行动阵营
+// 阵营轮转门控：unit 是否为当前行动角色（不再以势力键比较）
 function isMyTurn(unit) {
   const af = battleState.value?.activeFaction
   if (!af) return true
-  return !unit?.faction || unit.faction === af
+  // 单人托管（所有单位同属一个 owner）→ 沙盒模式，放开阵营轮转门控，允许任意一方随时行动
+  const us = battleState.value?.units
+  if (us) {
+    const list = Array.isArray(us) ? us : Object.values(us)
+    const owners = new Set(list.map(u => u.ownerId).filter(Boolean))
+    if (owners.size <= 1) return true
+  }
+  return getFactionRole(unit?.faction) === af
 }
 
 async function executeMove(tq, tr) {
@@ -2515,9 +3046,15 @@ async function executeMove(tq, tr) {
 
   // Phase 3: 平滑位移 — 先发起 API，成功后沿 path 逐段行走 + 动态朝向
   try {
-    const resp = await combatAPI.move(route.params.id, { unit_id: String(unit.id), target_q: tq, target_r: tr })
+    const resp = await combatAPI.move(route.params.id, { unitId: String(unit.id), target_q: tq, target_r: tr })
     if (resp?.success === false || resp?.error) {
       throw new Error(resp.error || '移动失败')
+    }
+    if (resp?.ambushed) {
+      ambushAlert.value = true
+      freezeQueue() // 伏击红警期间冻结状态消费，防止推送撕裂动画
+      stateFrozen.value = true // 模块4：冻结期间刷新状态直接提交，避免门控延迟 QTE/红警
+      setTimeout(() => { ambushAlert.value = false; unfreezeQueue(); stateFrozen.value = false }, 2500)
     }
     const fromCoord = formatCoord(fromQ, fromR)
     const toCoord = formatCoord(tq, tr)
@@ -2563,7 +3100,7 @@ async function executeSkipTactical() {
   try {
     await combatAPI.action(route.params.id, {
       actionType: 'skip_tactical',
-      params: { unit_id: String(selectedUnit.value.id) }
+      params: { unitId: String(selectedUnit.value.id) }
     })
     addLog('action', `${selectedUnit.value.name} 跳过战术环节${selectedUnit.value.faction === 'maxion' ? '（移动后可恢复隐匿）' : ''}`)
     actionMode.value = null
@@ -2580,7 +3117,7 @@ async function executeSkipMove() {
   try {
     await combatAPI.action(route.params.id, {
       actionType: 'skip_move',
-      params: { unit_id: String(selectedUnit.value.id) }
+      params: { unitId: String(selectedUnit.value.id) }
     })
     addLog('action', `${selectedUnit.value.name} 跳过移动${selectedUnit.value.concealRestorePending ? '，恢复隐匿' : ''}`)
     actionMode.value = null
@@ -2613,7 +3150,7 @@ async function doJump(factionKey) {
   }
   try {
     await combatAPI.jumpTo(route.params.id, {
-      unit_id: String(selectedUnit.value.id),
+      unitId: String(selectedUnit.value.id),
       target_q: tq,
       target_r: tr
     })
@@ -2642,9 +3179,36 @@ function victoryLabel(info) {
 async function executeAttack(target) {
   if (!selectedUnit.value) return
   const attacker = selectedUnit.value
-  if (!isMyTurn(attacker)) { addLog('warn', `当前行动阵营为 ${battleState.value?.activeFaction}，无法攻击`); return }
+  if (!isMyTurn(attacker)) {
+    addLog('warn', `当前行动阵营为 ${battleState.value?.activeFaction}，无法攻击`)
+    showBlockedAttackReport(attacker, target)
+    return
+  }
+  // H1 决斗预检：前端驱动（后端 /attack 不做预检），可决斗则弹窗让用户抉择
   try {
-    const attackType = (attacker.range || 1) > 1 ? 'ranged' : 'melee'
+    const duelRes = await combatAPI.duelCheck(route.params.id, {
+      casterUnitId: String(attacker.id),
+      targetUnitId: String(target.id),
+    })
+    if (duelRes.data?.canDuel) {
+      reactionUI.duel = {
+        attackerId: String(attacker.id),
+        defenderId: String(target.id),
+        attackerName: attacker.name,
+        defenderName: target.name,
+      }
+      return
+    }
+  } catch (e) {
+    // 预检失败降级为普通攻击
+  }
+  await performPlainAttack(attacker, target)
+}
+
+// 普通攻击结算（决斗取消时复用）
+async function performPlainAttack(attacker, target) {
+  try {
+    const attackType = isBasicRanged(attacker) ? 'ranged' : 'melee'
     const result = await combatAPI.attack(route.params.id, {
       attacker_id: String(attacker.id),
       target_id: String(target.id),
@@ -2662,30 +3226,134 @@ async function executeAttack(target) {
 
     if (result.data?.surprise_triggered) {
       addLog('action', `⚡ 奇袭触发！${attacker.name} vs ${target.name}`)
+      enqueueEffect('burst', target.q, target.r, target.faction)   // 模块4：奇袭爆闪
     } else {
       addLog('attack', `${attacker.name} 攻击 ${target.name} → 伤害 ${result.data?.combat_result?.final_damage ?? result.data?.combat_result?.damage ?? '?'}`)
     }
+    enqueueEffect('muzzle', attacker.q, attacker.r, attacker.faction) // 模块4：开火闪光
     actionMode.value = null
-    await refreshState()
+    await handleAttackResponse(result, attacker, target)
   } catch (e) {
     addLog('error', `攻击失败: ${e.response?.data?.error || e.message}`)
     cancelAction()
   }
 }
 
-
-// ===== Phase8: 手动掷骰系统 =====
-function parseDiceType(diceStr) {
-  const m = String(diceStr || '1d6').match(/^(\d+)d(\d+)$/i)
-  return m ? { count: parseInt(m[1]), sides: parseInt(m[2]) } : { count: 1, sides: 6 }
+// 消费 /attack 回传的反应事件，填充弹窗 UI
+async function handleAttackResponse(result, attacker, target) {
+  await refreshState()
+  const data = result.data || {}
+  const events = data.reaction_events || []
+  for (const ev of events) {
+    if (ev.evt === 'execute_lethal') {
+      const tName = unitNameById(ev.payload?.targetId) || target?.name || '目标'
+      reactionUI.execute = { ...ev.payload, targetName: tName }
+      addLog('action', `☠️ 斩杀！${tName} 被处决`)
+    } else if (ev.evt === 'reactivate') {
+      const uName = unitNameById(ev.payload?.unitId) || attacker?.name || '单位'
+      reactionUI.reactivate = { ...ev.payload, name: uName }
+      addLog('action', `🔄 再动！${uName} 行动点已重置`)
+    }
+  }
+  if (data.lucky_effect) reactionUI.lucky = data.lucky_effect
+  if (data.pending_snatch) {
+    const ps = data.pending_snatch
+    reactionUI.snatch = { ...ps, attackerName: unitNameById(ps.attackerId), targetName: unitNameById(ps.targetId) }
+  }
+  if (data.pending_reaction) {
+    const pr = data.pending_reaction
+    reactionUI.cover = {
+      ...pr,
+      attackerName: unitNameById(pr.attackerId),
+      victimName: unitNameById(pr.victimId),
+      helperName: unitNameById(pr.helperId),
+    }
+  }
+  // 实时胜利结算：后端 evaluateVictory 命中 → 弹出胜利遮罩
+  if (data.victory && data.victory.victory) {
+    battleResult.value = data.victory
+    addLog('action', `🏆 战斗结束：${data.victory.winner} 获胜（${data.victory.condition}）`)
+  }
+  // Phase 31: 战斗结算弹窗（双方机体视图 + HP + 伤害公式）
+  // 系统级兜底：优先用显式传入的单位，其次用后端回显的 id 从刷新后的战局解析，
+  // 避免任何调用路径漏传参数导致弹窗单位错乱（攻击方/阵营/图片全部回退）。
+  const aId = String(attacker?.id || attacker?.unitId || data.attacker_id || '')
+  const dId = String(target?.id || target?.unitId || data.target_id || '')
+  const aUnit = allUnits.value.find(u => String(u.id) === aId) || attacker || {}
+  const dUnit = allUnits.value.find(u => String(u.id) === dId) || target || {}
+  attackReport.value = {
+    blocked: false,
+    attacker: unitSnapshot(aUnit),
+    target: unitSnapshot(dUnit),
+    formula: data.combat_result?.formula || null,
+    finalDamage: data.combat_result?.final_damage ?? 0,
+    dodged: data.combat_result?.dodged ?? false,
+    sizeBanner: data.combat_result?.sizeBanner || null,
+    sizeTactic: data.combat_result?.sizeTactic || null,
+  }
+  showAttackReport.value = true
 }
 
-function rollDice(diceStr) {
-  const { count, sides } = parseDiceType(diceStr)
-  let t = 0
-  for (let i = 0; i < count; i++) t += Math.floor(Math.random() * sides) + 1
-  return t
+function unitNameById(id) {
+  if (id === undefined || id === null) return ''
+  const u = allUnits.value.find(x => String(x.id) === String(id))
+  return u?.name || ''
 }
+
+// ===== 弹窗决策回调 =====
+async function confirmDuel() {
+  const d = reactionUI.duel
+  reactionUI.duel = null
+  try {
+    const res = await combatAPI.resolveDuel(route.params.id, {
+      casterUnitId: d.attackerId,
+      targetUnitId: d.defenderId,
+    })
+    addLog('action', `⚔️ 决斗！${d.attackerName} vs ${d.defenderName} → ${res.data?.outcome || res.data?.duelLog || '结算完成'}`)
+  } catch (e) {
+    addLog('error', `决斗失败: ${e.response?.data?.error || e.message}`)
+  }
+  await refreshState()
+}
+async function cancelDuel() {
+  const d = reactionUI.duel
+  reactionUI.duel = null
+  const attacker = allUnits.value.find(u => String(u.id) === d.attackerId)
+  const target = allUnits.value.find(u => String(u.id) === d.defenderId)
+  if (attacker && target) await performPlainAttack(attacker, target)
+}
+async function resolveSnatch(accept) {
+  const s = reactionUI.snatch
+  reactionUI.snatch = null
+  try {
+    await combatAPI.resolveSnatch(route.params.id, {
+      casterUnitId: s.attackerId,
+      targetUnitId: s.targetId,
+      accept,
+    })
+  } catch (e) {
+    addLog('error', `抢夺结算失败: ${e.response?.data?.error || e.message}`)
+  }
+  await refreshState()
+}
+async function resolveCover(choice) {
+  const c = reactionUI.cover
+  reactionUI.cover = null
+  try {
+    await combatAPI.resolveCover(route.params.id, { choice })
+  } catch (e) {
+    addLog('error', `援助结算失败: ${e.response?.data?.error || e.message}`)
+  }
+  await refreshState()
+}
+function closeExecute() { reactionUI.execute = null }
+function closeReactivate() { reactionUI.reactivate = null }
+function closeLucky() { reactionUI.lucky = null }
+
+
+// ===== Phase8: 手动掷骰系统（掷骰逻辑统一走 diceUtil，与后端 diceService 语义一致）=====
+function parseDiceType(diceStr) { return parseDiceTypeUtil(diceStr) }
+function rollDice(diceStr) { return rollDiceUtil(diceStr) }
 
 function maybeInterceptManualRoll(target, skill) {
   const cfg = glossarySkills.value || {}
@@ -2752,11 +3420,13 @@ async function resolveDiceRoll() {
       bonus_damage: isSuccess ? bonusDamage : 0,
     }
   }
-  if (pendingAttackPayload.skill.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pendingAttackPayload.skill.id)) {
-    payload.skill_id = pendingAttackPayload.skill.id
-  }
+  // 系统级：始终下发全部身份标识（id/key/name），交由后端按任意一种解析，不再因非 UUID 而丢弃 skill_id
+  payload.skill_id = pendingAttackPayload.skill.id ?? null
+  payload.skill_key = pendingAttackPayload.skill.key ?? pendingAttackPayload.skill.skill_key ?? null
+  payload.skill_name = pendingAttackPayload.skill.name ?? null
   try {
     const result = await combatAPI.attack(route.params.id, payload)
+    handleAttackResponse(result, selectedUnit.value, pendingAttackPayload.target) // 掷骰技能攻击也弹结算画面（含未命中/伤害0），便于核对数值
     const dmg = result.data?.combat_result?.final_damage ?? result.data?.combat_result?.damage ?? result.data?.damage ?? '?'
     if (isSuccess) {
       addLog('attack', `${selectedUnit.value?.name} [${diceRollState.skillName}] SUCCESS! 掷${diceRollState.rollResult}>=${diceRollState.successLine}, +${bonusDamage}加成 -> 伤害${dmg}`)
@@ -2800,10 +3470,12 @@ async function executeSkillAttack(target, skill) {
       target_id: String(target.id),
       attack_type: 'skill',
     }
-    if (skill.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(skill.id)) {
-      attackPayload.skill_id = skill.id
-    }
+    // 系统级：始终下发全部身份标识（id/key/name），交由后端按任意一种解析，不再因非 UUID 而丢弃 skill_id
+    attackPayload.skill_id = skill.id ?? null
+    attackPayload.skill_key = skill.key ?? skill.skill_key ?? null
+    attackPayload.skill_name = skill.name ?? null
     const result = await combatAPI.attack(route.params.id, attackPayload)
+    handleAttackResponse(result, attacker, target) // 技能攻击也弹结算画面（含未命中/伤害0），便于核对数值
     const dmg = result.data?.combat_result?.final_damage ?? result.data?.combat_result?.damage ?? result.data?.damage ?? '?'
     addLog('attack', `${attacker.name} 使用 [${skill.name}] 攻击 ${target.name} → 伤害 ${dmg}`)
     actionMode.value = null
@@ -2817,7 +3489,11 @@ async function executeSkillAttack(target, skill) {
 
 async function endTurn() {
   try {
-    await combatAPI.endTurn(route.params.id)
+    const res = await combatAPI.endTurn(route.params.id)
+    if (res && res.data && res.data.victory && res.data.victory.victory) {
+      battleResult.value = res.data.victory
+      addLog('action', `🏆 战斗结束：${res.data.victory.winner} 获胜（${res.data.victory.condition}）`)
+    }
     addLog('turn', '===== 回合结束 =====')
     await refreshState()
   } catch (e) {
@@ -2827,9 +3503,26 @@ async function endTurn() {
 
 async function refreshState() {
   const { data } = await combatAPI.getBattleState(route.params.id)
-  const rawMap = (data.battle || data)?.map
-  console.log('[refreshState] map keys:', rawMap ? Object.keys(rawMap) : 'undefined', '| units count:', Object.keys((data.battle || data)?.units || {}).length)
-  battleState.value = normalizeBattleState(data.battle || data)
+  const rawState = data.battle || data
+  const newState = normalizeBattleState(rawState)
+  // 模块4：比对旧/新战局，受击推送特效；特效播放期间延迟提交硬数值(HP/AP)。
+  const effects = diffBattleEffects(battleState.value, newState)
+  if (effects.length && !stateFrozen.value) {
+    effects.forEach(e => enqueueEffect(e.type, e.q, e.r, e.faction))
+    // 仅保留最新一次拉取，避免快速连续刷新时旧快照后提交
+    _pendingRaw = rawState
+    if (!_commitTimer) _commitTimer = setTimeout(flushCommit, GATE_MS)
+  } else {
+    commitState(rawState)
+  }
+}
+// 模块4：真正把战局落盘到 battleState（含派生状态同步、精灵/lerp 清理、配置加载）
+function commitState(rawState) {
+  const rawMap = rawState?.map
+  console.log('[refreshState] map keys:', rawMap ? Object.keys(rawMap) : 'undefined', '| units count:', Object.keys(rawState?.units || {}).length)
+  battleState.value = normalizeBattleState(rawState)
+  // 同步后端角色映射（faction→role），保证前端门控与后端一致（含 unknow 等异常势力默认 attack）
+  if (rawState?.factionRoles) factionRoles.value = rawState.factionRoles
   // Preserve selection if unit still exists
   if (selectedUnit.value) {
     const found = allUnits.value.find(u => u.id === selectedUnit.value.id)
@@ -2857,7 +3550,57 @@ async function refreshState() {
   loadFactionRoles(); loadFactionCooldowns().catch(() => {})
   loadVictoryInfo().catch(() => {})
   hexGrid.value?.redraw()
+  // Batch C-2: 同步派生状态到 Pinia stores（行动点 / 战报 / 移动交互模式）
+  apStore.syncFromUnit(selectedUnit.value)
+  if (battleState.value?.combatLog) logStore.setLogs(battleState.value.combatLog)
+  moveStore.setMode(null)
 }
+
+// ===== Batch D-4.3: 反应奇袭 QTE 控制 =====
+function openSurprise(s) {
+  if (surpriseUI.value && surpriseUI.value.lockedReactorId === s.lockedReactorId && !surpriseUI.value.settled) return
+  surpriseUI.value = s
+  // 模块4：奇袭爆闪特效（QTE 开启时推入队列）
+  const reactorUnit = allUnits.value.find(u => String(u.id) === String(s.lockedReactorId))
+  if (reactorUnit) enqueueEffect('burst', reactorUnit.q, reactorUnit.r, reactorUnit.faction)
+  const ms = s.deadline ? (s.deadline - Date.now()) : 10000
+  surpriseSeconds.value = Math.max(1, Math.ceil(ms / 1000))
+  if (surpriseTimer) clearInterval(surpriseTimer)
+  surpriseTimer = setInterval(() => {
+    surpriseSeconds.value -= 1
+    if (surpriseSeconds.value <= 0) {
+      clearInterval(surpriseTimer); surpriseTimer = null
+      submitSurprise('giveup') // 超时自动放弃（服务端亦会强平）
+    }
+  }, 1000)
+}
+function closeSurprise() {
+  if (surpriseTimer) { clearInterval(surpriseTimer); surpriseTimer = null }
+  surpriseUI.value = null
+  // screenToneOn 为 computed（pendingSurprise 清除后自动熄灭），无需手动复位
+}
+async function submitSurprise(choice, skillId) {
+  const s = surpriseUI.value
+  if (!s) return
+  closeSurprise()
+  try {
+    await combatAPI.surpriseChoice(route.params.id, { unitId: s.lockedReactorId, choice, skill_id: skillId || null })
+  } catch (e) {
+    console.warn('[surprise] 提交失败', e?.message || e)
+  }
+  refreshState()
+}
+// 监听推送刷新后的 surprise 字段，自动弹出/关闭 QTE（仅当当前用户为锁定反应者）
+watch(() => battleState.value?.surprise || battleState.value?.pendingSurprise, (s) => {
+  if (s && !s.settled && s.phase !== 'done' && s.phase !== 'settled') {
+    const myId = userStore.user?.userId
+    const reactorUnit = battleState.value?.units?.find((u) => u.unitId === s.lockedReactorId)
+    if (reactorUnit && reactorUnit.ownerId === myId) {
+      openSurprise(s); return
+    }
+  }
+  closeSurprise()
+}, { deep: true })
 
 async function loadFactionCooldowns() {
   try {
@@ -2904,7 +3647,7 @@ async function deployToHex(q, r) {
   try {
     // Phase 14: 部署前清洗装备数据
     sanitizeUnitEquipment(unit)
-    await combatAPI.deployUnit(route.params.id, { unit_id: String(unit.id), q, r, unit_data: unit })
+    await combatAPI.deployUnit(route.params.id, { unitId: String(unit.id), q, r, unit_data: unit })
     addLog('deploy', `${unit.name} 部署到 ${formatCoord(q, r)}`)
     selectedDeployUnit.value = null
     deployFsmState.value = DEPLOY_FSM.IDLE
@@ -3022,10 +3765,44 @@ onMounted(async () => {
     loadFactionLogos().catch(() => {})
     // 加载 3D 视角配置 (静默拉取，战场端不提供 UI 调节)
     loadViewConfig().catch(() => {})
+  // Batch C/D: 连接 comm 实时推送（叠加在 refreshState 之上，失败自动回退轮询）
+  try {
+    const myFaction = myFaction.value || 'earth'
+    connectBattleSocket({
+      battleId: route.params.id,
+      token: userStore.token,
+      faction: myFaction,
+      role: userStore.user?.role || 'Player',
+      onState: () => enqueueState('battle', refreshState),
+      onConnect: () => refreshState(), // 断线重连后强制拉取最新态（隐患三收尾）
+    })
+  } catch (e) {
+    console.warn('[socket] 连接失败，回退轮询', e?.message || e)
+  }
   // Phase 29-H: 合并到下方 loadGlossaryConfig() 统一拉取，消除重复请求
   try {
-    const { data } = await combatAPI.getBattleState(route.params.id)
-    battleState.value = normalizeBattleState(data.battle || data)
+    // 韧性重试：初次进入战场时偶发模块初始化时序问题（如 TDZ）会导致请求失败，
+    // 重试一次即可恢复，避免误走「兜底新建战局」导致画布空白。
+    let res
+    let lastErr
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await combatAPI.getBattleState(route.params.id)
+        lastErr = null
+        break
+      } catch (e2) {
+        lastErr = e2
+        if (attempt === 0) {
+          console.warn('[BattleInit] getBattleState 首次失败，重试中…', e2?.message || e2)
+          await new Promise(r => setTimeout(r, 400))
+        }
+      }
+    }
+    if (lastErr) throw lastErr
+    const { data } = res
+    const rawState = data.battle || data
+    battleState.value = normalizeBattleState(rawState)
+    if (rawState?.factionRoles) factionRoles.value = rawState.factionRoles
         // Phase 14: 出击装备 DKM 防爆清洗
         sanitizeAllUnitsEquipment()
 
@@ -3086,7 +3863,9 @@ onMounted(async () => {
           return
         }
         const { data: bd } = await combatAPI.getBattleState(newId)
-        battleState.value = normalizeBattleState(bd.battle || bd)
+        const rawState = bd.battle || bd
+        battleState.value = normalizeBattleState(rawState)
+        if (rawState?.factionRoles) factionRoles.value = rawState.factionRoles
       }
     } catch (createErr) {
       console.warn('[BattleInit] auto-create failed:', createErr.message || createErr)
@@ -3181,6 +3960,8 @@ watch(() => battleState.value?.units, () => {
 }, { deep: true })
 
 onUnmounted(() => {
+  disconnectBattleSocket()
+  if (surpriseTimer) { clearInterval(surpriseTimer); surpriseTimer = null }
   document.removeEventListener('keydown', onDiceKeyDown)
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
@@ -3440,6 +4221,19 @@ function onDiceKeyDown(e) {
   border-top: 2px solid #9c27b0;
 }
 
+/* 方案A 战术化：按角色分组后的上边框配色 */
+.faction-box.faction-attack {
+  border-top: 2px solid #13ff43;
+}
+
+.faction-box.faction-defense {
+  border-top: 2px solid #4da6ff;
+}
+
+.faction-box.faction-ambush {
+  border-top: 2px solid #ff4d4d;
+}
+
 .faction-header {
   display: flex;
   align-items: center;
@@ -3542,8 +4336,19 @@ function onDiceKeyDown(e) {
   display: block;
 }
 
-.fu-fill.hp { background: #13ff43; }
-.fu-fill.shield { background: #00b4dc; }
+.fu-fill.hp { background: #13ff43; transition: width 0.3s ease; }
+.fu-fill.shield { background: #00b4dc; transition: width 0.3s ease; }
+
+/* 死亡单位：灰度化 + 半透明 + 彻底禁用点击 */
+.faction-unit-card.dead {
+  filter: grayscale(1);
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: default;
+}
+.faction-unit-card.dead .fu-name {
+  text-decoration: line-through;
+}
 
 .fu-pos {
   font-size: 8px;
@@ -3717,6 +4522,14 @@ function onDiceKeyDown(e) {
   color: #ffd479;
   font-weight: 600;
 }
+/* 体型机动补偿 Buff 角标 */
+.mob-buff-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 6px; padding: 0 6px; min-width: 18px; height: 16px;
+  border-radius: 3px; font-size: 11px; font-weight: 700;
+  background: rgba(79, 209, 255, 0.18); color: #9fe3ff;
+  border: 1px solid rgba(79, 209, 255, 0.5);
+}
 
 /* 阵营面板特定样式 */
 .floating-faction-panel {
@@ -3727,6 +4540,86 @@ function onDiceKeyDown(e) {
 .floating-faction-panel .floating-card-body {
   padding: 8px;
   max-height: 50vh;
+}
+
+/* ===== 行动记录浮动窗（战报栏）===== */
+.floating-action-log {
+  width: 252px;
+}
+
+.floating-action-log .log-count {
+  background: rgba(255,176,0,0.12);
+  color: #ffb000;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  margin-left: 6px;
+}
+
+/* 滚动容器：direction:rtl 把垂直滚动条推到左侧；overflow:auto 让水平滚动条落在底部，
+   形如普通网页框。entry 再设 ltr 保证文字从左到右。 */
+.floating-action-log .floating-card-body {
+  direction: rtl;
+  padding: 6px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,176,0,0.5) rgba(255,255,255,0.06);
+}
+
+.floating-action-log .floating-card-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.floating-action-log .floating-card-body::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+}
+
+.floating-action-log .floating-card-body::-webkit-scrollbar-thumb {
+  background: rgba(255,176,0,0.5);
+  border-radius: 4px;
+}
+
+.floating-action-log .floating-card-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,176,0,0.75);
+}
+
+.floating-action-log .floating-card-body .log-entry,
+.floating-action-log .floating-card-body .log-empty {
+  direction: ltr;
+  text-align: left;
+}
+
+.log-entry {
+  font-size: 9px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-family: 'Fira Code', monospace;
+  line-height: 1.4;
+  display: flex;
+  gap: 6px;
+}
+
+.log-time { color: rgba(255,255,255,0.2); flex-shrink: 0; }
+.log-msg { color: rgba(241,243,252,0.5); }
+
+.log-entry.log-system { background: rgba(255,255,255,0.02); }
+.log-entry.log-move .log-msg { color: #00b4dc; }
+.log-entry.log-attack .log-msg { color: #ff4d4d; }
+.log-entry.log-action .log-msg { color: #ffb000; }
+.log-entry.log-deploy .log-msg { color: #ffb000; }
+.log-entry.log-turn .log-msg { color: rgba(255,176,0,0.7); font-weight: 700; }
+.log-entry.log-error .log-msg { color: #ff4d4d; background: rgba(255,77,77,0.1); }
+.log-entry.log-info { font-style: italic; }
+.log-entry.log-select .log-msg { color: #c1e8ff; }
+.log-entry.log-warn .log-msg { color: #ffd479; }
+
+.log-empty {
+  color: rgba(241,243,252,0.1);
+  font-size: 10px;
+  text-align: center;
+  padding: 20px 0;
 }
 
 .ap-empty {
@@ -3795,6 +4688,32 @@ function onDiceKeyDown(e) {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
+/* 状态效果（自动化技能 statusEffects） */
+.ap-status-effects {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.se-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-family: 'Fira Code', monospace;
+  background: rgba(255,255,255,0.04);
+  border-left: 3px solid rgba(120,180,255,0.6);
+}
+.se-chip.se-defense { border-left-color: rgba(255,160,120,0.7); }
+.se-chip.se-attack { border-left-color: rgba(120,220,140,0.7); }
+.se-chip.se-attack_debuff_target { border-left-color: rgba(255,210,90,0.7); }
+.se-label { color: rgba(241,243,252,0.85); font-weight: 600; }
+.se-val { color: rgba(241,243,252,0.55); }
+.se-count { color: rgba(150,200,255,0.85); }
+.se-cond { color: rgba(255,210,90,0.9); background: rgba(255,210,90,0.12); padding: 1px 5px; border-radius: 4px; }
+
 .ap-stat-row {
   display: flex;
   justify-content: space-between;
@@ -3854,6 +4773,18 @@ function onDiceKeyDown(e) {
   opacity: 0.3;
   cursor: not-allowed;
   text-decoration: line-through;
+}
+
+.ap-standby-badge {
+  margin-top: 4px;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  color: #ffd24a;
+  background: rgba(255,176,0,0.1);
+  border: 1px solid rgba(255,176,0,0.3);
+  border-radius: 4px;
 }
 
 .ap-action-icon {
@@ -4267,6 +5198,31 @@ function onDiceKeyDown(e) {
 .victory-cooldown { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.05); }
 .victory-cooldown div { color: rgba(241,243,252,0.4); line-height: 1.6; }
 
+/* 实时胜利结算遮罩 */
+.victory-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 10, 20, 0.72);
+  backdrop-filter: blur(3px);
+}
+.victory-card {
+  min-width: 280px; padding: 28px 32px; text-align: center;
+  background: linear-gradient(160deg, #14203a, #0c1426);
+  border: 1px solid rgba(0, 180, 220, 0.5);
+  border-radius: 14px;
+  box-shadow: 0 12px 48px rgba(0, 180, 220, 0.25);
+}
+.victory-title { font-size: 22px; font-weight: 800; color: #ffd24a; letter-spacing: 2px; }
+.victory-winner { margin-top: 14px; font-size: 16px; color: #f1f3fc; font-weight: 600; }
+.victory-cond { margin-top: 6px; font-size: 13px; color: #00b4dc; }
+.victory-msg { margin-top: 8px; font-size: 12px; color: rgba(241,243,252,0.55); }
+.victory-close {
+  margin-top: 20px; padding: 8px 26px; cursor: pointer;
+  background: rgba(0,180,220,0.15); border: 1px solid #00b4dc;
+  border-radius: 8px; color: #00b4dc; font-size: 13px;
+}
+.victory-close:hover { background: rgba(0,180,220,0.28); }
+
 /* ===== Concealment Indicator on Canvas ===== */
 .conceal-indicator {
   font-size: 9px;
@@ -4321,4 +5277,33 @@ function onDiceKeyDown(e) {
 .sk-tag.tag-height { background: rgba(76,175,80,0.15); color: #81c784; }
 .sk-tag.tag-range { background: rgba(255,152,0,0.15); color: #ffb74d; }
 .sk-tag.tag-acc { background: rgba(63,81,181,0.15); color: #7986cb; }
+
+/* ===== Batch D-4.3 反应奇袭 QTE + Screen Tone ===== */
+/* 模块3：全端暗绿赛博朋克滤镜 + 高对比度荧光线条网格闪烁，掩盖 10 秒挂起等待 */
+.surprise-screen-tone {
+  position: fixed; inset: 0; pointer-events: none; z-index: 900;
+  background:
+    repeating-linear-gradient(0deg, rgba(105,240,174,0.10) 0 1px, transparent 1px 38px),
+    repeating-linear-gradient(90deg, rgba(105,240,174,0.10) 0 1px, transparent 1px 38px),
+    rgba(0,70,28,0.30);
+  animation: surpriseTone 1.1s ease-in-out infinite alternate, surpriseGridFlicker 2.2s steps(2,end) infinite;
+}
+@keyframes surpriseTone { from { background-color: rgba(0,60,20,0.16);} to { background-color: rgba(0,110,36,0.40);} }
+@keyframes surpriseGridFlicker { 0% { opacity: 0.78; } 50% { opacity: 1; } 100% { opacity: 0.86; } }
+.surprise-qte-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.surprise-qte-card { background: rgba(10,20,15,0.96); border: 1px solid #2e7d32; border-radius: 12px; padding: 24px 28px; width: 360px; text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+.surprise-qte-title { font-size: 20px; font-weight: 700; color: #69f0ae; margin-bottom: 8px; }
+.surprise-qte-sub { color: #cfd8dc; font-size: 14px; margin-bottom: 12px; }
+.surprise-qte-timer { color: #ffb74d; font-size: 16px; margin-bottom: 16px; font-weight: 600; }
+.surprise-qte-actions { display: flex; gap: 10px; justify-content: center; }
+.surprise-btn { padding: 10px 16px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+.surprise-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.surprise-btn.replace { background: #2e7d32; color: #fff; }
+.surprise-btn.counter { background: #1565c0; color: #fff; }
+.surprise-btn.giveup { background: #455a64; color: #fff; }
+
+/* ===== Batch D-4.2 移动伏击红屏警报 ===== */
+.ambush-alert-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 950; pointer-events: none; background: rgba(180,0,0,0.22); animation: ambushFlash 0.6s ease-in-out infinite alternate; }
+@keyframes ambushFlash { from { background: rgba(180,0,0,0.12);} to { background: rgba(220,0,0,0.34);} }
+.ambush-alert-text { font-size: 28px; font-weight: 800; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,0.8); letter-spacing: 2px; }
 </style>

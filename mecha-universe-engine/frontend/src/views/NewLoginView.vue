@@ -165,7 +165,9 @@ async function handleLogin() {
       username: loginForm.value.username,
       password: loginForm.value.password
     })
-    localStorage.setItem('token', data.token)
+    // 关键：写入 store 的 token（会同步 localStorage），否则 userStore.isLoggedIn 恒为 false，
+    // 导致 /admin 等 requiresRole 路由守卫判定失败、点击后跳转被拦截。
+    userStore.setToken(data.token)
     if (data.user) {
       localStorage.setItem('user', JSON.stringify(data.user))
       userStore.setUser(data.user)
