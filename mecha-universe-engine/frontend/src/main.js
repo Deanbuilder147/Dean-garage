@@ -21,10 +21,14 @@ import NewBattlefieldView from './views/NewBattlefieldView.vue';
 import NewPreparationRoom from './views/NewPreparationRoom.vue';
 import AssetGenPanel from './components/AssetGenPanel.vue';
 import AdminPermissionsView from './views/AdminPermissionsView.vue';
+import BugReportView from './views/BugReportView.vue';
+import BugReportAdminView from './views/BugReportAdminView.vue';
+import AdminCenterView from './views/AdminCenterView.vue';
+import GlossaryCarouselView from './views/GlossaryCarouselView.vue';
 
 // Phase 13-A: 设备分流
 import MobileBattleView from './views/MobileBattleView.vue';
-import { detectDevice } from './utils/deviceDetector.js';
+import BattleEntryView from './views/BattleEntryView.vue';
 import { useUserStore } from './stores/user.js';
 
 // 路由配置
@@ -38,19 +42,36 @@ const routes = [
   { path: '/units/:id', component: NewUnitEditorView, meta: { requiresAuth: true } },
   { path: '/battlefields', component: NewBattlefieldSelector, meta: { requiresAuth: true } },
   { path: '/battlefield-edit/:id?', component: NewBattlefieldView, meta: { requiresAuth: true } },
-  { path: '/glossary', component: GlossaryView, meta: { requiresAuth: true } },
+  // /glossary 为词条库应急页面（暂不维护，仅作回退备份）；新词条库中枢请走 /glossary-studio
+  { path: '/glossary', component: GlossaryView, meta: { requiresAuth: true, emergency: true, emergencyNote: '词条库应急页面，暂不维护' } },
+  { path: '/glossary-studio', component: () => import('./views/GlossaryHubNew.vue'), meta: { requiresAuth: true } },
+  { path: '/glossary-carousel', component: GlossaryCarouselView, meta: { requiresAuth: true, title: '词条展示' } },
+  // 独立验证页：六段式画布净化版（WHEN/IF/ROLL/DO/AFTER/COST），确认无误后替换 /glossary-studio
+  { path: '/glossary-studio-v2', component: () => import('./views/GlossaryStudio.vue'), meta: { requiresAuth: true } },
+  // ★ 并行新增：词条锻造双皮肤（2026-09-02）
+  //   严禁替换/覆盖现有词条库页面（/glossary、/glossary-studio、/glossary-studio-v2、/glossary-carousel），
+  //   以下两条为新增路由，与原有页面共存，可独立测试编辑。
+  { path: '/glossary-forge-prism', component: () => import('./views/GlossaryForgePrismView.vue'), meta: { requiresAuth: true, title: '词条锻造·棱柱工坊' } },
+  { path: '/glossary-forge-blueprint', component: () => import('./views/GlossaryForgeBlueprintView.vue'), meta: { requiresAuth: true, title: '词条锻造·蓝图' } },
   { path: '/dice-config', component: DiceConfigView, meta: { requiresAuth: true, requiresRole: ['admin', 'dominator'] } },
   { path: '/size-config', component: () => import('./views/SizeConfigView.vue'), meta: { requiresAuth: true, requiresRole: ['admin', 'dominator'] } },
   { path: '/preparation/:roomId', component: NewPreparationRoom, meta: { requiresAuth: true } },
   { path: '/asset-gen', component: AssetGenPanel, meta: { requiresAuth: true } },
   { path: '/admin', component: AdminPermissionsView, meta: { requiresAuth: true, requiresRole: 'dominator', title: '后台管理' } },
+  { path: '/admin-center', component: AdminCenterView, meta: { requiresAuth: true, requiresRole: ['admin', 'referee', 'dominator'], title: '后台管理' } },
+  { path: '/bug-report', component: BugReportView, meta: { title: '问题反馈' } },
+  { path: '/bug-report-admin', component: BugReportAdminView, meta: { requiresAuth: true, requiresRole: 'dominator', title: 'Bug 汇总' } },
+  { path: '/unit-library', component: () => import('./views/UnitLibraryView.vue'), meta: { title: '棋子库' } },
+  { path: '/my-units', component: () => import('./views/MyUnitsView.vue'), meta: { requiresAuth: true, title: '我的投稿' } },
+  { path: '/unit-review', component: () => import('./views/UnitReviewView.vue'), meta: { requiresAuth: true, requiresRole: ['referee', 'dominator'], title: '棋子审核台' } },
+  { path: '/map-review', component: () => import('./views/MapReviewView.vue'), meta: { requiresAuth: true, requiresRole: ['admin', 'dominator'], title: '地图审核台' } },
 
   // Phase 13-A: 设备专属分流路由
   { path: '/battle-pc/:id', component: NewBattleView, meta: { requiresAuth: true, device: 'pc' } },
   { path: '/battle-mobile/:id', component: MobileBattleView, meta: { requiresAuth: true, device: 'mobile' } },
 
-  // 旧 /battle/:id 保留作为兼容入口，由导航守卫自动分流重定向
-  { path: '/battle/:id', meta: { requiresAuth: true, redirectByDevice: true } }
+  // /battle/:id 为显式视角选择入口（用户手动选 PC / 移动版），不再自动分流
+  { path: '/battle/:id', component: BattleEntryView, meta: { requiresAuth: true } }
 ];
 
 const router = createRouter({
@@ -62,20 +83,6 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token');
   const isLoggedIn = !!token;
-
-  // Phase 13-A: /battle/:id 自动分流为 /battle-pc/:id 或 /battle-mobile/:id
-  if (to.meta.redirectByDevice && to.params.id) {
-    const device = detectDevice();
-    const targetPath = device.isPC
-      ? `/battle-pc/${to.params.id}`
-      : `/battle-mobile/${to.params.id}`;
-    console.log(
-      `[DeviceRouter] 设备分流: type=${device.type}, width=${device.width}, ` +
-      `${to.path} → ${targetPath}`
-    );
-    next(targetPath);
-    return;
-  }
 
   if (to.path === '/' || to.path === '/login' || to.path === '/register') {
     next();
@@ -111,7 +118,18 @@ app.use(pinia);
 const userStore = useUserStore();
 // 启动时从 localStorage 恢复 user（token 已在 store 初始化时读取），
 // 避免刷新后 user 为 null 导致 requiresRole 守卫误判、后台入口消失。
-const bootToken = localStorage.getItem('token');
+// token 来源兼容：localStorage.token 优先，回落 localStorage.user.token（登录侧实际写入位置）
+function getBootToken() {
+  const direct = localStorage.getItem('token');
+  if (direct) return direct;
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    return u && u.token ? u.token : null;
+  } catch {
+    return null;
+  }
+}
+const bootToken = getBootToken();
 
 // 安全策略：本地 user 仅作首屏占位，服务端 /me 为权威来源。
 // 前端门禁(isHost/isGM/requiresRole)只是 UX，真实权限由后端 req.auth 强制校验，

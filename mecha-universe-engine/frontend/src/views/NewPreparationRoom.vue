@@ -85,11 +85,11 @@
                 <option value="ambush">偷袭席位</option>
               </select>
             </template>
-            <label class="spec-toggle" :class="{ disabled: !canEditThis(p) || p.userId === room?.hostId }">
+            <label class="spec-toggle" :class="{ disabled: !canEditThis(p) }">
               <input
                 type="checkbox"
                 :checked="p.isSpectator"
-                :disabled="!canEditThis(p) || p.userId === room?.hostId"
+                :disabled="!canEditThis(p)"
                 @change="onSpectatorChange(p, $event.target.checked)"
               /> 观战
             </label>
@@ -140,11 +140,10 @@
           <div v-else class="faction-roles unit-roles">
             <div v-for="role in ['attack', 'defense', 'ambush']" :key="role" class="role-col">
               <div class="role-head">{{ roleLabel(role) }}（{{ roleUnits[role].length }}）</div>
-              <label v-for="u in joinedUnits" :key="u.id" class="role-opt unit-role-opt">
-                <input type="checkbox" :checked="roleUnits[role].includes(u.id)" @change="toggleRoleUnit(role, u.id)" />
-                <span class="unit-name">{{ u.name }}</span>
-                <span class="unit-meta">{{ factionLabel(u.faction) }} · {{ u.ownerName }}</span>
-              </label>
+              <div v-for="u in joinedUnits" :key="u.id" class="role-opt unit-role-opt" :class="{ selected: roleUnits[role].includes(u.id) }" @click="toggleRoleUnit(role, u.id)">
+                <span class="unit-name">{{ u.codename || u.name }}</span>
+                <span class="unit-meta">{{ u.ownerName || ('用户' + (u.ownerId || '')) }}</span>
+              </div>
             </div>
           </div>
 
@@ -407,10 +406,10 @@ async function saveMyUnits() {
 }
 
 // GM 出击后自动同步进入战场：房间已 in_battle 且拿到 battleId 时跳转。
-// GM 端已先 router.push 并卸载本组件，故不会重复；player 端收到 room-update / 轮询 / 首屏加载均会触发。
+// 统一跳到显式选择入口 /battle/:id（由 BattleEntryView 让用户手动选 PC / 移动版，不再自动分流）。
 function syncBattleEntry() {
   if (room.value?.status === 'in_battle' && room.value?.battleId) {
-    const target = '/battle-pc/' + room.value.battleId
+    const target = '/battle/' + room.value.battleId
     if (router.currentRoute.value.path !== target) router.push(target)
   }
 }
@@ -595,7 +594,7 @@ async function startBattle() {
     try {
       await combatAPI.setVictoryConditions(battleId, victoryData)
     } catch (e) { console.warn('setVictoryConditions 失败', e) }
-    router.push(`/battle-pc/${battleId}`)
+    router.push(`/battle/${battleId}`)
   } catch (e) {
     alert('开始战斗失败：' + (e?.response?.data?.message || e.message))
   } finally {
@@ -733,7 +732,11 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer); disconnectPre
 .unit-check .unit-meta { font-size: 10px; color: rgba(193,232,255,0.45); padding-left: 18px; }
 .unit-count-badge { font-size: 9px; color: rgba(255,176,0,0.7); background: rgba(255,176,0,0.1); padding: 1px 6px; border-radius: 3px; white-space: nowrap; }
 .unit-names { flex-basis: 100%; font-size: 10px; color: rgba(255,255,255,0.55); margin-left: 0; }
-.unit-role-opt { flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 6px; border-radius: 4px; }
+.unit-role-opt { flex-direction: column; align-items: flex-start; gap: 2px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; transition: background .12s, border-color .12s; }
+.unit-role-opt:hover { background: rgba(255,176,0,0.08); }
+.unit-role-opt.selected { background: rgba(255,176,0,0.16); border-color: rgba(255,176,0,0.55); }
+.unit-role-opt.selected .unit-name { color: #ffb000; font-weight: 700; }
+.unit-role-opt.selected .unit-name::before { content: '▸ '; color: #ffb000; }
 .unit-role-opt .unit-meta { font-size: 10px; color: rgba(255,255,255,0.45); }
 
 .host-actions { display: flex; gap: 10px; margin-top: 16px; }

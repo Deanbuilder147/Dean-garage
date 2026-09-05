@@ -20,12 +20,13 @@ import { HEX_RADIUS, HEX_WIDTH, HEX_HEIGHT, isoTransformPoint } from './hexUtils
  * @param {number} cx 中心 X
  * @param {number} cy 中心 Y
  */
-export function drawHexPath(ctx, cx, cy) {
+export function drawHexPath(ctx, cx, cy, radius) {
+  const r = (radius == null ? HEX_RADIUS : radius)
   ctx.beginPath()
   for (let i = 0; i < 6; i++) {
     const angle = (Math.PI / 3) * i - Math.PI / 2
-    const hx = cx + HEX_RADIUS * Math.cos(angle)
-    const hy = cy + HEX_RADIUS * Math.sin(angle)
+    const hx = cx + r * Math.cos(angle)
+    const hy = cy + r * Math.sin(angle)
     if (i === 0) ctx.moveTo(hx, hy)
     else ctx.lineTo(hx, hy)
   }

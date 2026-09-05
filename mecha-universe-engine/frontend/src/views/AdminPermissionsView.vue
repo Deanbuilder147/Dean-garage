@@ -2,7 +2,7 @@
   <div class="admin-page" v-if="isDominator">
     <header class="page-header">
       <h1>[ 后台管理 · 主宰专属 ]</h1>
-      <p class="subtitle">管理各等级（普通用户 / 裁判 / 管理员）对各项功能的权限，并搜索账号、修改账号权限。</p>
+      <p class="subtitle">管理各等级（主宰 dominator / 管理员 admin / 裁判 referee / 普通用户 user）对各项功能的权限，并搜索账号、修改账号角色与权限。所有等级的权限矩阵由你（主宰）在此逐一检查与修改。</p>
     </header>
 
     <!-- 权限矩阵面板 -->
@@ -85,6 +85,33 @@
           </ul>
         </div>
 
+        <!-- 全部账号列表 -->
+        <div class="account-list-wrap">
+          <div class="al-head">
+            <span class="al-title">全部账号（{{ allUsers.length }}）</span>
+            <button class="btn btn-add al-refresh" @click="loadAllUsers" :disabled="loadingUsers">
+              {{ loadingUsers ? '刷新中…' : '⟳ 刷新列表' }}
+            </button>
+          </div>
+          <div v-if="loadingUsers" class="al-loading">加载账号列表…</div>
+          <ul v-else class="account-list">
+            <li
+              v-for="u in allUsers"
+              :key="u.id"
+              class="al-item"
+              :class="['role-' + u.role, { active: selectedUser && selectedUser.id === u.id }]"
+              @click="selectUser(u)"
+            >
+              <span class="al-name">{{ u.username }}</span>
+              <span class="al-email">{{ u.email }}</span>
+              <span class="al-role">{{ roleLabel(u.role) }}</span>
+              <span class="al-perm">P{{ u.permission }}</span>
+              <span class="al-credits">{{ u.credits }}分</span>
+            </li>
+            <li v-if="!allUsers.length" class="al-empty">暂无账号</li>
+          </ul>
+        </div>
+
         <div v-if="selectedUser" class="account-edit">
           <div class="ae-title">
             编辑账号：<strong>{{ selectedUser.username }}</strong>
@@ -111,6 +138,9 @@
               {{ savingUser ? '[ 保存中… ]' : '[ 保存账号权限 ]' }}
             </button>
             <button class="btn" @click="clearUser">清除</button>
+            <button class="btn btn-danger" :disabled="deletingUser" @click="deleteUser">
+              {{ deletingUser ? '[ 删除中… ]' : '[ 删除账号 ]' }}
+            </button>
             <span v-if="userMsg" class="user-msg">{{ userMsg }}</span>
           </div>
         </div>
@@ -145,6 +175,7 @@ const savingMatrix = ref(false)
 const matrixMsg = ref('')
 
 const roleLabelMap = {
+  guest: '游客',
   user: '普通用户',
   referee: '裁判',
   admin: '管理员',
@@ -222,6 +253,21 @@ const editForm = reactive({ role: 'user', permission: 1, credits: 10 })
 const savingUser = ref(false)
 const userMsg = ref('')
 
+// 全部账号列表
+const allUsers = ref([])
+const loadingUsers = ref(false)
+async function loadAllUsers() {
+  loadingUsers.value = true
+  try {
+    const res = await adminAPI.listUsers()
+    allUsers.value = res.users || []
+  } catch (e) {
+    userMsg.value = '加载账号列表失败：' + (e?.response?.data?.message || e.message)
+  } finally {
+    loadingUsers.value = false
+  }
+}
+
 function onSearchInput() {
   showResults.value = true
 }
@@ -277,8 +323,33 @@ async function saveUser() {
   }
 }
 
+// 删除账号（dominator 专属，含二次确认与关联数据清理）
+const deletingUser = ref(false)
+async function deleteUser() {
+  if (!selectedUser.value) return
+  if (!window.confirm(`确定删除账号「${selectedUser.value.username}」？该操作不可恢复，其单位 / 房间 / 反馈等关联数据也会一并清除。`)) {
+    return
+  }
+  deletingUser.value = true
+  userMsg.value = ''
+  try {
+    const res = await adminAPI.deleteUser(selectedUser.value.id)
+    userMsg.value = `✓ 已删除账号：${res.deleted?.username || selectedUser.value.username}`
+    allUsers.value = allUsers.value.filter((u) => u.id !== selectedUser.value.id)
+    selectedUser.value = null
+    searchResults.value = searchResults.value.filter((u) => u.id !== res.deleted?.id)
+  } catch (e) {
+    userMsg.value = '删除失败：' + (e?.response?.data?.message || e.message)
+  } finally {
+    deletingUser.value = false
+  }
+}
+
 onMounted(() => {
-  if (isDominator.value) loadMatrix()
+  if (isDominator.value) {
+    loadMatrix()
+    loadAllUsers()
+  }
 })
 </script>
 
@@ -434,6 +505,52 @@ onMounted(() => {
 .search-no { padding: 10px; text-align: center; color: #94a3b8; font-size: 12px; }
 
 .account-empty { color: #94a3b8; font-size: 13px; padding: 12px 0; }
+
+/* 全部账号列表 */
+.account-list-wrap {
+  margin-top: 18px;
+  border-top: 1px solid rgba(159, 142, 120, 0.18);
+  padding-top: 14px;
+}
+.al-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.al-title { color: #ffd597; font-size: 14px; letter-spacing: 1px; }
+.al-refresh { padding: 5px 12px; font-size: 12px; }
+.al-loading { color: #94a3b8; font-size: 13px; padding: 12px 0; text-align: center; }
+.account-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid rgba(159, 142, 120, 0.12);
+  border-radius: 6px;
+}
+.al-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(159, 142, 120, 0.08);
+  cursor: pointer;
+  font-size: 13px;
+}
+.al-item:last-child { border-bottom: none; }
+.al-item:hover { background: rgba(255, 176, 0, 0.1); }
+.al-item.active { background: rgba(168, 85, 247, 0.16); }
+.al-name { font-weight: 700; color: #ffb000; min-width: 120px; }
+.al-email { color: #e2d8c2; flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-role { font-size: 11px; color: #94a3b8; min-width: 56px; }
+.al-perm { font-size: 11px; color: #94a3b8; min-width: 40px; }
+.al-credits { font-size: 11px; color: #fbbf24; min-width: 48px; text-align: right; }
+.al-item.role-referee .al-role { color: #38bdf8; }
+.al-item.role-admin .al-role { color: #a855f7; }
+.al-item.role-dominator .al-name { color: #f472b6; }
+.al-empty { padding: 14px; text-align: center; color: #94a3b8; font-size: 13px; }
 .account-edit {
   margin-top: 16px;
   border: 1px solid rgba(168, 85, 247, 0.2);
@@ -485,6 +602,13 @@ onMounted(() => {
   background: rgba(56, 189, 248, 0.08);
 }
 .btn-add:hover { background: rgba(56, 189, 248, 0.18); }
+.btn-danger {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.22); }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .admin-denied {
   max-width: 600px;

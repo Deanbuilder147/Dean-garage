@@ -17,7 +17,7 @@ export default defineConfig({
     port: 8081,
     proxy: {
       '/api': { target: 'http://106.54.197.69:3006', changeOrigin: true },
-      '/socket.io': { target: 'http://106.54.197.69:3006', ws: true, changeOrigin: true }
+      '/socket.io': { target: 'http://106.54.197.69:3005', ws: true, changeOrigin: true }
     }
   }
 })

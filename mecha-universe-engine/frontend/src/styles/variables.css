@@ -1,4 +1,7 @@
 :root {
+  /* ===== 字体 ===== */
+  --font-chrontor: 'Chrontor', 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   /* ===== 核心色彩（已统一为词条库琥珀标准） ===== */
   --primary: #ffb000;
   --primary-container: #ff8a00;
@@ -130,6 +133,9 @@
   
   /* ===== Z-index ===== */
   --z-modal: 1000;
+
+  /* ===== 六边形花纹背景层强度（取自 资源 2.svg 六角形集合花纹） ===== */
+  --hexpat-opacity: 0.85;
   
   /* ===== 强调色 ===== */
   --accent-blue: #4facfe;

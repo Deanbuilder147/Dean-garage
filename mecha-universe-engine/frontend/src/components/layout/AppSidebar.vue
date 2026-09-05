@@ -49,18 +49,17 @@ function handleMouseLeave() {
 
 <style scoped>
 .app-sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 240px;
-  height: 100vh;
-  background: rgba(8,51,68,0.95);
-  border-right: 1px solid rgba(255,176,0,0.1);
-  z-index: 50;
+  /* 回归 Flex 流式：不再脱离文档流(fixed)，由外层 aside flex-shrink-0 占位 */
+  position: relative; /* 作为内部 absolute 子元素(收起按钮)的包含块，避免跑出侧边栏 */
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border-right: none;
   display: flex;
   flex-direction: column;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .app-sidebar.collapsed {
@@ -74,9 +73,9 @@ function handleMouseLeave() {
   width: 28px;
   height: 28px;
   border-radius: 4px;
-  border: 1px solid rgba(255,176,0,0.15);
-  background: rgba(255,176,0,0.06);
-  color: rgba(255,176,0,0.5);
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255,176,0,0.35);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -117,22 +116,9 @@ function handleMouseLeave() {
 }
 
 /* When collapsed, hide text but keep icons */
-.app-sidebar.collapsed :deep(.profile-info),
 .app-sidebar.collapsed :deep(.nav-link-text),
 .app-sidebar.collapsed :deep(.action-log-panel) {
   display: none;
-}
-
-.app-sidebar.collapsed :deep(.sidebar-profile) {
-  justify-content: center;
-  border-bottom: none;
-  padding-bottom: 8px;
-}
-
-.app-sidebar.collapsed :deep(.avatar) {
-  width: 32px;
-  height: 32px;
-  font-size: 12px;
 }
 
 .app-sidebar.collapsed :deep(.nav-link) {
@@ -144,13 +130,6 @@ function handleMouseLeave() {
 
 .app-sidebar.collapsed :deep(.nav-link.active) {
   border-left: none !important;
-}
-
-.app-sidebar.collapsed :deep(.profile-section),
-.app-sidebar.collapsed :deep(.sidebar-profile) {
-  border-bottom: none;
-  padding-bottom: 8px;
-  margin-bottom: 0;
 }
 
 /* Scrollbar */

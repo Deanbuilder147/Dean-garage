@@ -3,7 +3,7 @@
  * 与 skillContract.js 运行时模块字段名严格对齐，供编辑器类型提示（不进入打包）。
  */
 
-export type Category = 'melee' | 'ranged' | 'automation' | 'support';
+export type Category = 'melee' | 'ranged' | 'auto';
 export type TargetScope = 'enemy' | 'ally' | 'enemy_equipment' | 'ally_equipment';
 export type SkillShape = 'single' | 'fan' | 'linear' | 'concentric';
 export type DamageKind = 'kinetic' | 'beam' | 'explosive' | 'corrosive' | 'thermal';
@@ -70,6 +70,8 @@ export interface EditorSkill extends SkillContract {
   type: string;
   deterministic: boolean;
   trigger: string | null;
+  /** T5 强引用锚点：绑定全局词条时的 skill_key（英文）；未绑定则留空（降级为软关联副本） */
+  skill_key?: string;
   dice_branches: Array<DiceBranch & { id: string; label: string }>;
 }
 

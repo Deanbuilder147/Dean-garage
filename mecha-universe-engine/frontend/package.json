@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "check:mirror": "node scripts/check-mirror.mjs",
+    "build": "node scripts/check-mirror.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

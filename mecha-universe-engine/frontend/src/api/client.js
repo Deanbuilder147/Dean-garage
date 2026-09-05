@@ -14,9 +14,21 @@ const apiClient = axios.create({
 });
 
 // 请求拦截器：添加 Token
+// token 来源兼容两种存储：① localStorage.token（优先，标准来源）
+// ② localStorage.user.{token}（登录侧实际写入对象，拦截器兜底读取，避免「显示已登录但请求无 token」）
+function getAuthToken() {
+  const direct = localStorage.getItem('token');
+  if (direct) return direct;
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || '{}');
+    return u && u.token ? u.token : null;
+  } catch {
+    return null;
+  }
+}
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -91,6 +103,7 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   login: (data) => apiClient.post('/auth/login', data),
   register: (data) => apiClient.post('/auth/register', data),
+  me: () => apiClient.get('/auth/me'),
   getProfile: () => apiClient.get('/auth/profile'),
   updateProfile: (data) => apiClient.put('/auth/profile', data),
   changePassword: (data) => apiClient.post('/auth/change-password', data)
@@ -113,6 +126,12 @@ export const hangarAPI = {
   uploadFactionLogo: (data) => apiClient.post('/units/factions/upload', data),
   parseExcel: (data) => apiClient.post('/units/parse-excel', data),
   createFromJson: (data) => apiClient.post('/units/create-from-json', data),
+  // 棋子公开审核链路
+  getPublicUnits: () => apiClient.get('/units/public'),
+  getMySubmissions: () => apiClient.get('/units/my-submissions'),
+  getReviewQueue: () => apiClient.get('/units/review-queue'),
+  reviewUnit: (id, action, isPublic) => apiClient.post(`/units/${id}/review`, { action, isPublic }),
+  cloneUnit: (id) => apiClient.post(`/units/${id}/clone`),
 };
 
 export const mapAPI = {
@@ -125,6 +144,10 @@ export const mapAPI = {
   getMapList: () => apiClient.get('/map/list'),
   getMapFile: (filename) => apiClient.get(`/map/list?file=${encodeURIComponent(filename)}`),
   getMapById: (id) => apiClient.get(`/map/list?id=${encodeURIComponent(id)}`),
+  // 地图公开审核链路（审核者：admin / dominator）
+  getMySubmissions: () => apiClient.get('/map/my-submissions'),
+  getReviewQueue: () => apiClient.get('/map/review-queue'),
+  reviewMap: (id, action, isPublic) => apiClient.post(`/map/${id}/review`, { action, isPublic }),
 };
 
 export const combatAPI = {
@@ -195,6 +218,8 @@ export const sizeAPI = {
 export const glossaryAPI = {
   getConfig: () => apiClient.get('/combat-glossary/config'),
   saveConfig: (data) => apiClient.post('/combat-glossary/config', data),
+  // 方案 A：原子元数据清单（atomRegistry.listMeta 后端真相源），前端编辑器据此派生语义原子下拉
+  getAtomMeta: () => apiClient.get('/combat-glossary/atom-meta'),
   // Excel 导入（两步法）：步骤一预览 / 步骤二落盘
   importExcel: (formData) =>
     apiClient.post('/combat-glossary/import-excel', formData, {
@@ -267,9 +292,29 @@ export const adminAPI = {
     apiClient.put('/admin/permissions', { role, features }).then((r) => r.data),
   // 搜索账号（用户名 / 邮箱）
   searchUsers: (q) => apiClient.get('/admin/search-users', { params: { q } }).then((r) => r.data),
+  // 列出全部账号
+  listUsers: () => apiClient.get('/admin/list-users').then((r) => r.data),
   // 修改账号权限（role / permission / credits）
   updateUser: (userId, payload) =>
     apiClient.put(`/admin/users/${userId}`, payload).then((r) => r.data),
+  // dominator 地图视图设置（全局默认，跨设备共享）
+  getMapViewSettings: () => apiClient.get('/admin/map-view-settings').then((r) => r.data),
+  updateMapViewSettings: (settings) =>
+    apiClient.put('/admin/map-view-settings', settings).then((r) => r.data),
+  // 删除账号（dominator 专属）
+  deleteUser: (userId) => apiClient.delete(`/admin/users/${userId}`).then((r) => r.data),
+};
+
+// Bug 问题收集 API
+export const bugReportAPI = {
+  // 玩家提交（免登录）
+  submit: (payload) => apiClient.post('/bug-report', payload),
+  // 管理列表（dominator）
+  list: (params = {}) => apiClient.get('/bug-report/list', { params }).then((r) => r.data),
+  // 更新状态（dominator）
+  updateStatus: (id, status) => apiClient.put(`/bug-report/${id}`, { status }),
+  // 导出 CSV（dominator）
+  exportUrl: (status) => `/api/bug-report/export${status ? `?status=${encodeURIComponent(status)}` : ''}`,
 };
 
 export default apiClient;

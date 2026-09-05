@@ -1,18 +1,63 @@
 <template>
-  <AppSidebar
-    :model-value="modelValue"
-    @update:model-value="emit('update:modelValue', $event)"
-  >
-    <!-- Profile：点击头像/信息区弹出账号信息弹窗 -->
-    <div class="sidebar-profile" @click="openProfileModal" title="点击查看 / 修改账号信息">
-      <div class="avatar">
-        <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuDYyn-HCiF01XLYgK6uTbi_cB5wuYmt8wGvSbdTtGk_-bIDUvWqWvTFoahEAZhzycVcpuExWN3Rw1jX1-1PqZYrfHGb5tma9krNH7tYuYxKSqJ7ma-wJir3RmFgtHvmZ_J2Lg4QYbl3N1GTRREWIHZI4KOwkIZ8XWdW1zxDdtHVOJs8D5o3KqueWnknlSfp57HOjuj9rn0ZijamKid25utBkYLbqKFrFkQQxczNmtQx1b63kPfqZGIlEfAnUi2XSKTCDLtPh9noD-w" alt="">
+  <div class="fab-nav">
+    <!-- 展开态：六边形导航列（竖向堆叠于右下角，可自滚动） -->
+    <transition name="fab-expand">
+      <div v-show="expanded" class="fab-list">
+        <nav class="nav">
+          <!-- 六边形导航：取自首页.svg 真源（平顶六边形 + 蜂巢错位 + 琥珀中文 + 绿光选中态） -->
+          <template v-for="(item, i) in navItems" :key="item.to">
+            <a
+              v-if="item.external"
+              :href="item.to"
+              target="_blank"
+              rel="noopener"
+              class="hex-nav"
+              :class="{ 'even': i % 2 === 1, 'admin': item.admin }"
+            >
+              <svg class="hx" viewBox="0 0 80 96" preserveAspectRatio="xMidYMid meet">
+                <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-fill"/>
+                <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-stroke"/>
+              </svg>
+              <span class="hx-tit">{{ item.label }}</span>
+            </a>
+            <router-link
+              v-else
+              :to="item.to"
+              class="hex-nav"
+              :class="{ 'on': route.path === item.to || (item.match && item.match(route.path)), 'even': i % 2 === 1, 'admin': item.admin }"
+              active-class=""
+            >
+              <svg class="hx" viewBox="0 0 80 96" preserveAspectRatio="xMidYMid meet">
+                <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-fill"/>
+                <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-stroke"/>
+              </svg>
+              <span class="hx-tit">{{ item.label }}</span>
+            </router-link>
+          </template>
+
+          <template v-if="isBattlePage">
+            <div class="nav-separator"></div>
+            <span class="hex-nav on battle">
+              <svg class="hx" viewBox="0 0 80 96"><polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-fill"/><polygon points="40,4 72,22 72,58 40,76 8,58 8,22" class="hx-stroke"/></svg>
+              <span class="hx-tit">战场指挥</span>
+            </span>
+          </template>
+        </nav>
       </div>
-      <div class="profile-info">
-        <p>[ {{ user?.username || '指挥官' }} ]</p>
-        <p>军衔: {{ userRank }}</p>
+    </transition>
+
+    <!-- FAB 主按钮：默认收起，点击展开 / 收起 -->
+    <button class="fab-toggle" @click="expanded = !expanded" :title="expanded ? '收起导航' : '展开导航'">
+      <img class="hx-img" :src="hexBtnUrl" alt="菜单" />
+      <span class="hx-tit">{{ expanded ? '收起' : '菜单' }}</span>
+    </button>
+
+    <!-- ID 栏：右上角独立浮动，不随导航列 -->
+    <div class="id-fab">
+      <div class="hex-nav account-entry" @click="openProfileModal" title="账号信息 / 修改资料">
+        <img class="hx-img" :src="hexBtnUrl" alt="账号" />
+        <span class="hx-tit">账号</span>
       </div>
-      <button class="logout-btn" @click.stop="handleLogout" title="退出登录">↩ 退出</button>
     </div>
 
     <!-- 账号信息弹窗 -->
@@ -70,61 +115,14 @@
         </div>
 
         <p v-if="msg" :class="['pm-msg', msgType]">{{ msg }}</p>
+
+        <!-- 退出登录 -->
+        <button class="pm-logout" @click="handleLogout">
+          ↩ 退出登录
+        </button>
       </div>
     </div>
-
-    <nav class="nav">
-      <router-link to="/home" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="9 22 9 12 15 12 15 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span class="nav-link-text">首页</span>
-      </router-link>
-      <router-link to="/units" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24" fill="currentColor"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
-        <span class="nav-link-text">单位编辑器</span>
-      </router-link>
-      <router-link to="/battlefield-edit" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="3" width="7" height="7" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="14" width="7" height="7" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="14" width="7" height="7" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        <span class="nav-link-text">地图编辑器</span>
-      </router-link>
-      <router-link to="/battlefields" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><line x1="12" y1="22" x2="12" y2="15.5" stroke="currentColor" stroke-width="2"/><line x1="22" y1="8.5" x2="12" y2="15.5" stroke="currentColor" stroke-width="2"/><line x1="2" y1="8.5" x2="12" y2="15.5" stroke="currentColor" stroke-width="2"/></svg>
-        <span class="nav-link-text">战术部署</span>
-      </router-link>
-      <router-link to="/glossary" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <span class="nav-link-text">词条库</span>
-      </router-link>
-      <router-link to="/asset-gen" class="nav-link" active-class="active">
-        <svg class="icon-lg" viewBox="0 0 24 24"><path d="M12 2l2.4 5.4L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.6-.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        <span class="nav-link-text">AI 素材工坊</span>
-      </router-link>
-
-      <!-- 后台管理分组：仅管理员(admin)或主宰(dominator)可见 -->
-      <template v-if="['admin', 'dominator'].includes(user?.role)">
-        <div class="nav-group-label">后台管理</div>
-        <router-link to="/admin" class="nav-link nav-admin" active-class="active">
-          <svg class="icon-lg" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 8v4M10 10h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <span class="nav-link-text">权限与用户</span>
-        </router-link>
-        <router-link to="/dice-config" class="nav-link nav-admin" active-class="active">
-          <svg class="icon-lg" viewBox="0 0 24 24"><path d="M5 5h14v14H5z M9 9h.01M15 9h.01M9 15h.01M15 15h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <span class="nav-link-text">骰子工坊</span>
-        </router-link>
-        <router-link to="/size-config" class="nav-link nav-admin" active-class="active">
-          <svg class="icon-lg" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M9 4v16M15 4v16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <span class="nav-link-text">体型工坊</span>
-        </router-link>
-      </template>
-
-      <template v-if="isBattlePage">
-        <div class="nav-separator"></div>
-        <span class="nav-link active">
-          <svg class="icon-lg" viewBox="0 0 24 24"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          <span class="nav-link-text">战场指挥</span>
-        </span>
-      </template>
-      </nav>
-  </AppSidebar>
+  </div>
 </template>
 
 <script setup>
@@ -133,18 +131,15 @@ import { useRoute } from 'vue-router'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
 import { authAPI } from '../../api/client.js'
-import AppSidebar from './AppSidebar.vue'
+import hexBtnUrl from '../../assets/icons/hex-btn.svg'
 
-const props = defineProps({
-  modelValue: { type: Boolean, default: false }
-})
-const emit = defineEmits(['update:modelValue'])
-
-// 收起状态由布局层（App.vue）持有，这里透传给 AppSidebar 即可
 const route = useRoute()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
 const router = useRouter()
+
+// 浮动导航展开状态：默认展开（常驻显示）
+const expanded = ref(true)
 
 const userRank = computed(() => {
   if (!user.value) return 'AC-01'
@@ -153,11 +148,21 @@ const userRank = computed(() => {
 })
 
 const roleLabel = computed(() => {
-  const map = { dominator: '主宰', referee: '裁判(GM)', admin: '管理员', user: '玩家' }
+  const map = { dominator: '主宰', admin: '管理员', referee: '裁判', user: '玩家', guest: '游客' }
   return map[user.value?.role] || user.value?.role || '玩家'
 })
 
 const isBattlePage = computed(() => route.path.startsWith('/battle/'))
+
+// 主导航只保留 5 项；其余（AI 素材 / 问题反馈 / 棋子库 / 我的投稿）归总到后台管理页
+const navItems = [
+  { to: '/home', label: '首页' },
+  { to: '/units', label: '格纳库' },
+  { to: '/battlefield-edit', label: '地图档案' },
+  { to: '/glossary-studio', label: '词条库' },
+  { to: '/glossary2/', label: '词条展示', external: true },
+  { to: '/admin-center', label: '后台管理', admin: true, match: (p) => p.startsWith('/admin') },
+]
 
 function handleLogout() {
   // 清除所有本地鉴权数据
@@ -252,141 +257,146 @@ async function savePassword() {
 </script>
 
 <style scoped>
-.sidebar-profile {
+/* ===== 右下角浮动导航（FAB） ===== */
+.fab-nav {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 60;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255,176,0,0.08);
-  cursor: pointer;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.avatar {
-  width: 36px; height: 36px;
-  border-radius: 50%;
-  background: rgba(255,176,0,0.1);
+.fab-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-width: none;
+  transform-origin: bottom left;
+}
+.fab-list::-webkit-scrollbar { display: none; }
+
+.fab-toggle {
+  position: relative;
+  width: 76px;
+  height: 82px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  border: 1px solid rgba(255,176,0,0.2);
-  overflow: hidden;
-  position: relative;
+  cursor: pointer;
+  border: none;
+  background: transparent;
   flex-shrink: 0;
+  transition: transform 0.22s cubic-bezier(.2,.8,.2,1);
+}
+.fab-toggle .hx { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hx-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.fab-toggle .hx-fill { fill: #1e6fd0; transition: fill .22s; }
+.fab-toggle .hx-stroke {
+  fill: none; stroke: #4A9EFF; stroke-width: 2.4;
+  filter: drop-shadow(0 0 8px rgba(74,158,255,.6)); transition: .22s;
+}
+.fab-toggle .hx-tit {
+  position: relative; z-index: 1; pointer-events: none;
+  font-size: 14px; font-weight: 700; letter-spacing: 1px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg,#ffe0a0 0%,#ffb700 55%,#ff8c00 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 12px rgba(255,160,0,.4);
+}
+.fab-toggle:hover { transform: scale(1.06); }
+.fab-toggle:hover .hx-fill { fill: #2f86ec; }
+.fab-toggle:hover .hx-stroke { stroke: #7ec0ff; filter: drop-shadow(0 0 14px rgba(74,158,255,.9)); }
+
+.fab-expand-enter-active,
+.fab-expand-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.fab-expand-enter-from,
+.fab-expand-leave-to {
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
 }
 
-.avatar img {
-  width: 100%; height: 100%;
-  object-fit: cover;
-}
-
-.profile-info p {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
-.profile-info p:first-child {
-  font-weight: 700;
-  color: #ffb000;
-  font-size: 13px;
-  letter-spacing: 1px;
-}
-
-.profile-info p:last-child {
-  color: rgba(193,232,255,0.5);
-  font-size: 9px;
-  font-family: 'Fira Code', monospace;
-}
-
+/* ===== 六边形导航（取自首页.svg 真源） ===== */
 .nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.nav-link {
+.hex-nav {
+  position: relative;
+  width: 96px;
+  height: 104px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  color: rgba(241,243,252,0.35);
-  font-size: 11px;
+  justify-content: center;
   cursor: pointer;
-  transition: all 0.15s;
-  border-radius: 4px;
   text-decoration: none;
-  border: none;
-  background: transparent;
-  font-family: inherit;
-  letter-spacing: 1px;
+  transition: transform 0.22s cubic-bezier(.2,.8,.2,1);
 }
-
-.nav-link:hover {
-  color: #c1e8ff;
-  background: rgba(255,176,0,0.05);
+/* 蜂巢错位：偶数项向右偏移 */
+.hex-nav.even { margin-left: 52px; }
+.hex-nav .hx { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* 填充与框线同色系（不透明实色） */
+.hex-nav .hx-fill { fill: #1e6fd0; transition: fill .22s; }
+.hex-nav .hx-stroke {
+  fill: none; stroke: #4A9EFF; stroke-width: 2.2;
+  filter: drop-shadow(0 0 6px rgba(74,158,255,.5)); transition: .22s;
 }
-
-.nav-link.active {
-  color: #ffb000;
-  background: rgba(255,176,0,0.08);
-  border-left: 3px solid #ffb000;
+.hex-nav .hx-tit {
+  position: relative; z-index: 1; pointer-events: none;
+  font-size: 15px; font-weight: 700; letter-spacing: 1px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg,#ffe0a0 0%,#ffb700 55%,#ff8c00 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 12px rgba(255,160,0,.4);
 }
-
-.nav-link-text { white-space: nowrap; }
-.icon-lg { width: 20px; height: 20px; flex-shrink: 0; }
-
-.nav-group-label {
-  margin: 14px 0 4px;
-  padding: 0 6px;
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: rgba(168,85,247,0.6);
-  text-transform: uppercase;
-}
-
-/* 主宰专属后台入口：醒目配色 */
-.nav-admin {
-  color: rgba(168,85,247,0.85);
-  border: 1px solid rgba(168,85,247,0.25);
-  background: rgba(168,85,247,0.06);
-}
-.nav-admin:hover {
-  color: #c084fc;
-  background: rgba(168,85,247,0.14);
-}
-.nav-admin.active {
-  color: #c084fc;
-  background: rgba(168,85,247,0.18);
-  border-left: 3px solid #a855f7;
-}
+.hex-nav:hover { transform: scale(1.05); z-index: 2; }
+.hex-nav:hover .hx-fill { fill: #2f86ec; }
+.hex-nav:hover .hx-stroke { stroke: #7ec0ff; filter: drop-shadow(0 0 12px rgba(74,158,255,.8)); }
+/* 选中态：青绿高亮（不透明实色） */
+.hex-nav.on { transform: scale(1.1); z-index: 2; }
+.hex-nav.on .hx-fill { fill: #06b46c; }
+.hex-nav.on .hx-stroke { stroke: #00ff88; stroke-width: 3; filter: drop-shadow(0 0 10px rgba(0,255,136,.7)); }
+.hex-nav.on .hx-tit { text-shadow: 0 0 16px rgba(0,255,136,.5); }
+/* 后台管理：紫描边变体 */
+.hex-nav.admin .hx-stroke { stroke: #c77dff; }
+.hex-nav.admin:hover .hx-stroke { stroke: #e0b0ff; filter: drop-shadow(0 0 12px rgba(199,125,255,.8)); }
+.hex-nav.admin.on .hx-stroke { stroke: #b06bff; filter: drop-shadow(0 0 10px rgba(176,107,255,.7)); }
 
 .nav-separator {
   height: 1px;
   background: rgba(255,176,0,0.08);
-  margin: 4px 0;
+  margin: 6px 0;
+  width: 96px;
 }
 
-.logout-btn {
-  margin-top: 6px;
-  padding: 4px 10px;
-  background: rgba(255,77,77,0.08);
-  border: 1px solid rgba(255,77,77,0.2);
-  color: rgba(255,77,77,0.7);
-  font-size: 10px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.15s;
-  font-family: inherit;
-  letter-spacing: 1px;
+/* 账号入口：浮动六边形按钮（紫色变体） */
+.account-entry { margin-top: 14px; }
+.account-entry .hx-fill { fill: #5b2a7a; }
+.account-entry .hx-stroke { stroke: #c77dff; }
+.account-entry:hover .hx-stroke { stroke: #e0b0ff; filter: drop-shadow(0 0 12px rgba(199,125,255,.8)); }
+.account-entry .hx-tit {
+  background: linear-gradient(180deg,#e7c4ff 0%,#c77dff 55%,#a64dff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
-.logout-btn:hover {
-  background: rgba(255,77,77,0.2);
-  color: #ff6b6b;
-  border-color: rgba(255,77,77,0.4);
+/* ID 栏：右上角独立浮动（不随左下角导航列） */
+.id-fab {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 60;
 }
+.id-fab .account-entry { margin-top: 0; }
 
 /* 账号信息弹窗 */
 .profile-modal-overlay {
@@ -524,4 +534,25 @@ async function savePassword() {
 }
 .pm-msg.ok { color: #4ade80; }
 .pm-msg.err { color: #ff6b6b; }
+
+.pm-logout {
+  margin-top: 14px;
+  width: 100%;
+  padding: 9px 0;
+  background: rgba(255,77,77,0.08);
+  border: 1px solid rgba(255,77,77,0.25);
+  color: rgba(255,107,107,0.9);
+  font-size: 13px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 1px;
+  transition: all 0.15s;
+}
+
+.pm-logout:hover {
+  background: rgba(255,77,77,0.2);
+  color: #ff6b6b;
+  border-color: rgba(255,77,77,0.45);
+}
 </style>

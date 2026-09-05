@@ -16,7 +16,7 @@
       </div>
       <div class="reaction-actions">
         <button class="reaction-btn confirm" @click="$emit('confirm')">发起决斗</button>
-        <button class="reaction-btn cancel" @click="$emit('cancel')">普通攻击</button>
+        <button class="reaction-btn cancel" @click="$emit('cancel')">取消决斗</button>
       </div>
     </div>
   </div>

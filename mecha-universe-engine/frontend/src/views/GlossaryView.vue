@@ -11,6 +11,11 @@
       </div>
     </header>
 
+    <!-- 应急页面横幅：本页暂不维护，仅作词条库回退备份；新词条库中枢请使用 /glossary-studio -->
+    <div class="emergency-banner">
+      ⚠ 应急页面 · 暂不维护（旧版词条库中枢 v5.0 备份）。新词条库请前往「词条造词工厂 /glossary-studio」。
+    </div>
+
     <!-- 操作栏 -->
     <div class="action-bar">
       <!-- 第一排：搜索框 + 上传Excel + 重新加载 + 新建 / 向导 -->
@@ -428,6 +433,7 @@
           >
             <button class="overview-item" @click="toggleOverview(key)" :aria-expanded="expandedKey === key">
               <span class="ov-key">{{ key }}</span>
+              <span v-if="props.showEntryBadge" class="vg-entry-badge" :class="ENTRY_TYPE_CLASS[entryTypeOf(skill)]">{{ ENTRY_TYPE_LABELS[entryTypeOf(skill)] }}</span>
               <span class="ov-name">{{ skill.name || key }}</span>
               <span class="ov-cat" :class="'cat-' + (skill.category || 'melee')">{{ CATEGORY_LABELS[skill.category] || skill.category }}</span>
               <span v-if="skill.has_dice" class="ov-dice">🎲 d{{ skill.dice_type }}</span>
@@ -724,33 +730,6 @@
         </div>
       </div>
     </section>
-      <!-- 系统参数面板 (保留原有) -->
-      <section class="panel" v-if="Object.keys(editableConfig.systems || {}).length > 0">
-        <div class="panel-header">
-          <h2>[ 系统参数 ]</h2>
-          <span class="panel-badge">{{ Object.keys(editableConfig.systems || {}).length }} 项</span>
-        </div>
-        <div class="panel-body">
-          <div v-for="(sys, key) in editableConfig.systems" :key="key" class="system-card">
-            <div class="system-label">{{ sys.label || key }}</div>
-            <div class="system-params">
-              <div v-for="(val, pkey) in getSystemParams(sys)" :key="pkey" class="param-row">
-                <span class="param-key">{{ pkey }}</span>
-                <select v-if="pkey === 'visibility'" v-model="sys[pkey]" class="param-select">
-                  <option value="normal">正常</option>
-                  <option value="reduced">降低</option>
-                  <option value="blind">盲视</option>
-                </select>
-                <input v-else :type="typeof val === 'number' ? 'number' : 'text'"
-                  v-model="sys[pkey]" class="param-input"
-                  :class="{ 'param-text': typeof val === 'string' }"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- 配置元信息 -->
       <section class="panel panel-meta" v-if="editableConfig._meta">
         <div class="panel-header">
@@ -864,6 +843,22 @@
 <script setup>
 import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { glossaryAPI } from '@/api/client.js'
+
+// Phase 33: 可视化词条生成器 View2 复用入口 —— 可选开启类型 Badge
+const props = defineProps({
+  showEntryBadge: { type: Boolean, default: false }
+})
+
+// 词条类型推导：skill / special / faction（优先读显式 entryType，否则按字段特征推断）
+function entryTypeOf(skill) {
+  if (skill && skill.entryType) return skill.entryType
+  if (skill && skill.faction && (skill.faction.limited_to || skill.faction.stance)) return 'faction'
+  if (skill && (skill.special === true || skill.category === 'special')) return 'special'
+  if (skill && skill.action_type === 'passive' && skill.faction) return 'faction'
+  return 'skill'
+}
+const ENTRY_TYPE_LABELS = { skill: '[技能]', special: '[特殊]', faction: '[阵营]' }
+const ENTRY_TYPE_CLASS = { skill: 'entry-skill', special: 'entry-special', faction: 'entry-faction' }
 import {
   hydrateSkill,
   serializeSkillToContract,
@@ -1013,24 +1008,6 @@ const editableConfig = reactive({
   systems: {}
 })
 
-
-// 获取系统参数 (过滤 label/description/deterministic)
-function getSystemParams(sys) {
-  const params = {}
-  for (const [key, val] of Object.entries(sys)) {
-    if (!['label', 'description', 'deterministic', 'deterministic_probability'].includes(key)) {
-      params[key] = val
-    }
-  }
-  return params
-}
-
-// 格式化系统参数值
-function formatSystemValue(key, val) {
-  if (key === 'chance') return Math.round(val * 100) + '%'
-  if (key === 'damage_percent') return Math.round(val * 100) + '%'
-  return val
-}
 
 // 切换效果标签
 function toggleEffect(skill, effectValue) {
@@ -1496,6 +1473,14 @@ onMounted(() => {
 
 <style scoped>
 * { box-sizing: border-box; }
+/* Phase 33: 可视化生成器 View2 类型 Badge */
+.vg-entry-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; font-weight: 700; margin-right: 6px; vertical-align: middle;
+}
+.vg-entry-badge.entry-skill { background: #1f6feb; color: #fff; }
+.vg-entry-badge.entry-special { background: #b8860b; color: #fff; }
+.vg-entry-badge.entry-faction { background: #8e44ad; color: #fff; }
 .page-container {
   background: #001620; font-family: 'Fira Code', 'Courier New', monospace;
   color: #c1e8ff;
@@ -1510,6 +1495,18 @@ onMounted(() => {
 .sep { color: rgba(255,176,0,0.2); }
 .dot-live { width: 6px; height: 6px; background: #13ff43; border-radius: 50%; display: inline-block; margin-right: 4px; }
 .meta-version { color: rgba(255,176,0,0.5); }
+
+/* 应急页面横幅 */
+.emergency-banner {
+  margin: 12px 32px 0;
+  padding: 10px 14px;
+  background: rgba(214,69,60,0.12);
+  border: 1px solid rgba(214,69,60,0.5);
+  border-radius: 6px;
+  color: #ff9a8f;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
 
 .action-bar { display: flex; flex-direction: column; gap: 10px; padding: 16px 32px; border-bottom: 1px solid rgba(159,142,120,0.1); }
 .action-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -1753,6 +1750,15 @@ onMounted(() => {
   padding: 8px 0; user-select: none;
 }
 .compat-slot summary:hover { color: #ffb000; }
+/* 旧词条遗留的无用参数（兼容插槽 / 自动化增益插槽里的旧万能语法字段）字体标红 */
+.compat-slot .param-key,
+.automation-slot .param-key { color: #ff6b6b; }
+.compat-slot .param-value,
+.automation-slot .param-value { color: #ff7a7a; }
+.compat-slot .param-input,
+.compat-slot .param-select,
+.automation-slot .param-input,
+.automation-slot .param-select { color: #ff8585; border-color: rgba(255,107,107,0.35); }
 
 .param-row {
   display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; gap: 0;

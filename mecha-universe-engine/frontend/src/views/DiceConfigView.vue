@@ -1,20 +1,20 @@
 <template>
   <div class="dice-config-view">
     <header class="page-header">
-      <h1>🎲 骰子工坊</h1>
-      <p class="subtitle">统一骰子引擎参数 · 修改即时影响新开战斗的结算与弹窗</p>
+      <h1>🎲 骰子工坊 / Dice Workshop</h1>
+      <p class="subtitle">统一骰子引擎参数 · 修改即时影响新开战斗的结算与弹窗<br/>Unified dice engine parameters · changes apply to new battles immediately</p>
     </header>
 
-    <div v-if="loading" class="state-msg">加载中…</div>
+    <div v-if="loading" class="state-msg">加载中… / Loading…</div>
     <div v-else-if="loadError" class="state-msg error">{{ loadError }}</div>
 
     <div v-else class="cards-grid">
       <!-- 卡片1：投骰倍率梯度 -->
       <section class="card">
-        <h2>投骰倍率梯度</h2>
-        <p class="card-hint">骰点 1~6 对应的基础伤害倍率（普通攻击「投骰倍率」项来源）</p>
+        <h2>投骰倍率梯度 / Roll Multiplier Gradient</h2>
+        <p class="card-hint">骰点 1~6 对应的基础伤害倍率（普通攻击「投骰倍率」项来源）<br/>Base damage multiplier per pip 1~6 (source of the basic-attack "roll multiplier")</p>
         <div class="roll-mult-row" v-for="(m, i) in form.rollMult" :key="i">
-          <label>骰点 {{ i + 1 }}</label>
+          <label>骰点 / Pip {{ i + 1 }}</label>
           <input type="number" step="0.05" min="0" v-model.number="form.rollMult[i]" />
           <span class="mult-tag">×{{ (form.rollMult[i] * 100).toFixed(0) }}%</span>
         </div>
@@ -22,69 +22,91 @@
 
       <!-- 卡片2：暴击配置 -->
       <section class="card">
-        <h2>暴击配置</h2>
-        <p class="card-hint">1d6 ≥ 触发骰点时暴击，倍率在 [下限, 上限] 间随机</p>
+        <h2>暴击配置 / Critical Hit Config</h2>
+        <p class="card-hint">1d6 ≥ 触发骰点时暴击，倍率在 [下限, 上限] 间随机<br/>Crit when 1d6 ≥ trigger pip; multiplier randomized within [min, max]</p>
         <div class="field">
-          <label>触发骰点 (1~6)</label>
+          <label>触发骰点 (1~6) / Trigger Pip</label>
           <input type="number" min="1" max="6" v-model.number="form.critThreshold" />
         </div>
         <div class="field">
-          <label>倍率下限</label>
+          <label>倍率下限 / Min Multiplier</label>
           <input type="number" step="0.05" min="0" v-model.number="form.critMin" />
         </div>
         <div class="field">
-          <label>倍率上限</label>
+          <label>倍率上限 / Max Multiplier</label>
           <input type="number" step="0.05" min="0" v-model.number="form.critMax" />
         </div>
-        <p class="card-hint">当前区间：×{{ form.critMin }} ~ ×{{ form.critMax }}</p>
+        <p class="card-hint">当前区间 / Current range：×{{ form.critMin }} ~ ×{{ form.critMax }}</p>
       </section>
 
       <!-- 卡片3：骰面库 -->
       <section class="card">
-        <h2>骰面库</h2>
-        <p class="card-hint">可用骰面（影响词条下拉与手动摇骰可选面数）</p>
+        <h2>骰面库 / Dice Faces Library</h2>
+        <p class="card-hint">可用骰面（影响词条下拉与手动摇骰可选面数）<br/>Available dice faces (affects skill dropdown & manual roll options)</p>
         <div class="dice-types">
           <label class="type-chip" v-for="t in ALL_DICE_TYPES" :key="t">
             <input type="checkbox" :value="t" v-model="form.availableDiceTypes" />
-            <span>{{ t }} 面</span>
+            <span>{{ t }} 面 / sides</span>
           </label>
         </div>
       </section>
 
+      <!-- 卡片4：命中判定（2026-08-07 新增，全局真相源） -->
+      <section class="card highlight-card">
+        <h2>🎯 命中判定 / Hit Check</h2>
+        <p class="card-hint">统一「掷骰是否算命中」的全局规则，所有攻击/技能结算共用。关闭后一律视为命中（攻击必生效）。<br/>Global rule for whether a roll counts as a hit, shared by all attack/skill resolution. When off, every roll hits.</p>
+        <div class="field inline">
+          <label>启用命中判定 / Enable Hit Check</label>
+          <input type="checkbox" v-model="form.hitCheck.enabled" />
+        </div>
+        <div class="field" :class="{ disabled: !form.hitCheck.enabled }">
+          <label>成功线 / Success Line</label>
+          <input type="number" min="1" max="20" :disabled="!form.hitCheck.enabled" v-model.number="form.hitCheck.successLine" />
+          <span class="mult-tag">骰点 ≥ 此值算命中 / hit if pip ≥ this</span>
+        </div>
+        <p class="card-hint" v-if="form.hitCheck.enabled">
+          当前命中率（1d6）：掷出 {{ form.hitCheck.successLine }}~6 命中，约
+          {{ Math.round(((7 - form.hitCheck.successLine) / 6) * 100) }}%<br/>
+          Current hit rate (1d6): pips {{ form.hitCheck.successLine }}~6 hit, ≈
+          {{ Math.round(((7 - form.hitCheck.successLine) / 6) * 100) }}%
+        </p>
+        <p class="card-hint warn-inline" v-else>⚠ 已关闭：所有攻击/技能一律命中，成功线不生效。<br/>⚠ Off: every attack/skill always hits; success line disabled.</p>
+      </section>
+
       <!-- 卡片5：手动摇骰默认 -->
       <section class="card">
-        <h2>手动摇骰默认</h2>
-        <p class="card-hint">未单独配置技能时的全局默认手动摇骰参数</p>
+        <h2>手动摇骰默认 / Manual Roll Defaults</h2>
+        <p class="card-hint">未单独配置技能时的全局默认手动摇骰参数<br/>Global default manual-roll params when a skill has none configured</p>
         <div class="field">
-          <label>成功线</label>
+          <label>成功线 / Success Line</label>
           <input type="number" min="1" v-model.number="form.manualRollDefault.successLine" />
         </div>
         <div class="field">
-          <label>成功追加伤害</label>
+          <label>成功追加伤害 / Bonus Damage on Success</label>
           <input type="number" min="0" v-model.number="form.manualRollDefault.bonusDamage" />
         </div>
         <div class="field inline">
-          <label>全局启用手动摇骰</label>
+          <label>全局启用手动摇骰 / Enable Manual Roll Globally</label>
           <input type="checkbox" v-model="form.manualRollDefault.enabled" />
         </div>
       </section>
 
       <!-- 卡片6：实时掷骰模拟器 -->
       <section class="card">
-        <h2>实时掷骰模拟器</h2>
-        <p class="card-hint">本地模拟，验证当前骰面分布（不写回引擎）</p>
+        <h2>实时掷骰模拟器 / Live Roll Simulator</h2>
+        <p class="card-hint">本地模拟，验证当前骰面分布（不写回引擎）<br/>Local simulation to verify current dice distribution (not written back)</p>
         <div class="sim-controls">
           <div class="field">
-            <label>骰面</label>
+            <label>骰面 / Sides</label>
             <select v-model.number="sim.sides">
-              <option v-for="t in form.availableDiceTypes" :key="t" :value="t">{{ t }} 面</option>
+              <option v-for="t in form.availableDiceTypes" :key="t" :value="t">{{ t }} 面 / sides</option>
             </select>
           </div>
           <div class="field">
-            <label>次数</label>
+            <label>次数 / Rolls</label>
             <input type="number" min="1" max="10000" v-model.number="sim.count" />
           </div>
-          <button class="btn small" @click="runSim">掷!</button>
+          <button class="btn small" @click="runSim">掷! / Roll!</button>
         </div>
         <div class="histogram" v-if="sim.dist.length">
           <div class="bar" v-for="(c, i) in sim.dist" :key="i" :style="{ height: barHeight(c) + 'px' }">
@@ -100,12 +122,12 @@
         {{ saveMsg }}
       </span>
       <div class="footer-actions">
-        <button class="btn ghost" @click="resetDefaults">恢复默认</button>
+        <button class="btn ghost" @click="resetDefaults">恢复默认 / Reset</button>
         <button class="btn primary" :disabled="saving" @click="saveConfig">
-          {{ saving ? '保存中…' : '保存参数' }}
+          {{ saving ? '保存中… / Saving…' : '保存参数 / Save' }}
         </button>
       </div>
-      <p class="warn">注：进行中的战斗已加载进内存的单位不回滚，仅后续新结算生效。</p>
+      <p class="warn">注：进行中的战斗已加载进内存的单位不回滚，仅后续新结算生效。<br/>Note: units already loaded into memory in ongoing battles are not rolled back; only subsequent resolutions are affected.</p>
     </footer>
   </div>
 </template>
@@ -131,6 +153,7 @@ const form = reactive({
   critMax: 1.5,
   availableDiceTypes: [4, 6, 8, 10, 12, 20],
   manualRollDefault: { successLine: 4, bonusDamage: 0, enabled: false },
+  hitCheck: { enabled: true, successLine: 4 },
 });
 
 const sim = reactive({ sides: 6, count: 200, dist: [] });
@@ -147,6 +170,10 @@ function applyConfig(cfg) {
     form.manualRollDefault.successLine = cfg.manualRollDefault.successLine ?? 4;
     form.manualRollDefault.bonusDamage = cfg.manualRollDefault.bonusDamage ?? 0;
     form.manualRollDefault.enabled = !!cfg.manualRollDefault.enabled;
+  }
+  if (cfg.hitCheck) {
+    form.hitCheck.enabled = !!cfg.hitCheck.enabled;
+    form.hitCheck.successLine = typeof cfg.hitCheck.successLine === 'number' ? cfg.hitCheck.successLine : 4;
   }
   if (!form.availableDiceTypes.includes(sim.sides)) sim.sides = form.availableDiceTypes[0] || 6;
 }
@@ -176,6 +203,10 @@ function buildPayload() {
       successLine: Number(form.manualRollDefault.successLine),
       bonusDamage: Number(form.manualRollDefault.bonusDamage),
       enabled: !!form.manualRollDefault.enabled,
+    },
+    hitCheck: {
+      enabled: !!form.hitCheck.enabled,
+      successLine: Number(form.hitCheck.successLine),
     },
   };
 }
@@ -210,6 +241,7 @@ function resetDefaults() {
     critMax: 1.5,
     availableDiceTypes: [4, 6, 8, 10, 12, 20],
     manualRollDefault: { successLine: 4, bonusDamage: 0, enabled: false },
+    hitCheck: { enabled: true, successLine: 4 },
   });
   saveMsg.value = '已恢复默认值，记得点「保存参数」';
   savedOk.value = false;
@@ -268,6 +300,9 @@ onMounted(loadConfig);
   font-size: 12px;
 }
 .field.inline { gap: 8px; }
+.highlight-card { border-color: rgba(255, 176, 0, 0.4); background: rgba(255, 176, 0, 0.05); }
+.field.disabled { opacity: 0.45; }
+.warn-inline { color: rgba(255, 107, 107, 0.85) !important; }
 .sim-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
 .roll-mult-row label, .field label { width: 90px; color: rgba(241, 243, 252, 0.7); flex-shrink: 0; }
 .roll-mult-row input, .field input, .field select {

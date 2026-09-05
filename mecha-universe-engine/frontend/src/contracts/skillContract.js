@@ -17,14 +17,13 @@
  */
 
 // ───────────────────────── 枚举常量 ─────────────────────────
-export const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
+// 类型真相仅三种：melee（近战）/ ranged（远程）/ auto（自动化，含辅助/随动）。
+// automation/support 为 auto 的录入别名，special 已废除（爆炸/范围伤害由词条设定）。
+export const SKILL_CATEGORIES = ['melee', 'ranged', 'auto'];
 export const CATEGORY_LABELS = {
   melee: '近战',
   ranged: '远程',
-  automation: '自动化',
-  support: '辅助',
-  auto: '自动化(旧)',
-  special: '特殊(旧)'
+  auto: '自动化'
 };
 
 export const TARGET_SCOPES = ['enemy', 'ally', 'enemy_equipment', 'ally_equipment'];

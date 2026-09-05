@@ -1,5 +1,20 @@
 <template>
-<div class="dm-battle-layout flex flex-row w-full h-full absolute inset-0">
+<div class="dm-battle-layout flex flex-col w-full h-full absolute inset-0">
+    <!-- 战场部署过场控制条（动画画在引擎 Canvas 上） -->
+    <div v-if="deployAnimOn" style="position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9100;display:flex;gap:12px;">
+      <button @click="replayDeployAnim(hexGrid)" style="font:14px/1 system-ui;color:#cfeaff;background:rgba(16,32,52,.85);border:1px solid rgba(54,197,240,.4);border-radius:8px;padding:10px 16px;cursor:pointer;">↺ 重新部署</button>
+      <button @click="deployGhostOn = !deployGhostOn" :style="deployGhostOn ? 'font:14px/1 system-ui;color:#fff;background:rgba(16,32,52,.85);border:1px solid #36c5f0;border-radius:8px;padding:10px 16px;cursor:pointer;' : 'font:14px/1 system-ui;color:#cfeaff;background:rgba(16,32,52,.85);border:1px solid rgba(54,197,240,.4);border-radius:8px;padding:10px 16px;cursor:pointer;'">透视检查</button>
+      <button @click="finishDeployAnim(hexGrid)" style="font:14px/1 system-ui;font-weight:600;color:#fff;background:linear-gradient(135deg,#1b6fb0,#36c5f0);border:none;border-radius:8px;padding:10px 16px;cursor:pointer;">开始战斗（揭开战场）</button>
+    </div>
+    <!-- 部署过场标题提示：canvas 小图下动画偏弱，DOM 提示保证一眼可见 -->
+    <div v-if="deployAnimOn" style="position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:9100;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:6px;">
+      <div style="font:600 15px/1.4 'Space Grotesk',system-ui;color:#cfeaff;letter-spacing:2px;text-shadow:0 0 12px rgba(54,197,240,.6);">⚙ 战场部署中 · 单位就位</div>
+      <div style="width:180px;height:3px;border-radius:2px;background:rgba(54,197,240,.18);overflow:hidden;">
+        <div style="height:100%;background:linear-gradient(90deg,#1b6fb0,#36c5f0);border-radius:2px;animation:deployProgressBar 2.1s linear forwards;"></div>
+      </div>
+    </div>
+    <!-- ===== ROW: 主区(画布+右侧栏) 占满上方，底部操作栏单独一行横跨 ===== -->
+    <div class="dm-row flex-1 flex flex-row min-h-0">
     <!-- ===== CENTER: Battlefield ===== -->
     <div class="dm-main flex-1 flex flex-col h-full overflow-hidden" ref="dmMainRef">
       <!-- Header -->
@@ -26,6 +41,7 @@
         <template v-if="isDeployPhase">
           <span class="dm-badge">部署模式</span>
           <span class="toolbar-info" style="margin-left:6px;">{{ selectedDeployUnit ? '已选: ' + (selectedDeployUnit.name || 'Unit-'+selectedDeployUnit.id) + ' → 点击地图放置' : '从下方阵营框点击棋子 → 点击地图放置' }}</span>
+          <button class="toolbar-btn deploy-finish" @click="finishDeployment">结束部署</button>
         </template>
 
         <!-- Selection mode indicator -->
@@ -37,36 +53,101 @@
         <button class="toolbar-btn" @click="endTurn" :disabled="isDeployPhase" style="margin-left:auto;">结束回合</button>
       </div>
 
+      <!-- ===== CANVAS AREA (flex-1, 地图占满剩余空间) ===== -->
+      <div class="canvas-area">
       <!-- Canvas Area: HexGridCanvasEngine 无状态大一统画布内核 -->
       <!-- Phase 29-DOM_Purge: 违章建筑 .game-canvas-sandbox 已物理拆除，DOM 结构与编辑器对齐 -->
-      <HexGridCanvasEngine
-        ref="hexGrid"
-        :grid-data="gridData"
-        :draw-fn="safeDrawBattleScene"
-        :show-coords="showCoords"
-        :show-hover="true"
-        :use-terrain-cache="false"
-        :iso-config="isoConfig"
-        :extrude="extrudeEnabled"
-        :terrain-materials="terrainMaterials"
-        @cell-clicked="onHexClick"
+      <!-- ShapedCanvas: 异形战斗画布框（clip-path 裁切 + 描边 + 程序化阴影，交互严格限制异形内） -->
+      <ShapedCanvas
+        :raw-points="framePoints"
+        :view-box-w="frameViewBox.w"
+        :view-box-h="frameViewBox.h"
+        stroke-color="rgba(255,176,0,0.9)"
+        :stroke-width="2"
+        glow
+        glow-color="rgba(255,176,0,0.4)"
+        :fill="true"
+      >
+        <HexGridCanvasEngine
+          ref="hexGrid"
+          :grid-data="gridData"
+          :bg-color="bg.color"
+          :bg-image="bg.image"
+          :draw-fn="safeDrawBattleScene"
+          :show-coords="isDominator ? mapViewSettings.showCoords : showCoords"
+          :show-hover="true"
+          :use-terrain-cache="false"
+          :fit-all-on-mount="true"
+          :iso-config="isoConfig"
+          :extrude="extrudeEnabled"
+          :terrain-materials="terrainMaterials"
+          :terrain-opacity="isDominator ? mapViewSettings.terrainOpacity : 1"
+          :terrain-override-color="isDominator ? mapViewSettings.terrainOverrideColor : ''"
+          :grid-line-opacity="isDominator ? mapViewSettings.gridLineOpacity : 0.08"
+          :unit-opacity="isDominator ? mapViewSettings.unitOpacity : 1"
+          :spacing-h-scale="isDominator ? mapViewSettings.spacingHScale : 1"
+          :spacing-v-scale="isDominator ? mapViewSettings.spacingVScale : 1"
+          @cell-clicked="onHexClick"
+        />
+      </ShapedCanvas>
+
+      <!-- dominator 专用：地图视图设置面板 -->
+      <MapViewSettingsPanel
+        v-if="isDominator"
+        :settings="mapViewSettings"
+        :bg="bg"
+        @update="updateMapViewSetting"
+        @reset="resetMapViewSettings"
+        @bg-reset="resetBg"
       />
+
+      <!-- Step 3: 点击棋子行动菜单（跟随点击点，占位骨架） -->
+      <template v-if="unitActionMenu.visible">
+        <div class="uam-mask" @click="closeUnitActionMenu"></div>
+        <div
+          class="unit-action-menu"
+          :style="{ left: unitActionMenu.x + 'px', top: unitActionMenu.y + 'px' }"
+        >
+          <!-- 主菜单 -->
+          <template v-if="unitActionMenu.mode === 'main'">
+            <div class="uam-title">{{ unitActionMenu.unit?.name || 'Unit' }} · 行动</div>
+            <button
+              v-for="item in unitActionMenuItems"
+              :key="item.key"
+              class="uam-item"
+              @click="onUnitActionMenuClick(item)"
+            >{{ item.label }}</button>
+          </template>
+
+          <!-- Step 4: 战术行动 → 可用技能竖列表 -->
+          <template v-else-if="unitActionMenu.mode === 'skills'">
+            <div class="uam-title">
+              <button class="uam-back" @click="unitActionMenu.mode = 'main'">‹ 返回</button>
+              战术行动 · 技能
+            </div>
+            <div class="uam-skill-list">
+              <button
+                v-for="skill in unitActionMenuSkills"
+                :key="skill.skill_key || skill.id || skill.name"
+                class="uam-skill"
+                @click="onUnitActionMenuSkillClick(skill)"
+              >
+                <span class="uam-skill-name">{{ skill.name }}</span>
+                <span class="uam-skill-meta">
+                  射程{{ getSkillRange(skill) }}<template v-if="skill.ap !== undefined"> · AP{{ skill.ap }}</template>
+                </span>
+              </button>
+              <div v-if="unitActionMenuSkills.length === 0" class="uam-skill-empty">无可用技能</div>
+            </div>
+          </template>
+        </div>
+      </template>
+
       <!-- Legend (浮动壳, 锚定于 .dm-main position:relative) -->
       <div class="map-legend" style="position:absolute; bottom:12px; left:12px; z-index:10; pointer-events:none;">
         <span v-for="(info, key) in usedTerrains" :key="key" class="legend-item">
           <i class="legend-swatch" :style="{ background: info.color }"></i>{{ info.name }}
         </span>
-      </div>
-
-      <!-- 需求② 略缩图栏（右下角浮动层，pointer-events:auto 可交互） -->
-      <div class="floating-card battle-minimap" style="position:absolute; bottom:12px; right:12px; z-index:10;">
-        <BattleMinimap
-          :grid-data="gridData"
-          :cells="cells"
-          :units="allUnits"
-          :engine="hexGrid"
-          :size="180"
-        />
       </div>
 
       <!-- Phase8: Manual Dice Roll Overlay -->
@@ -100,376 +181,172 @@
       </div>
 
 
-      <!-- ===== Phase 13: Faction Panel (Floating Draggable Collapsible) ===== -->
-      <div
-        class="floating-card floating-faction-panel"
-        :class="{ collapsed: factionPanelCollapsed }"
-        :style="{ left: factionPanelPos.left + 'px', top: factionPanelPos.top + 'px' }"
-        ref="factionPanelRef"
-      >
-        <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'factionPanel')">
-          <span class="floating-card-title">🗂️ 阵营单位</span>
-          <button class="floating-card-collapse-btn" @click.stop="toggleFactionPanel" :title="factionPanelCollapsed ? '展开' : '折叠'">
-            {{ factionPanelCollapsed ? '▶' : '◀' }}
-          </button>
-        </div>
-        <div class="floating-card-body" v-show="!factionPanelCollapsed">
-      <!-- Faction Boxes (bottom) -->
-      <div class="faction-boxes">
-        <div v-for="faction in factionGroups" :key="faction.key" class="faction-box" :class="'faction-' + faction.key">
-          <div class="faction-header">
-            <span class="faction-dot" :style="{background: faction.color}"></span>
-            <span class="faction-name">{{ faction.label }}</span>
-            <span class="faction-count">{{ faction.units.length }}</span>
-            <button class="faction-jump-btn" @click.stop="toggleJumpInput(faction.key)" title="坐标跳转">⊕</button>
-          </div>
-          <!-- 坐标跳转输入栏（每个阵营独立） -->
-          <div class="jump-input-row" v-if="jumpVisible[faction.key]">
-            <input class="jump-input" v-model="jumpStates[faction.key].q" placeholder="Q坐标(字母)" type="text" maxlength="2" />
-            <input class="jump-input" v-model="jumpStates[faction.key].r" placeholder="R坐标(数字)" type="number" min="0" />
-            <button class="jump-go-btn" @click="doJump(faction.key)" :disabled="!jumpStates[faction.key].q || jumpStates[faction.key].r === ''">跳转</button>
-            <button class="jump-cancel-btn" @click="jumpVisible[faction.key] = false; clearJump(faction.key)">✕</button>
-          </div>
-          <!-- 阵营技能按钮 -->
-          <div class="faction-skills-row" v-if="getFactionSkills(faction.role || faction.key).length > 0">
-            <button
-              v-for="skill in getFactionSkills(faction.role || faction.key)"
-              :key="skill.key"
-              class="faction-skill-btn"
-              :class="{ disabled: isSkillDisabled(faction.key, skill.key) }"
-              :title="skillTooltip(faction.key, skill.key)"
-              @click.stop="useFactionSkill(faction.key, skill.key)"
-            >
-              <span class="skill-icon">{{ skill.icon }}</span>
-              <span class="skill-label">{{ skill.label }}</span>
-            </button>
-          </div>
-          <div class="faction-units">
-            <div
-              v-for="unit in faction.units"
-              :key="unit.id"
-              :class="['faction-unit-card', { 'selected': (isDeployPhase ? selectedDeployUnit?.id : selectedUnit?.id) === unit.id, 'dead': isUnitDead(unit) }]"
-              @click="isUnitDead(unit) ? null : (isDeployPhase ? startDeployUnit(unit) : selectUnitById(unit))"
-            >
-              <div class="fu-name">{{ unit.name || ('Unit-' + unit.id) }}</div>
-              <div class="fu-bars">
-                <div class="fu-bar" title="HP"><span class="fu-fill hp" :style="{width: ((unit.hp || 0) / (unit.maxHp || unit.hp || 100) * 100) + '%'}"></span></div>
-                <div class="fu-bar" title="护盾"><span class="fu-fill shield" :style="{width: (unit.shield || 0) + '%'}"></span></div>
-              </div>
-              <div class="fu-pos" v-if="unit.q !== undefined">
-                {{ formatCoord(unit.q, unit.r) }}
-                <span v-if="unit.has_moved" class="fu-moved">已移动</span>
-              </div>
-              <div class="fu-pos" v-else>
-                未部署
-                <button class="fu-deploy-btn" @click.stop="startDeployUnit(unit)">部署</button>
-              </div>
-            </div>
-            <div v-if="!faction.units.length" class="fu-empty">无单位</div>
-          </div>
-        </div>
-      </div>
-        </div><!-- end floating-card-body -->
-      </div><!-- end floating-card -->
+      </div><!-- end canvas-area -->
     </div><!-- end dm-main -->
 
-    <!-- ===== RIGHT: Action Panel (Floating Draggable Collapsible) ===== -->
-    <div
-      class="floating-card floating-action-panel"
-      :class="{ collapsed: actionPanelCollapsed }"
-      :style="{ left: actionPanelPos.left + 'px', top: actionPanelPos.top + 'px' }"
-      ref="actionPanelRef"
-    >
-      <!-- Phase 13: 抓取条 (Drag Bar) -->
-      <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'actionPanel')">
-        <span class="floating-card-title">⚔ 行动面板</span>
-        <button class="floating-card-collapse-btn" @click.stop="toggleActionPanel" :title="actionPanelCollapsed ? '展开' : '折叠'">
-          {{ actionPanelCollapsed ? '▶' : '◀' }}
-        </button>
+    <!-- ===== RIGHT SIDEBAR (固定宽度=行动面板 220px，Step 2 占位骨架) ===== -->
+    <!-- 与右侧浮动「行动面板」保持同宽；阵营列表 / 敌单位详情 二选一替换出现 -->
+    <div class="right-sidebar" :class="{ collapsed: rightSidebarCollapsed }">
+      <!-- 敌方检索：仅一个输入框 -->
+      <div class="rs-search">
+        <input
+          class="rs-search-input"
+          v-model="rsEnemySearch"
+          type="text"
+          placeholder="敌方检索…（占位 · Step 2）"
+        />
       </div>
-      <!-- Phase 13: 卡片内容 (折叠时隐藏) -->
-      <div class="floating-card-body" v-show="!actionPanelCollapsed">
-      <!-- Deploy Phase Panel -->
-      <template v-if="isDeployPhase">
-        <div class="ap-header">
-          <span class="ap-deploy-title">⚙ 部署阶段</span>
-        </div>
-        <div v-if="selectedDeployUnit" class="ap-stats">
-          <div class="ap-section-title">待部署单位</div>
-          <div class="ap-stat-row"><span>名称</span><span class="ap-stat-val">{{ selectedDeployUnit.name || 'Unit-'+selectedDeployUnit.id }}</span></div>
-          <div class="ap-stat-row"><span>类型</span><span class="ap-stat-val">{{ selectedDeployUnit.type || '?' }}</span></div>
-          <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedDeployUnit.attack || '?' }}</span></div>
-          <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedDeployUnit.defense || '?' }}</span></div>
-          <div class="ap-mobility-block">
-            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ deployMobilityBreakdown.total || selectedDeployUnit.mobility || '—' }}</span></div>
-            <div class="ap-stat-sub"><span>主机体移动力</span><span>{{ deployMobilityBreakdown.mainBody || 0 }}</span></div>
-            <div class="ap-stat-sub"><span>额外移动力{{ deployMobilityBreakdown.extraType ? '(' + mobTypeLabel(deployMobilityBreakdown.extraType) + ')' : '' }}</span><span>{{ deployMobilityBreakdown.extra || 0 }}</span></div>
+
+      <!-- 阵营列表 / 敌单位详情：替换出现 -->
+      <div class="rs-block rs-faction-detail">
+        <!-- 无选中：显示阵营列表（按战术角色分组，受检索框过滤） -->
+        <template v-if="!rsSelectedUnit">
+          <div class="rs-block-title">
+            <button class="rs-collapse-btn" :title="rsListCollapsed ? '展开阵营列表' : '收起阵营列表'" @click="toggleRsList">{{ rsListCollapsed ? '▸' : '▾' }}</button>
+            阵营列表<small v-if="rsEnemySearch"> · 检索中</small>
           </div>
-          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ selectedDeployUnit.range || 1 }}</span></div>
-        </div>
-        <div class="ap-mode-hint deploy-hint" v-if="selectedDeployUnit">
-          <span>🖱 点击地图格子放置单位</span>
-          <button class="ap-cancel-btn" @click="selectedDeployUnit = null">✕ 取消</button>
-        </div>
-        <div v-else class="ap-empty">
-          <div class="ap-empty-icon">📦</div>
-          <div class="ap-empty-text">从下方阵营框中<br/>点击棋子选择部署</div>
-        </div>
-        <div class="ap-stats" style="margin-top:8px;">
-          <div class="ap-stat-row"><span>待部署</span><span class="ap-stat-val" style="color:#ffb000;">{{ deployPool.length }}</span></div>
-          <div class="ap-stat-row"><span>已部署</span><span class="ap-stat-val" style="color:#ffb000;">{{ deployedCount }}</span></div>
-        </div>
-        <button class="ap-action-btn deploy-finish" @click="finishDeployment" :disabled="deploying" style="margin-top:8px; background:rgba(255,176,0,0.12); color:#ffb000; border-color:rgba(255,176,0,0.3);">
-          <span class="ap-action-label">⚔ 开始战斗</span>
-        </button>
-      </template>
-
-      <!-- Combat Phase Panel -->
-      <template v-else-if="selectedUnit">
-        <div class="ap-header">
-          <div class="ap-unit-icon" :style="{borderColor: getFactionColor(selectedUnit.faction)}">
-            {{ (selectedUnit.name || 'U')[0] }}
+          <div v-show="!rsListCollapsed" class="rs-block-body rs-list">
+            <template v-for="g in rsListGroups" :key="g.key">
+              <div class="rs-group-head">
+                <span class="rs-dot" :style="{ background: g.color }"></span>
+                {{ g.label }}（{{ g.units.length }}）
+              </div>
+              <button
+                v-for="u in g.units"
+                :key="u.id"
+                class="rs-unit"
+                :class="{ 'rs-unit-deploying': isDeployPhase && selectedDeployUnit && selectedDeployUnit.id === u.id }"
+                @click="isDeployPhase ? startDeployUnit(u) : (rsSelectedUnit = u)"
+              >
+                <span class="rs-unit-name">{{ u.name }}</span>
+                <span class="rs-unit-hpbar"><i :style="{ width: rsHpPercent(u) + '%' }"></i></span>
+                <span class="rs-unit-hp">{{ u.hp }}/{{ u.maxHp || u.hp }}</span>
+              </button>
+            </template>
+            <div v-if="rsListGroups.length === 0" class="rs-empty">无匹配单位</div>
           </div>
-          <div class="ap-unit-info">
-            <div class="ap-name">{{ selectedUnit.name || 'Unknown' }}</div>
-            <div class="ap-faction">{{ getFactionLabel(selectedUnit.faction) }}</div>
+        </template>
+        <!-- 已选中：显示该单位详情 + 返回 -->
+        <template v-else>
+          <div class="rs-block-title">
+            <button class="rs-back-btn" @click="rsSelectedUnit = null">‹ 返回</button>
+            敌单位详情
           </div>
-        </div>
-
-        <div class="ap-stats">
-          <div class="ap-stat-row"><span>HP</span><span class="ap-stat-val">{{ selectedUnit.hp ?? '?' }}/{{ selectedUnit.maxHp || selectedUnit.hp || 100 }}</span></div>
-          <div class="ap-stat-row"><span>护盾</span><span class="ap-stat-val">{{ selectedUnit.shield || 0 }}</span></div>
-          <div class="ap-stat-row"><span>攻击</span><span class="ap-stat-val">{{ selectedUnit.attack ?? '?' }}</span></div>
-          <div class="ap-stat-row"><span>防御</span><span class="ap-stat-val">{{ selectedUnit.defense ?? '?' }}</span></div>
-          <div class="ap-mobility-block">
-            <div class="ap-stat-row"><span>机动</span><span class="ap-stat-val">{{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || '—' }}<span v-if="selectedUnit.mobility_buff && selectedUnit.mobility_buff_turns > 0" class="mob-buff-chip">+{{ selectedUnit.mobility_buff }}</span></span></div>
-            <div class="ap-stat-sub"><span>主机体移动力</span><span>{{ mobilityBreakdown.mainBody || 0 }}</span></div>
-            <div class="ap-stat-sub"><span>额外移动力{{ mobilityBreakdown.extraType ? '(' + mobTypeLabel(mobilityBreakdown.extraType) + ')' : '' }}</span><span>{{ mobilityBreakdown.extra || 0 }}</span></div>
-          </div>
-          <div class="ap-stat-row"><span>射程</span><span class="ap-stat-val">{{ basicAttackRange(selectedUnit) }}</span></div>
-          <div class="ap-stat-row" v-if="selectedUnit.q !== undefined"><span>位置</span><span class="ap-stat-val">{{ formatCoord(selectedUnit.q, selectedUnit.r) }}</span></div>
-        </div>
-
-        <!-- 状态效果（自动化技能 statusEffects：剩余次数/回合 + 条件标签） -->
-        <div class="ap-status-effects" v-if="selectedUnit.statusEffects && selectedUnit.statusEffects.length">
-          <div class="ap-panel-subtitle">状态效果</div>
-          <div
-            v-for="se in selectedUnit.statusEffects"
-            :key="se.id"
-            class="se-chip"
-            :class="['se-' + (se.applies_on || 'attack')]"
-          >
-            <span class="se-label">{{ se.label || se.source }}</span>
-            <span class="se-val" v-if="se.value">{{ se.applies_on === 'defense' ? ('减伤' + se.value) : (se.applies_on === 'attack' ? ('增伤' + se.value) : (se.applies_on === 'attack_debuff_target' ? ('削敌机动' + se.value) : '')) }}</span>
-            <span class="se-count" :title="(se.consumption && se.consumption.mode === 'counter') ? '剩余生效次数' : '剩余生效回合'">
-              {{ se.consumption && se.consumption.mode === 'counter' ? ('剩' + se.consumption.remaining + '次') : ('剩' + (se.consumption ? se.consumption.remaining : '?') + '回合') }}
-            </span>
-            <span class="se-cond" v-if="se.trigger && se.trigger.type === 'conditional'" :title="conditionLabel(se.trigger)">{{ conditionLabel(se.trigger) }}</span>
-          </div>
-        </div>
-
-        <!-- 被动/防御技能 -->
-        <div class="ap-passive" v-if="passiveSkills.length">
-          <div class="ap-section-title">被动技能</div>
-          <div class="ap-passive-item" v-for="ps in passiveSkills" :key="ps.id">
-            <span class="ps-name">{{ ps.name }}</span>
-            <span class="ps-desc" v-if="ps.description">{{ getPassiveSkillDesc(ps) }}</span>
-          </div>
-        </div>
-
-        <div class="ap-actions" v-if="!isVisitor">
-          <div class="ap-section-title">可用行动</div>
-
-          <button
-            class="ap-action-btn"
-            :class="{ active: actionMode === 'move' }"
-            @click="startAction('move')"
-            :disabled="selectedUnit.has_moved || selectedUnit.standby"
-          >
-            <span class="ap-action-icon">➤</span>
-            <span class="ap-action-label">移动</span>
-            <span class="ap-action-hint">机动 {{ mobilityBreakdown.total || selectedUnit.mobility || selectedUnit['机动'] || 3 }}</span>
-          </button>
-
-          <button
-            class="ap-action-btn"
-            :class="{ active: actionMode === 'tactical' }"
-            @click="startAction('tactical')"
-            :disabled="selectedUnit.has_acted || selectedUnit.standby"
-          >
-            <span class="ap-action-icon">⚔</span>
-            <span class="ap-action-label">战术行动</span>
-            <span class="ap-action-hint">{{ activeSkillCount + 1 }}种方式</span>
-          </button>
-
-          <button class="ap-action-btn" @click="startAction('defend')" :disabled="selectedUnit.has_defended || selectedUnit.standby">
-            <span class="ap-action-icon">🛡</span>
-            <span class="ap-action-label">防御</span>
-            <span class="ap-action-hint">+护盾</span>
-          </button>
-
-          <button class="ap-action-btn" @click="startAction('wait')" :disabled="selectedUnit.standby">
-            <span class="ap-action-icon">⏸</span>
-            <span class="ap-action-label">待机</span>
-          </button>
-
-          <div v-if="selectedUnit.standby" class="ap-standby-badge">该单位已完成回合（待机）</div>
-        </div>
-
-        <!-- Tactical action: skill/weapon selection -->
-        <div class="ap-tactical" v-if="actionMode === 'tactical'">
-          <div class="ap-section-title">选择战术行动</div>
-
-          <!-- 普通攻击 -->
-          <button
-            class="ap-skill-btn ap-basic-attack"
-            :class="{ active: selectedAttackSkill === null }"
-            @click="selectTacticalSkill(null)"
-          >
-            <div class="sk-top">
-              <span class="sk-name">⚔ 普通攻击</span>
+          <div class="rs-block-body rs-detail">
+            <div class="rs-d-title">{{ rsSelectedUnit.name }}</div>
+            <div class="rs-d-row"><span>阵营</span><b>{{ getFactionLabel(rsSelectedUnit.faction) }}</b></div>
+            <div class="rs-d-row"><span>角色</span><b>{{ getRoleLabel(rsSelectedUnit.role || rsSelectedUnit.faction) }}</b></div>
+            <div class="rs-d-row"><span>位置</span><b>({{ rsSelectedUnit.q }}, {{ rsSelectedUnit.r }})</b></div>
+            <div class="rs-d-row rs-d-hp">
+              <span>HP</span>
+              <b>{{ rsSelectedUnit.hp }}/{{ rsSelectedUnit.maxHp || rsSelectedUnit.hp }}</b>
+              <span class="rs-hpbar"><i :style="{ width: rsHpPercent(rsSelectedUnit) + '%' }"></i></span>
             </div>
-            <div class="sk-meta">
-              <span class="sk-attrinfo">{{ weaponAttrLabel }} 射程{{ basicAttackRange(selectedUnit) }}</span>
-              <span class="skill-type-badge badge-basic">基础</span>
-              <span class="sk-durability-label" v-if="selectedUnit.right_hand_durability !== undefined">右:{{ selectedUnit.right_hand_durability }} 左:{{ selectedUnit.left_hand_durability !== undefined ? selectedUnit.left_hand_durability : '?' }}</span>
+            <div class="rs-d-row" v-if="rsSelectedUnit.shield"><span>护盾</span><b>{{ rsSelectedUnit.shield }}</b></div>
+            <div class="rs-d-sub">技能（{{ (rsSelectedUnit.skills || []).length }}）</div>
+            <div class="rs-d-skill" v-for="s in (rsSelectedUnit.skills || [])" :key="s.skill_key || s.id || s.name">
+              <span>{{ s.name }}</span><span class="rs-d-skill-meta">射程{{ getSkillRange(s) }}</span>
             </div>
-          </button>
+          </div>
+        </template>
+      </div>
+    </div><!-- end right-sidebar -->
 
-          <!-- 分组技能列表 -->
-          <template v-for="group in skillGroups" :key="group.slot">
-            <div class="ap-skill-group-label">
-              <span>{{ group.label }}</span>
-              <span class="sk-durability" v-if="group.durability !== undefined">
-                耐久: <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b>
-              </span>
+    </div><!-- end dm-row -->
+
+    <!-- ===== LOWER ZONE (下半区，固定 230px，40% 透明) ===== -->
+    <div class="lower-zone" :class="{ collapsed: lowerZoneCollapsed }">
+      <!-- ① 单位卡片（名 + 机体左下视图 + 属性值） -->
+      <div class="lz-block lz-unit">
+        <template v-if="selectedUnit">
+          <div class="uc-sprite">
+            <img v-if="unitLeftBottomView" :src="unitLeftBottomView" alt="机体左下视图" @error="onUnitSpriteError" />
+            <div v-else class="uc-sprite-ph">无视图</div>
+            <div class="uc-name-overlay">{{ selectedUnit.name || ('Unit-' + selectedUnit.id) }}</div>
+            <div class="attr-overlay">
+              <div class="attr-row"><span>HP</span><b>{{ selectedUnit.hp ?? '?' }}/{{ selectedUnit.maxHp || selectedUnit.hp || 100 }}</b></div>
+              <div class="attr-row"><span>射击</span><b>{{ selectedUnit.main_射击 ?? '—' }}</b></div>
+              <div class="attr-row"><span>格斗</span><b>{{ selectedUnit.main_格斗 ?? '—' }}</b></div>
+              <div class="attr-row"><span>机动</span><b>{{ mobilityBreakdown.total || selectedUnit.main_机动 || selectedUnit.mobility || '—' }}</b></div>
             </div>
-            <button
-              v-for="skill in group.skills"
+          </div>
+        </template>
+        <div v-else class="lz-empty">未选中单位</div>
+      </div>
+
+      <!-- ② 属性 & 装备（行动按钮 + 技能栏[滚动]） -->
+      <div class="lz-block lz-attr">
+        <div class="lz-title">属性 & 装备</div>
+        <template v-if="selectedUnit">
+          <div class="attr-skills">
+            <div
+              v-for="skill in activeSkillList"
               :key="skill.id"
-              class="ap-skill-btn"
-              :title="getActiveSkillTooltip(skill)"
-              :class="{
-                active: selectedAttackSkill?.id === skill.id,
-                'skill-disabled': group.durability !== undefined && group.durability <= 0
-              }"
+              class="skill-detail-card"
+              :class="{active: selectedAttackSkill?.id === skill.id}"
               @click="onTacticalSkillClick(skill)"
-              :disabled="group.durability !== undefined && group.durability <= 0"
             >
-              <div class="sk-top">
-                <span class="sk-name">{{ skill.name }}</span>
+              <div class="sdc-line">
+                <span class="sdc-name">{{ skill.name }}</span>
+                <span class="sdc-type" :title="'类型'">{{ skillTypeLabel(skill) }}</span>
+                <span class="sdc-sep">·</span>
+                <span class="sdc-key">属性</span>
+                <span class="sdc-val">{{ skillAttrLabel(skill) }}</span>
+                <span class="sdc-sep">·</span>
+                <span class="sdc-key">词条</span>
+                <span class="sdc-val sdc-entry">{{ skill.description || skillEntryText(skill) || '—' }}</span>
               </div>
-              <div class="sk-meta">
-                <span class="sk-attrinfo">{{ skill.attributeLabel || '实体' }} 射程{{ skill.type === 'scout' ? '射击值×1' : (skill.rangeLabel || (skill.range_min !== undefined ? skill.range_min + (skill.range_max ? '-' + skill.range_max : '') : '') || (skill.cast_range ?? skill.range) || '1') }}<template v-if="(skill.aoe_radius ?? skill.aoe_range)"> 辐射范围{{ skill.aoe_radius ?? skill.aoe_range }}</template></span>
-                <span class="skill-type-badge" :class="'badge-' + (skill.category || 'special')">{{ skill.typeLabel || skill.type || skill.category }}</span>
-                <span class="sk-durability-label" v-if="group.durability !== undefined">耐久 <b :style="{color: group.durability <= 0 ? '#ff4d4d' : '#ffb000'}">{{ group.durability }}</b></span>
+            </div>
+            <!-- ★ 地图炮方向选择罗盘：六向箭头环绕布局，选中含 map_cannon.directions 的技能时显示，用户选 1 个方向（不选=按主目标自动量化） -->
+            <div v-if="isMapCannon" class="aoe-dir-panel">
+              <div class="aoe-dir-title">地图炮方向（点击箭头选择，◎=按目标自动朝向）</div>
+              <div class="aoe-dir-compass">
+                <button class="aoe-dir-btn dir-6" :class="{active: selectedAoeDir===6}" @click="selectedAoeDir=6" title="右上">↗</button>
+                <button class="aoe-dir-btn dir-1" :class="{active: selectedAoeDir===1}" @click="selectedAoeDir=1" title="右">→</button>
+                <button class="aoe-dir-btn dir-2" :class="{active: selectedAoeDir===2}" @click="selectedAoeDir=2" title="右下">↘</button>
+                <button class="aoe-dir-btn dir-3" :class="{active: selectedAoeDir===3}" @click="selectedAoeDir=3" title="左下">↙</button>
+                <button class="aoe-dir-btn dir-4" :class="{active: selectedAoeDir===4}" @click="selectedAoeDir=4" title="左">←</button>
+                <button class="aoe-dir-btn dir-5" :class="{active: selectedAoeDir===5}" @click="selectedAoeDir=5" title="左上">↖</button>
+                <button class="aoe-dir-btn aoe-dir-auto" :class="{active: selectedAoeDir===null}" @click="selectedAoeDir=null" title="自动">◎</button>
               </div>
-              <div class="sk-desc" v-if="skill.description">{{ skill.description }}</div>
-              <div class="sk-tags">
-                <span v-if="skill.guaranteed_hit" class="sk-tag tag-hit">必中</span>
-                <span v-if="skill.crit_boost" class="sk-tag tag-crit">暴击</span>
-                <span v-if="skill.pierce" class="sk-tag tag-pierce">穿透</span>
-                <span v-if="skill.lifesteal" class="sk-tag tag-leech">吸血</span>
-                <!-- Phase 11: 万能语法标签 -->
-                <span v-if="getSkillPhase10Tags(skill).length > 0" class="sk-tags-group">
-                  <span v-for="tag in getSkillPhase10Tags(skill)" :key="tag.key" class="sk-tag" :class="tag.cssClass">{{ tag.label }}</span>
-                </span>
-              </div>
-            </button>
-          </template>
-
-          <!-- RoyRoy 部署按钮 -->
-          <div class="ap-skill-group-label" v-if="selectedUnit.royroy && !selectedUnit.royroy_deployed">RoyRoy</div>
-          <button
-            v-if="selectedUnit.royroy && !selectedUnit.royroy_deployed"
-            class="ap-skill-btn ap-royroy-deploy"
-            :class="{ active: royroyDeployMode }"
-            @click="startRoyroyDeploy"
-          >
-            <div class="sk-top">
-              <span class="sk-name">🤖 部署 RoyRoy</span>
-              <span class="skill-type-badge badge-deploy">部署</span>
             </div>
-            <div class="sk-meta">
-              <span class="sk-attrinfo">ATK {{ selectedUnit.royroy.attack || '?' }} | DEF {{ selectedUnit.royroy.defense || '?' }} | HP {{ selectedUnit.royroy.hp || '?' }}</span>
-            </div>
-          </button>
-          <!-- RoyRoy 回收按钮（规则5：仅已部署且未损毁时可回收，不消耗行动点） -->
-          <button
-            v-if="selectedUnit.royroy && selectedUnit.royroy_deployed && selectedUnit.royroy_status !== 'destroyed'"
-            class="ap-skill-btn ap-royroy-retrieve"
-            @click="retrieveRoyroy"
-          >
-            <div class="sk-top">
-              <span class="sk-name">🤖 回收 RoyRoy</span>
-              <span class="skill-type-badge badge-retrieve">回收</span>
-            </div>
-            <div class="sk-meta">
-              <span class="sk-attrinfo">HP {{ selectedUnit.royroy.hp }}/{{ selectedUnit.royroy.maxHp }} | 冷却 {{ selectedUnit.royroy.cooldownRound || 0 }} 轮</span>
-            </div>
-          </button>
-        </div>
-
-        <!-- Action mode hint -->
-        <!-- 胜利条件显示 -->
-        <div class="ap-victory-info" v-if="victoryInfo">
-          <div class="ap-section-title">胜利条件</div>
-          <div class="victory-type">{{ victoryLabel(victoryInfo) }}</div>
-          <div class="victory-detail" v-if="victoryInfo.hold_round">坚守至第 {{ victoryInfo.hold_round }} 轮</div>
-          <div class="victory-detail">当前轮次: {{ victoryInfo.round_number || 1 }}</div>
-          <div class="victory-cooldown" v-if="factionCooldowns">
-            <div v-if="factionCooldowns.fireCoverageUsed">🔥 火力覆盖: 已使用</div>
-            <div v-else>🔥 火力覆盖: 可用</div>
-            <div v-if="factionCooldowns.fogSystemUsed && factionCooldowns.fogCooldownRemaining > 0">🌫 迷雾: 冷却 {{ factionCooldowns.fogCooldownRemaining }} 轮</div>
-            <div v-else-if="factionCooldowns.fogSystemUsed">🌫 迷雾: 已使用</div>
-            <div v-else>🌫 迷雾: 可用</div>
           </div>
-        </div>
-
-        <div class="ap-mode-hint" v-if="actionMode">
-          <span v-if="actionMode === 'move'">点击目标六角格移动</span>
-          <span v-else-if="actionMode === 'tactical' && royroyDeployMode">
-            🖱 点击相邻空格部署 RoyRoy
-          </span>
-          <span v-else-if="actionMode === 'tactical' && selectedAttackSkill">
-            <span class="skill-hint-name">[{{ selectedAttackSkill.name || '普通攻击' }}]</span> → 点击目标单位
-          </span>
-          <span v-else-if="actionMode === 'tactical'">请先选择攻击方式</span>
-          <span v-else>执行 {{ actionMode }} 操作</span>
-          <button class="ap-cancel-btn" @click="cancelAction">✕</button>
-        </div>
-      </template>
-
-      <div v-else class="ap-empty">
-        <div class="ap-empty-icon">◈</div>
-        <div class="ap-empty-text">点击战场上的棋子<br/>查看可用行动</div>
+        </template>
+        <div v-else class="lz-empty">点击棋子查看属性</div>
       </div>
-      </div><!-- end floating-card-body -->
-    </div><!-- end floating-card -->
 
-    <!-- ===== Phase: 行动记录面板 (Floating Draggable Collapsible) ===== -->
-    <div
-      class="floating-card floating-action-log"
-      :class="{ collapsed: actionLogCollapsed }"
-      :style="{ left: actionLogPos.left + 'px', top: actionLogPos.top + 'px' }"
-      ref="actionLogRef"
-    >
-      <div class="floating-card-dragbar" @mousedown.stop="startDrag($event, 'actionLog')">
-        <span class="floating-card-title">📋 行动记录</span>
-        <span class="log-count">{{ sidebarActionLog.length }}</span>
-        <button class="floating-card-collapse-btn" @click.stop="toggleActionLog" :title="actionLogCollapsed ? '展开' : '折叠'">
-          {{ actionLogCollapsed ? '▶' : '◀' }}
-        </button>
+      <!-- ② 地图卡片（无外框） -->
+      <div class="lz-map">
+        <BattleMinimap
+          :grid-data="gridData"
+          :cells="cells"
+          :units="allUnits"
+          :engine="hexGrid"
+          :size="200"
+        />
+        <button class="map-deploy-btn" v-if="isDeployPhase && deployPool.length" @click="openDeployPool">🚀 擢银行动 ({{ deployPool.length }})</button>
       </div>
-      <div class="floating-card-body action-log-body" v-show="!actionLogCollapsed" :style="{ maxHeight: actionLogHeight + 'px' }" ref="logContainer">
-        <div v-for="(entry, i) in sidebarActionLog" :key="i" :class="['log-entry', 'log-' + entry.type]">
-          <span class="log-time">{{ entry.time }}</span>
-          <span class="log-msg">{{ entry.message }}</span>
+
+      <!-- ③ 行动记录（与右侧阵营列表等宽 = 220px） -->
+      <div class="lz-block lz-log">
+        <div class="lz-title">行动记录</div>
+        <div class="lz-log-body">
+          <div v-for="(entry, i) in sidebarActionLog" :key="i" :class="['log-entry', 'log-' + entry.type]">
+            <span class="log-time">{{ entry.time }}</span>
+            <span class="log-msg">{{ entry.message }}</span>
+          </div>
+          <div v-if="!sidebarActionLog.length" class="lz-empty">等待行动...</div>
         </div>
-        <div v-if="!sidebarActionLog.length" class="log-empty">等待行动...</div>
       </div>
-    </div><!-- end floating-card -->
+    </div>
+
   </div>
+
+  <!-- 右侧栏折叠把手：钉在视口右边缘，始终可见（侧栏 overflow:hidden 不会裁到它） -->
+  <button class="rs-toggle" :class="{ collapsed: rightSidebarCollapsed }" :title="rightSidebarCollapsed ? '展开阵营列表' : '收起阵营列表'" @click="toggleRightSidebar">{{ rightSidebarCollapsed ? '◂' : '▸' }}</button>
+
+  <!-- 底部操作栏折叠把手：钉在视口底部边缘，始终可见 -->
+  <button class="lz-toggle" :class="{ collapsed: lowerZoneCollapsed }" :title="lowerZoneCollapsed ? '展开操作栏' : '收起操作栏'" @click="toggleLowerZone">{{ lowerZoneCollapsed ? '▴' : '▾' }}</button>
 
   <!-- 实时胜利结算遮罩（后端 evaluateVictory 触发） -->
   <div v-if="battleResult && battleResult.victory" class="victory-overlay" @click.self="closeBattleResult">
@@ -523,8 +400,14 @@
 // ================================================================
 import { ref, inject, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { drawHexPath, drawGroundItemToken } from '../utils/hexDraw.js'
+import { useBattleDeploy } from '@/battle/useBattleDeploy.js'
 import { HEX_WIDTH, HEX_HEIGHT, HEX_APOTHEM, HEX_RADIUS, DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR, getHexNeighbors, hexDistance, getHexesInRange, TERRAIN_COLORS, UNIVERSAL_TERRAIN_MAP, convertMapFormat, ISO_DEFAULTS, pointyTopCenter, pointyTopToHex, computeDirection, syncTerrainFromGlossary } from '../utils/hexUtils.js'
 import HexGridCanvasEngine from '../components/HexGridCanvasEngine.vue'
+import ShapedCanvas from '../components/ShapedCanvas.vue'
+import { HEX_FRAME_VIEWBOX, buildFramePoints, DEFAULT_FRAME_LENGTHS } from '../utils/shapeFrames.js'
+import { useBattleCanvasBg } from '../composables/useBattleCanvasBg.js'
+
+const { bg, resetBg } = useBattleCanvasBg()
 import { applySizeMobility, sizeRenderScale, normSize, SIZE_LABELS, sizeSevenBox } from '../utils/unitSize.js'
 import BattleMinimap from '../components/BattleMinimap.vue'
 import { unitSpriteResolver } from '../resolvers/unitSpriteResolver.js'
@@ -532,6 +415,7 @@ import { useUserStore } from '../stores/user'
 import { connectBattleSocket, disconnectBattleSocket } from '../utils/battleSocket.js'
 import { useApStore } from '../stores/apStore.js'
 import { useMoveStore } from '../stores/moveStore.js'
+import MapViewSettingsPanel from '../components/MapViewSettingsPanel.vue'
 import { useLogStore } from '../stores/logStore.js'
 import { enqueueState, freezeQueue, unfreezeQueue } from '../utils/animationQueue.js'
 import { useRoute, useRouter } from 'vue-router'
@@ -544,7 +428,7 @@ import CoverWindow from '../components/reactions/CoverWindow.vue'
 import ReactivateBanner from '../components/reactions/ReactivateBanner.vue'
 import AirdropInfo from '../components/reactions/AirdropInfo.vue'
 import AttackReportModal from '../components/AttackReportModal.vue'
-import { combatAPI, hangarAPI, glossaryAPI, mapAPI } from '@/api/client'
+import { combatAPI, hangarAPI, glossaryAPI, mapAPI, adminAPI } from '@/api/client'
 import { rollDice as rollDiceUtil, parseDiceType as parseDiceTypeUtil } from '../utils/diceUtil.js'
 
 // ================================================================
@@ -738,6 +622,14 @@ function sanitizeAllUnitsEquipment() {
  * 防止 drawBattleScene 静默黑屏
  */
 function safeDrawBattleScene(ctx, opts) {
+  // 部署过场：在引擎 Canvas 上绘制组装中的 iso 六边形，覆盖单位层
+  if (deployAnimOn.value) {
+    drawDeployAnim(ctx)
+    return
+  }
+  ctx.save()
+  // dominator 视图设置：单位层透明度（地形透明度由引擎 props 控制）
+  ctx.globalAlpha = (opts && typeof opts.unitOpacity === 'number') ? opts.unitOpacity : 1
   try {
     drawBattleScene(ctx, opts)
   } catch (e) {
@@ -756,12 +648,69 @@ function safeDrawBattleScene(ctx, opts) {
       ctx.restore()
     } catch(_) {}
     throw e  // 重新抛出以保持错误传播
+  } finally {
+    ctx.restore()
   }
 }
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
+// dominator 专用：地图视图设置面板可见性
+const isDominator = computed(() => userStore.user?.role === 'dominator')
+// dominator 地图视图设置：固定 key 持久化（不区分账号/战场，作为全局默认）
+const MAP_VIEW_STORAGE_KEY = 'mecha.mapViewSettings.default'
+const DEFAULT_MAP_VIEW = {
+  terrainOpacity: 0.3,       // 地形格子透明度（默认 30% 露出背景）
+  terrainOverrideColor: '',  // 地形颜色覆盖（空 = 原色）
+  gridLineOpacity: 0.08,     // 网格线透明度
+  unitOpacity: 1,            // 单位层透明度
+  showCoords: true,          // 坐标标签
+  spacingHScale: 1,          // 横向格子间距倍率
+  spacingVScale: 1,          // 纵向格子间距倍率
+  // 地形外框 4 条轴边长度（dominator 实时调，单位=viewBox 像素；取默认=原美术形状跨度）
+  frameTopLen: DEFAULT_FRAME_LENGTHS.top,        // 顶边水平长度
+  frameBottomLen: DEFAULT_FRAME_LENGTHS.bottom,  // 底边水平长度
+  frameLeftLen: DEFAULT_FRAME_LENGTHS.left,      // 左边垂直长度
+  frameRightLen: DEFAULT_FRAME_LENGTHS.right,    // 右边垂直长度
+  // 自定义外框 SVG（上传后覆盖上面 4 条边，直接作为 canvas 外框）
+  frameSvgPoints: '',  // "x y x y ..." 轮廓点（空格分隔坐标对）
+  frameSvgW: 0,        // 该 SVG 的 viewBox 宽
+  frameSvgH: 0,        // 该 SVG 的 viewBox 高
+}
+function loadMapViewSettings() {
+  try {
+    const raw = localStorage.getItem(MAP_VIEW_STORAGE_KEY)
+    if (raw) return { ...DEFAULT_MAP_VIEW, ...JSON.parse(raw) }
+  } catch (_) { /* ignore */ }
+  return { ...DEFAULT_MAP_VIEW }
+}
+const mapViewSettings = reactive(loadMapViewSettings())
+// 进入时从服务端拉取全局默认（跨设备共享），成功则覆盖本地兜底值
+async function syncMapViewSettingsFromServer() {
+  if (!isDominator.value) return
+  try {
+    const res = await adminAPI.getMapViewSettings()
+    if (res && res.settings) {
+      Object.assign(mapViewSettings, DEFAULT_MAP_VIEW, res.settings)
+      localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(mapViewSettings))
+    }
+  } catch (_) { /* 离线或接口异常时沿用本地兜底 */ }
+}
+// 保存：写本地兜底 +（dominator）PUT 服务端
+async function saveMapViewSettings() {
+  try { localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(mapViewSettings)) } catch (_) { /* ignore */ }
+  if (!isDominator.value) return
+  try { await adminAPI.updateMapViewSettings({ ...mapViewSettings }) } catch (_) { /* ignore */ }
+}
+function updateMapViewSetting({ key, value }) {
+  mapViewSettings[key] = value
+  saveMapViewSettings()
+}
+function resetMapViewSettings() {
+  Object.assign(mapViewSettings, DEFAULT_MAP_VIEW)
+  saveMapViewSettings()
+}
 
 // ===== Batch C/D: 实时推送消费（socket 叠加在 refreshState 之上）=====
 const surpriseUI = ref(null)      // 反应奇袭 QTE 数据
@@ -1066,56 +1015,8 @@ function setUnitVisual(unitId, direction, actionState) {
   })
 }
 
-// === Phase 30-Cover: 战场状态规范化（前端从 position 取坐标；补全渲染所需字段） ===
-function safeParseJson(v) { try { return JSON.parse(v) } catch { return v } }
-
-// === 唯一的「机动 → 移动力」权威解析（系统性修复 · 2026-07-24 链路级修正） ===
-// 与后端 computeMobility 完全一致：机体 2:1（基础最低 5）；装备(载具/背包) 3:1；Royroy 等不计入。
-// 无部件时回退 stats.mobility / stats.speed / 顶层（旧语义，移动点即数值）。
-function resolveUnitMobility(raw) {
-  if (!raw || typeof raw !== 'object') return 0
-  const stats = (raw.stats && typeof raw.stats === 'object') ? raw.stats : {}
-  const toNum = (x) => (typeof x === 'number' && !isNaN(x) ? x : null)
-  const normType = (t) => String(t || '').trim()
-  // 分部位移动力（按规则换算）
-  let partsSum = 0
-  const parts = raw.attributes?.parts || (raw.parts && typeof raw.parts === 'object' ? raw.parts : null)
-  if (parts && typeof parts === 'object') {
-    for (const p of Object.values(parts)) {
-      if (p && typeof p === 'object') {
-        const type = normType(p.normalizedType || p.type)
-        const m = toNum(p['机动']) ?? toNum(p.mobility)
-        if (m == null) continue
-        if (type === '机体') partsSum += Math.max(5, Math.ceil(m / 2))
-        else if (type === '载具' || type === '背包') partsSum += Math.ceil(m / 3)
-        // 武器 / 防具 / 跟随(Royroy) 不计入
-      }
-    }
-  }
-  // 体型机动修正：s +10% / m 0 / l -5% / xl -10%（与后端 computeMobility 同源）
-  if (partsSum > 0) return applySizeMobility(partsSum, raw.size)
-  const candidates = [
-    toNum(stats.mobility),
-    toNum(stats.speed),
-    toNum(raw.mobility),
-    toNum(raw['机动']),
-    toNum(raw.main_机动),
-  ]
-  for (const c of candidates) if (c != null) return c
-  return 0
-}
-
-// 阵亡判定（稳健版）：显式 dead 标记为真才判死；hp 字段缺失/0 一律视为存活（后端部署池单位历史上无 hp 字段，
-// 旧逻辑 (unit.hp ?? 0) <= 0 会把所有待部署单位误判为阵亡，导致标灰划掉无法部署）。
-// 仅当 hp 是有效正数且 <= 0 时才判死（真打死的场面由战斗结算写回 currentStats.hp）。
-function isUnitDead(unit) {
-  if (!unit || typeof unit !== 'object') return false
-  if (unit.dead === true) return true
-  const h = Number(unit.hp)
-  // 只有真正拿到有效 HP 数值且 <= 0 才算死；NaN / 0 / undefined 都视为未死
-  if (!isNaN(h) && h > 0) return false
-  return false
-}
+// === 战场状态规范化 / 机动解析 / 阵亡判定 已抽至 src/battle/normalizeBattle.js（PC 与移动端共享） ===
+import { normalizeBattleState, resolveUnitMobility, isUnitDead, safeParseJson } from '../battle/normalizeBattle.js'
 
 // === 机动拆解（行动面板专用，响应式）：主机体移动力 + 额外移动力（载具/背包）===
 // 来源：unit.parts / unit.attributes.parts（分部位中文「机动」）/ 兜底 unit.equipState。
@@ -1166,48 +1067,7 @@ function conditionLabel(t) {
   const dk = (t.damage_kind && t.damage_kind.length) ? t.damage_kind.join('/') : '任意伤害'
   return '仅 ' + at + ' · ' + dk
 }
-function normalizeBattleState(state) {
-  if (!state || !state.units) return state
-  const units = Array.isArray(state.units) ? state.units : Object.values(state.units)
-  for (const u of units) {
-    if (!u) continue
-    // 坐标契约：position 是真理源，同步出顶层 q/r（棋盘其余读取 unit.q/unit.r 处无需改动）
-    if (u.position && u.q === undefined) { u.q = u.position.q; u.r = u.position.r }
-    // id 别名：战斗逻辑用 unitId，前端多处用 unit.id
-    if (u.unitId !== undefined && u.id === undefined) u.id = u.unitId
-    // HP 条
-    if (u.currentStats && u.hp === undefined) u.hp = u.currentStats.hp
-    // 四维/护盾/护甲：后端 createBattleUnit 把它们放在 currentStats 内，
-    // 而行动面板读的是顶层 attack/defense/range/shield/armor/maxHp。
-    // 仅当顶层缺失时从 currentStats 提上来（不覆盖已有顶层值）。
-    if (u.currentStats) {
-      const cs = u.currentStats
-      if (u.attack === undefined && cs.attack !== undefined) u.attack = cs.attack
-      if (u.defense === undefined && cs.defense !== undefined) u.defense = cs.defense
-      if (u.range === undefined && cs.range !== undefined) u.range = cs.range
-      if (u.shield === undefined && cs.shield !== undefined) u.shield = cs.shield
-      if (u.armor === undefined && cs.armor !== undefined) u.armor = cs.armor
-      // maxHp 兜底：currentStats 未携带时回退到当前 hp（载入时多为满血），避免 HP 条按 /100 误显为残血
-      if (u.maxHp === undefined) u.maxHp = cs.maxHp ?? u.hp
-    }
-    // 阶段修复：统一解析「机动」，消除 ? 与错误的 0
-    // 兼容 stats.mobility / stats.speed / attributes.parts.*.机动（合计）/ 顶层 mobility / 机动 / main_机动
-    if (u.mobility === undefined) u.mobility = resolveUnitMobility(u)
-    if (u.moveRange === undefined || u.moveRange === 0) u.moveRange = u.mobility
-    // 七视图兼容（view_urls 字符串 → viewUrls 对象）
-    if (u.view_urls !== undefined && u.viewUrls === undefined) {
-      u.viewUrls = typeof u.view_urls === 'string' ? safeParseJson(u.view_urls) : u.view_urls
-    }
-    // 行动点 → 旧布尔按钮字段（保持模板 :disabled 逻辑不变）：移动/战术/防御三类点用尽即置灰
-    if (u.has_moved === undefined) u.has_moved = (u.action_points?.MOVE ?? 1) <= 0
-    if (u.has_acted === undefined) u.has_acted = (u.action_points?.ATTACK ?? 1) <= 0
-    if (u.has_defended === undefined) u.has_defended = (u.action_points?.DEFEND ?? 1) <= 0
-    // 体型机动补偿 Buff：被更大机体攻击后下回合移动 +N（由后端 BuffManager 写入）
-    if (u.mobility_buff === undefined) u.mobility_buff = 0
-    if (u.mobility_buff_turns === undefined) u.mobility_buff_turns = 0
-  }
-  return state
-}
+// normalizeBattleState 已抽至 src/battle/normalizeBattle.js（见文件中部 import）
 
 // === Phase 3: 平滑位移插值引擎 (Lerp) ===
 // unitLerpState: Map<unitId, { fromX, fromY, toX, toY, startTime, duration, onComplete }>
@@ -1383,6 +1243,87 @@ const glossarySkills = ref({})  // Phase8: 词条库技能配置缓存  // skill
 const royroyDeployMode = ref(false)  // RoyRoy hex-click deployment mode
 const sidebarActionLog = inject('sidebarActionLog')
 
+// Step 2 右侧边栏状态：敌方检索关键字 / 当前选中的敌单位（选中则详情替换列表）
+const rsEnemySearch = ref('')
+const rsSelectedUnit = ref(null)
+// 阵营列表内容折叠（保留标题栏与检索框，仅收起下方列表）
+const rsListCollapsed = ref(false)
+function toggleRsList() {
+  rsListCollapsed.value = !rsListCollapsed.value
+}
+
+// Step 5：阵营列表（按战术角色分组）+ 敌方检索过滤（按单位名包含）
+const rsListGroups = computed(() => {
+  const kw = (rsEnemySearch.value || '').trim().toLowerCase()
+  return factionGroups.value
+    .map(g => ({
+      ...g,
+      units: kw ? g.units.filter(u => (u.name || '').toLowerCase().includes(kw)) : g.units,
+    }))
+    .filter(g => g.units.length > 0)
+})
+// 详情区展示字段：HP 百分比
+function rsHpPercent(u) {
+  const max = u.maxHp || u.hp || 1
+  return Math.max(0, Math.min(100, Math.round((u.hp || 0) / max * 100)))
+}
+
+// Step 3：点击棋子弹出的行动菜单（跟随点击点），先占位骨架
+// mode: 'main' 主菜单 / 'skills' 战术行动技能竖列表
+const unitActionMenu = reactive({ visible: false, x: 0, y: 0, unit: null, mode: 'main' })
+// 点棋子弹出的行动菜单：移动 / 战术行动 / 防御 / 待机
+const unitActionMenuItems = [
+  { key: 'move', label: '移动' },
+  { key: 'tactical', label: '战术行动' },
+  { key: 'defend', label: '防御' },
+  { key: 'wait', label: '待机' },
+]
+function closeUnitActionMenu() { unitActionMenu.visible = false }
+function openUnitActionMenu(unit, x, y) {
+  unitActionMenu.visible = true
+  unitActionMenu.x = x
+  unitActionMenu.y = y
+  unitActionMenu.unit = unit
+  unitActionMenu.mode = 'main'
+}
+// Step 4：战术行动 → 展开该单位主动技能竖列表
+const unitActionMenuSkills = computed(() => {
+  const u = unitActionMenu.unit
+  if (!u) return []
+  const passiveTypes = new Set(['counter', 'block', 'assist', 'guard', 'blockade', 'scout', 'execute', 'duel', 'snatch', 'full_armor', 'coating', 'reactivate', 'lucky'])
+  return (u.skills || []).filter(s => !passiveTypes.has(s.type))
+})
+function onUnitActionMenuClick(item) {
+  if (item.key === 'move') {
+    closeUnitActionMenu()
+    startAction('move')   // 进入移动模式（点击地图落点完成移动）
+    return
+  }
+  if (item.key === 'tactical') {
+    closeUnitActionMenu()
+    startAction('tactical')   // 进入战术模式（选技能后点目标施放）
+    return
+  }
+  if (item.key === 'defend') {
+    closeUnitActionMenu()
+    startAction('defend')   // 防御姿态（后端写减伤 statusEffect）
+    return
+  }
+  if (item.key === 'wait') {
+    closeUnitActionMenu()
+    startAction('wait')   // 原地待机
+    return
+  }
+  // 兜底占位
+  addLog('select', `[占位] 对 ${unitActionMenu.unit?.name || 'Unit'} 执行：${item.label}`)
+  closeUnitActionMenu()
+}
+function onUnitActionMenuSkillClick(skill) {
+  // 占位：打印技能信息，后续 Step 接入真实施放流程
+  addLog('select', `[占位] 选择技能：${skill.name}（射程 ${getSkillRange(skill)}）`)
+  closeUnitActionMenu()
+}
+
 // 阵营能力冷却 & ACE 信息
 const factionCooldowns = ref({})
 const aceUnits = ref({})
@@ -1473,6 +1414,18 @@ const actionPanelPos = reactive({ left: 0, top: 60 })
 const factionPanelRef = ref(null)
 const factionPanelCollapsed = ref(false)
 const factionPanelPos = reactive({ left: 0, top: 0 })
+
+// 右侧边栏（阵营列表）整体折叠：收起以露出更多地图横向空间
+const rightSidebarCollapsed = ref(true)
+function toggleRightSidebar() {
+  rightSidebarCollapsed.value = !rightSidebarCollapsed.value
+}
+
+// 底部操作栏（lower-zone）折叠：收起以露出更多地图纵向空间
+const lowerZoneCollapsed = ref(true)
+function toggleLowerZone() {
+  lowerZoneCollapsed.value = !lowerZoneCollapsed.value
+}
 
 // 行动记录面板状态（战报栏浮动窗：锚定战场左侧边缘）
 const actionLogRef = ref(null)
@@ -1925,17 +1878,37 @@ const gridData = computed(() => {
   }
 })
 
-// Phase 29-ParitySync: isoConfig — 与编辑器严格对齐，强制回退 ISO_DEFAULTS
-// 后端 _view 仅允许覆写 shearX/shearY，其余字段硬编码 ISO_DEFAULTS
-const isoConfig = computed(() => ({
-  shearX: ISO.shearX,
-  shearY: ISO.shearY,
-  scaleX: ISO_DEFAULTS.scaleX,
-  scaleY: ISO_DEFAULTS.scaleY,
-  rotation: ISO_DEFAULTS.rotation,
-  topFlat: ISO_DEFAULTS.topFlat,
-  bottomFlat: ISO_DEFAULTS.bottomFlat,
-}))
+// 战场部署过场（画在引擎 Canvas 上，与 iso 地形像素级重合）
+const {
+  deploying: deployAnimOn,
+  deployGhost: deployGhostOn,
+  drawDeploy: drawDeployAnim,
+  startDeploy: startDeployAnim,
+  finishDeploy: finishDeployAnim,
+  replayDeploy: replayDeployAnim,
+  bindAutoStart: bindDeployAutoStart,
+} = useBattleDeploy(gridData)
+bindDeployAutoStart(hexGrid)
+
+// Phase 29-ParitySync: isoConfig — 与编辑器严格对齐（网格形状不再经侧边滑块调整，回退 ISO_DEFAULTS）
+const isoConfig = computed(() => ({ ...ISO_DEFAULTS }))
+
+// 地形外框：有自定义 SVG 时直接用其轮廓；否则 dominator 实时调 4 条轴边长度（非 dominator 用默认形状）
+const framePoints = computed(() => {
+  if (mapViewSettings.frameSvgPoints) return mapViewSettings.frameSvgPoints
+  return buildFramePoints({
+    top: mapViewSettings.frameTopLen,
+    bottom: mapViewSettings.frameBottomLen,
+    left: mapViewSettings.frameLeftLen,
+    right: mapViewSettings.frameRightLen,
+  })
+})
+// 外框 viewBox：自定义 SVG 用其自身 viewBox，否则用默认 HEX_FRAME_VIEWBOX
+const frameViewBox = computed(() =>
+  mapViewSettings.frameSvgPoints && mapViewSettings.frameSvgW
+    ? { w: mapViewSettings.frameSvgW, h: mapViewSettings.frameSvgH }
+    : HEX_FRAME_VIEWBOX
+)
 
 // 稳健 HP 兜底：对 0 / undefined / null / NaN 都回退（后端部署池单位历史上无 hp 字段，曾被误判阵亡标灰）
 function safeHp(u) {
@@ -2289,7 +2262,7 @@ function drawBattleScene(ctx, opts) {
     // 敌方隐匿单位：绝不在 Canvas 上绘制其机体模型与血条，确保绝对隐形。
     // （后端暴露字段为 unit.stealth；ownerId/faction 判定的「我方单位」仍可见自己的隐匿单位）
     const isStealth = unit.stealth === true
-    const myId = user.value?.userId
+    const myId = userStore.user?.id || user.value?.id
     const myFactionResolved = myFaction.value
     // 方案A：友军判定基于「战术角色 role」而非固有 faction。
     // myRole = 当前玩家固有 faction 经 factionRoles 翻译出的战术角色；与 unit.role 比对，
@@ -2325,13 +2298,24 @@ function drawBattleScene(ctx, opts) {
     ctx.webkitImageSmoothingEnabled = false
     ctx.mozImageSmoothingEnabled = false
 
-    // === Step C2: 脚底投影椭圆（需求③：挤出 + 有高度时阴影加深；否则轻量） ===
+    // === Step C2: 脚底投影（与战场格同形的尖顶六边形，经同一 ISO/CTM 后为倾斜式样；沿中心向外径向虚化） ===
     const _tid = (cellMap[`${unit.q},${unit.r}`]?.terrain) || 'void'
     const _colH = (UNIVERSAL_TERRAIN_MAP[_tid]?.height) || 0
     const _projA = (extrudeEnabled.value && _colH > 0) ? 0.34 : 0.16
+    // 与底层战场格同形（尖顶正六边形，半径 HEX_RADIUS，受同一 ISO/CTM 变换而呈倾斜六边形）
     ctx.beginPath()
-    ctx.ellipse(0, 0, HEX_RADIUS * 0.52, HEX_RADIUS * 0.3, 0, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(0,0,0,${_projA})`
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i - Math.PI / 2
+      const px = HEX_RADIUS * Math.cos(a), py = HEX_RADIUS * Math.sin(a)
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    // 径向渐变：中心最深，沿中心向外至六边形边缘渐隐为透明
+    const _grad = ctx.createRadialGradient(0, 0, 0, 0, 0, HEX_RADIUS)
+    _grad.addColorStop(0, `rgba(0,0,0,${_projA})`)
+    _grad.addColorStop(0.6, `rgba(0,0,0,${_projA * 0.5})`)
+    _grad.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = _grad
     ctx.fill()
 
     // === Step D: 查询切图纹理 ===
@@ -2575,8 +2559,10 @@ function findUnitAt(q, r) {
   return allUnits.value.find(u => u.q === q && u.r === r)
 }
 
-function onHexClick({ q, r }) {
+function onHexClick({ q, r, screen }) {
   if (q < 0 || q >= gridWidth.value || r < 0 || r >= gridHeight.value) return
+  // Step 3：任何点击先关闭行动菜单（命中棋子时再按需打开）
+  unitActionMenu.visible = false
 
   // Deploy mode
   if (isDeployPhase.value && selectedDeployUnit.value) { deployToHex(q, r); return }
@@ -2624,6 +2610,10 @@ function onHexClick({ q, r }) {
     }
     // 否则（默认点击敌方=查看信息 / 点己方另一单位 / 未选单位时点敌人）按选择处理
     selectUnit(clickedUnit)
+    // Step 3：命中棋子 → 在点击点弹出行动菜单（screen 为相对画布像素坐标）
+    if (screen) {
+      openUnitActionMenu(clickedUnit, screen.x, screen.y)
+    }
     return
   }
 
@@ -2670,6 +2660,71 @@ function clearSelection() {
   selectedUnit.value = null
   actionMode.value = null
   hexGrid.value?.redraw()
+}
+
+// ===== LOWER ZONE 辅助函数 =====
+// 单位卡片「坐标跳转」：选中并居中到该单位（复用 selectUnitById 的 centerOn 等距变换）
+function focusUnit(unit) {
+  if (!unit) return
+  selectUnitById(unit)
+}
+
+// 部署期「擢银行动」：弹出部署池抽屉（复用开战流程的 showDeployDock）
+function openDeployPool() {
+  showDeployDock.value = true
+  pickDeployUnit()
+}
+
+// 部署池抽屉显隐 + 选中待部署单位
+const showDeployDock = ref(false)
+function pickDeployUnit() {
+  if (deployPool.value.length) {
+    selectedDeployUnit.value = deployPool.value[0]
+  }
+}
+
+// 主视图切换（部署期/战斗期）由 isDeployPhase 控制，这里仅占位以兼容设计稿 unitMainView 语义
+const unitMainView = computed(() => isDeployPhase.value ? 'deploy' : 'battle')
+
+// 机体左下视图（方向 3 = 左下方视图），单位卡片展示用
+// 单位库补全缓存：战斗单位若缺失 viewUrls，按 id 从 /api/units/:id 拉取真实七视图
+const unitViewUrlsCache = ref({})
+function pickAnyView(viewUrls) {
+  if (!viewUrls || typeof viewUrls !== 'object') return ''
+  // 优先方向 3（左下），其次方向 0（正），再遍历其余方向
+  let v = resolveSevenView(viewUrls, 3)
+  if (v) return v
+  for (const k of ['0','1','2','4','5','6']) {
+    if (viewUrls[k]) return viewUrls[k]
+  }
+  return ''
+}
+watch(selectedUnit, async (u) => {
+  if (!u) return
+  const id = u.id || u.unitId
+  const cur = u.viewUrls || u.view_urls
+  if (id && (!cur || (typeof cur === 'object' && !Object.keys(cur).length)) && !unitViewUrlsCache.value[id]) {
+    try {
+      const res = await hangarAPI.getUnit(id)
+      const data = res?.data?.unit || res?.data
+      const vu = data?.view_urls || data?.viewUrls
+      if (vu && typeof vu === 'object' && Object.keys(vu).length) {
+        unitViewUrlsCache.value[id] = typeof vu === 'string' ? safeParseJson(vu) : vu
+      }
+    } catch (_) { /* 无视图时静默 */ }
+  }
+})
+const unitLeftBottomView = computed(() => {
+  const u = selectedUnit.value
+  if (!u) return ''
+  const id = u.id || u.unitId
+  const v = u.viewUrls || u.view_urls || (id ? unitViewUrlsCache.value[id] : null) || {}
+  return pickAnyView(v)
+})
+// 图片加载失败时兜底（避免裂图）
+function onUnitSpriteError(e) {
+  const img = e?.target
+  if (img) img.style.visibility = 'hidden'
 }
 
 // ===== Actions =====
@@ -2822,6 +2877,58 @@ const skillGroups = computed(() => {
   return order.filter(s => groups[s]).map(s => groups[s])
 })
 
+// LOWER ZONE 属性卡片用的扁平主动技能列表（展开 skillGroups 的全部技能）
+// 按 skill_key（优先）或 name|category 去重，防止后端多来源（主机体/子部件/装备）合并后出现重复技能卡片
+const activeSkillList = computed(() => {
+  const seen = new Map()
+  const list = []
+  for (const g of skillGroups.value) {
+    for (const s of (g.skills || [])) {
+      const key = s.skill_key || s.skillKey || `n:${s.name}|${s.category || s.type}`
+      if (seen.has(key)) continue
+      seen.set(key, true)
+      list.push(s)
+    }
+  }
+  return list
+})
+
+// 技能类型中文标签（属性&装备栏详情用）
+const SKILL_TYPE_LABELS = {
+  melee: '近战', ranged: '远程', auto: '自动', automation: '自动化',
+  beam: '光束', kinetic: '动能', explosive: '爆炸', corrosive: '腐蚀', thermal: '热熔',
+  counter: '反击', block: '格挡', assist: '援助', guard: '守护', blockade: '封锁',
+  scout: '侦察', execute: '斩杀', duel: '决斗', snatch: '抢夺',
+  full_armor: '全装甲', coating: '涂层', reactivate: '再动', lucky: '幸运',
+  heal: '治疗', buff: '增益', debuff: '减益', passive: '被动', attack: '攻击',
+}
+function skillTypeLabel(skill) {
+  if (!skill) return '—'
+  if (skill.category && SKILL_TYPE_LABELS[skill.category]) return SKILL_TYPE_LABELS[skill.category]
+  return SKILL_TYPE_LABELS[skill.type] || skill.type || '—'
+}
+
+// 技能属性（伤害属性）中文标签
+const SKILL_ATTR_LABELS = {
+  kinetic: '动能', beam: '光束', explosive: '爆炸', corrosive: '腐蚀', thermal: '热熔', special: '特殊',
+}
+function skillAttrLabel(skill) {
+  if (!skill) return '—'
+  const a = skill.attribute || skill.damage_kind || skill.weaponType
+  if (!a) return '—'
+  return SKILL_ATTR_LABELS[a] || SKILL_ATTR_LABELS[String(a).toLowerCase()] || a
+}
+
+// 词条文本兜底：优先 description，其次取词条库 skills[type].description
+function skillEntryText(skill) {
+  if (!skill) return ''
+  const gc = glossaryConfig.value
+  if (gc && gc.skills && skill.type && gc.skills[skill.type] && gc.skills[skill.type].description) {
+    return gc.skills[skill.type].description
+  }
+  return ''
+}
+
 // 被动/防御技能列表（显示在单位信息中，不参与战术选择）
 const passiveSkills = computed(() => {
   const unit = selectedUnit.value
@@ -2867,10 +2974,17 @@ function basicAttackRange(unit) {
   return isBasicRanged(unit) ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE
 }
 
-// 选择战术行动的技能（null = 普通攻击）
+// 选择战术行动的技能（null 表示未选技能；普通攻击已在 Phase 32 彻底移除，不存在 basic_attack 入口）
+const selectedAoeDir = ref(null) // 地图炮方向选择（1-6），null=按主目标方向自动量化
+// 地图炮方向罗盘是否显示：技能含 map_cannon.directions 配置即视为地图炮
+const isMapCannon = computed(() => {
+  const d = selectedAttackSkill.value?.map_cannon?.directions
+  return !!(d && Object.keys(d).length)
+})
 function selectTacticalSkill(skill) {
   royroyDeployMode.value = false
   selectedAttackSkill.value = skill
+  selectedAoeDir.value = null // 重置方向选择
   addLog('info', `选择: ${skill ? skill.name : '普通攻击'}`)
   hexGrid.value?.redraw()
 }
@@ -3282,6 +3396,18 @@ async function handleAttackResponse(result, attacker, target) {
     dodged: data.combat_result?.dodged ?? false,
     sizeBanner: data.combat_result?.sizeBanner || null,
     sizeTactic: data.combat_result?.sizeTactic || null,
+    // ★ Phase 32-AOE：多目标结算（地图炮/AOE 命中全体）
+    //   后端 targets[] 含 {unitId,q,r,finalDamage,statusEffects}，转 AttackReportModal 期望的 aoeTargets[{name,damage,status}]
+    aoeTargets: (Array.isArray(data.combat_result?.targets) ? data.combat_result.targets : []).map((t) => ({
+      name: unitNameById(t.unitId) || `单位(${t.q},${t.r})`,
+      damage: Number(t.finalDamage) || 0,
+      status: (Array.isArray(t.statusEffects) && t.statusEffects.length)
+        ? t.statusEffects.map((s) => `${s.status}${s.stacks && s.stacks > 1 ? '×' + s.stacks : ''}`).join('、')
+        : '',
+    })),
+    targets: Array.isArray(data.combat_result?.targets) ? data.combat_result.targets : null,
+    hitCount: data.combat_result?.hit_count ?? 0,
+    aoeMode: data.combat_result?.aoe_mode || null,
   }
   showAttackReport.value = true
 }
@@ -3466,12 +3592,15 @@ async function executeSkillAttack(target, skill) {
     attackPayload.skill_id = skill.id ?? null
     attackPayload.skill_key = skill.key ?? skill.skill_key ?? null
     attackPayload.skill_name = skill.name ?? null
+    // ★ 地图炮方向选择：显式方向（1-6）随攻击下发；不选则后端按主目标方向自动量化
+    if (isMapCannon.value && selectedAoeDir.value != null) attackPayload.aoe_dir = selectedAoeDir.value
     const result = await combatAPI.attack(route.params.id, attackPayload)
     handleAttackResponse(result, attacker, target) // 技能攻击也弹结算画面（含未命中/伤害0），便于核对数值
     const dmg = result.data?.combat_result?.final_damage ?? result.data?.combat_result?.damage ?? result.data?.damage ?? '?'
     addLog('attack', `${attacker.name} 使用 [${skill.name}] 攻击 ${target.name} → 伤害 ${dmg}`)
     actionMode.value = null
     selectedAttackSkill.value = null
+    selectedAoeDir.value = null
     await refreshState()
   } catch (e) {
     addLog('error', `技能攻击失败: ${e.response?.data?.error || e.message}`)
@@ -3585,7 +3714,7 @@ async function submitSurprise(choice, skillId) {
 // 监听推送刷新后的 surprise 字段，自动弹出/关闭 QTE（仅当当前用户为锁定反应者）
 watch(() => battleState.value?.surprise || battleState.value?.pendingSurprise, (s) => {
   if (s && !s.settled && s.phase !== 'done' && s.phase !== 'settled') {
-    const myId = userStore.user?.userId
+    const myId = userStore.user?.id || user.value?.id
     const reactorUnit = battleState.value?.units?.find((u) => u.unitId === s.lockedReactorId)
     if (reactorUnit && reactorUnit.ownerId === myId) {
       openSurprise(s); return
@@ -3741,14 +3870,29 @@ onMounted(async () => {
       console.error('[BattlefieldCRASH] 未捕获错误:', event.message)
       console.error('[BattlefieldCRASH] 文件:', event.filename, '行:', event.lineno, '列:', event.colno)
       console.error('[BattlefieldCRASH] 错误对象:', event.error)
+      // 写入 DOM 供调试读取
+      try {
+        let dbg = document.getElementById('__nbv_debug__')
+        if (!dbg) { dbg = document.createElement('div'); dbg.id = '__nbv_debug__'; dbg.style.cssText = 'position:fixed;top:0;left:0;z-index:999999;background:red;color:white;padding:8px;font-size:12px;max-width:90vw;word-break:break-all'; document.body.appendChild(dbg) }
+        dbg.textContent += '\n[E] ' + event.message + ' @ ' + event.filename + ':' + event.lineno + ':' + event.colno
+        if (event.error && event.error.stack) dbg.textContent += '\nSTACK: ' + event.error.stack.substring(0, 500)
+      } catch(_) {}
       event.preventDefault()
     }
   })
   // 捕获 Promise rejection
   window.addEventListener('unhandledrejection', (event) => {
     console.error('[BattlefieldCRASH] 未处理的 Promise 拒绝:', event.reason)
+    try {
+      let dbg = document.getElementById('__nbv_debug__')
+      if (!dbg) { dbg = document.createElement('div'); dbg.id = '__nbv_debug__'; dbg.style.cssText = 'position:fixed;top:0;left:0;z-index:999999;background:red;color:white;padding:8px;font-size:12px;max-width:90vw;word-break:break-all'; document.body.appendChild(dbg) }
+      dbg.textContent += '\n[REJ] ' + String(event.reason).substring(0, 300)
+    } catch(_) {}
     event.preventDefault()
   })
+
+  // 跨设备同步：dominator 进入时从服务端拉取全局地图视图设置
+  syncMapViewSettingsFromServer()
 
     document.addEventListener('keydown', onDiceKeyDown)
     // Phase 26: 贴图异步加载完成后自动重绘 Canvas
@@ -3759,17 +3903,18 @@ onMounted(async () => {
     loadViewConfig().catch(() => {})
   // Batch C/D: 连接 comm 实时推送（叠加在 refreshState 之上，失败自动回退轮询）
   try {
-    const myFaction = myFaction.value || 'earth'
+    const myFactionValue = myFaction.value || 'earth'
     connectBattleSocket({
       battleId: route.params.id,
       token: userStore.token,
-      faction: myFaction,
+      faction: myFactionValue,
       role: userStore.user?.role || 'Player',
       onState: () => enqueueState('battle', refreshState),
       onConnect: () => refreshState(), // 断线重连后强制拉取最新态（隐患三收尾）
     })
   } catch (e) {
     console.warn('[socket] 连接失败，回退轮询', e?.message || e)
+    console.warn('[socket] 完整堆栈:', e?.stack || 'N/A')
   }
   // Phase 29-H: 合并到下方 loadGlossaryConfig() 统一拉取，消除重复请求
   try {
@@ -3983,13 +4128,22 @@ function onDiceKeyDown(e) {
 </script>
 
 <style scoped>
+@keyframes deployProgressBar { from { width: 0; } to { width: 100%; } }
 /* ===== DM Layout (Phase 25: 使用 absolute inset-0 占据父级 100%，不再硬编码 100vh) ===== */
 .dm-battle-layout {
   display: flex;
+  flex-direction: column;
   background: #0a1628;
   color: #f1f3fc;
   font-family: 'Space Grotesk', 'Fira Code', sans-serif;
   overflow: hidden;
+}
+/* 主区行：画布 + 右侧栏 占满上方，底部操作栏单独一行横跨 */
+.dm-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
 }
 
 /* ===== LEFT SIDEBAR ===== */
@@ -4016,6 +4170,297 @@ function onDiceKeyDown(e) {
 
 /* ===== MAIN CONTENT ===== */
 .dm-main { flex: 1; min-width: 0; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+
+/* ===== Step1 骨架：地图区占满 + 底部操作栏固定 ===== */
+.canvas-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* ===== LOWER ZONE: 四栏式下半区（固定 230px，40% 透明） ===== */
+.lower-zone {
+  flex: 0 0 230px;
+  height: 230px;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: rgba(8, 22, 44, 0.4);
+  border-top: 1px solid rgba(90, 160, 230, 0.35);
+  backdrop-filter: blur(2px);
+  transition: margin-bottom 0.28s ease;
+}
+/* 折叠：整条下栏向下塌缩，腾出地图纵向空间 */
+.lower-zone.collapsed {
+  margin-bottom: -230px;
+}
+.lz-block {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(13, 34, 64, 0.55);
+  border: 1px solid rgba(90, 160, 230, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow: hidden;
+}
+/* ① 单位卡片：固定 180px（与地图略缩图同宽） */
+.lz-unit {
+  flex: 0 0 180px;
+  width: 180px;
+}
+.uc-sprite {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+}
+.uc-sprite img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.uc-sprite-ph {
+  font-size: 11px;
+  color: rgba(180, 205, 235, 0.5);
+}
+/* 名字浮于视图顶部 */
+.uc-name-overlay {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  right: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #e6f0ff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  z-index: 2;
+}
+/* 属性值浮于视图底部 */
+.attr-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 10px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  background: linear-gradient(to top, rgba(4, 12, 26, 0.82), rgba(4, 12, 26, 0));
+  z-index: 2;
+}
+.attr-overlay .attr-row { display: flex; justify-content: space-between; color: rgba(180, 215, 255, 0.78); }
+.attr-overlay .attr-row b { color: #e6f0ff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+/* ② 属性 & 装备：放宽以填充地图缩小的空间 */
+.lz-attr {
+  flex: 2.5 1 0;
+  min-width: 0;
+}
+
+/* ③ 地图略缩：固定宽度，靠右紧邻行动记录 */
+.lz-map {
+  flex: 0 0 210px;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+/* 行动记录：与右侧阵营列表等宽 = 220px */
+.lz-log {
+  flex: 0 0 220px;
+  width: 220px;
+}
+.lz-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ffb000;
+  margin-bottom: 6px;
+  flex: 0 0 auto;
+}
+.lz-empty {
+  font-size: 12px;
+  color: rgba(180, 215, 255, 0.45);
+  margin: auto;
+}
+/* ① 单位卡片 */
+/* ② 属性卡片 */
+.attr-row { display: flex; justify-content: space-between; color: rgba(180, 215, 255, 0.7); }
+.attr-row b { color: #e6f0ff; }
+/* 技能栏：占满属性卡片剩余空间，超出滚动 */
+.attr-skills {
+  display: flex;
+  flex-direction: column;
+  align-content: flex-start;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.attr-skills .ap-skill-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+/* 技能详情卡片：名称 + 类型 + 属性 + 词条 */
+.skill-detail-card {
+  border: 1px solid rgba(90, 160, 230, 0.28);
+  border-radius: 5px;
+  background: rgba(20, 44, 78, 0.5);
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.skill-detail-card:hover {
+  border-color: rgba(120, 190, 255, 0.6);
+  background: rgba(30, 60, 100, 0.6);
+}
+.skill-detail-card.active {
+  border-color: #ffb000;
+  background: rgba(255, 176, 0, 0.12);
+}
+
+/* ★ 地图炮方向罗盘：六向箭头环绕布局 */
+.aoe-dir-panel {
+  margin-top: 8px;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 176, 0, 0.35);
+  border-radius: 6px;
+  background: rgba(40, 30, 10, 0.35);
+}
+.aoe-dir-title {
+  font-size: 11px;
+  color: #ffcf6b;
+  margin-bottom: 8px;
+  text-align: center;
+}
+.aoe-dir-compass {
+  position: relative;
+  width: 132px;
+  height: 120px;
+  margin: 0 auto;
+}
+.aoe-dir-btn {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(120, 190, 255, 0.5);
+  background: rgba(20, 44, 78, 0.6);
+  color: #cfe6ff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.aoe-dir-btn:hover {
+  border-color: #ffb000;
+  background: rgba(60, 80, 120, 0.7);
+}
+.aoe-dir-btn.active {
+  background: #ffb000;
+  border-color: #fff;
+  color: #1a1a1a;
+  transform: scale(1.12);
+}
+/* 六角环绕定位（right=1@右中, rightdown=2@右下, leftdown=3@左下, left=4@左中, leftup=5@左上, rightup=6@右上） */
+.aoe-dir-btn.dir-1 { left: 102px; top: 45px; }
+.aoe-dir-btn.dir-4 { left: 0;    top: 45px; }
+.aoe-dir-btn.dir-2 { left: 84px; top: 90px; }
+.aoe-dir-btn.dir-3 { left: 18px; top: 90px; }
+.aoe-dir-btn.dir-6 { left: 84px; top: 0;   }
+.aoe-dir-btn.dir-5 { left: 18px; top: 0;   }
+.aoe-dir-btn.aoe-dir-auto {
+  left: 51px;
+  top: 45px;
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  border-color: rgba(255, 176, 0, 0.5);
+  color: #ffcf6b;
+}
+.sdc-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.sdc-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8f3ff;
+  white-space: nowrap;
+}
+.sdc-type {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #9fd0ff;
+  background: rgba(90, 160, 230, 0.18);
+  border: 1px solid rgba(90, 160, 230, 0.35);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.sdc-sep {
+  color: #5a7da0;
+  flex: 0 0 auto;
+}
+.sdc-key {
+  flex: 0 0 auto;
+  color: #8fb6dc;
+}
+.sdc-val {
+  color: #d8e8f8;
+  flex: 0 1 auto;
+}
+.sdc-entry {
+  color: #b9d6ee;
+  flex: 1 1 auto;
+  line-height: 1.35;
+}
+.map-deploy-btn {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #ffb000;
+  background: rgba(255, 176, 0, 0.12);
+  border: 1px solid rgba(255, 176, 0, 0.35);
+  border-radius: 5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.map-deploy-btn:hover { background: rgba(255, 176, 0, 0.22); }
+/* ④ 行动记录 */
+.lz-log-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.lz-log-body .log-entry { display: flex; gap: 6px; margin-bottom: 2px; }
+.lz-log-body .log-time { color: rgba(180, 215, 255, 0.4); flex: 0 0 auto; }
+.lz-log-body .log-msg { color: rgba(200, 225, 255, 0.8); }
 
 /* Header */
 .battle-header {
@@ -4466,6 +4911,325 @@ function onDiceKeyDown(e) {
 /* 行动面板特定样式 */
 .floating-action-panel {
   width: 220px;
+}
+
+/* ===== Step 2: 右侧固定边栏（宽度与行动面板一致 = 220px） ===== */
+.right-sidebar {
+  position: relative;
+  flex: 0 0 220px;          /* 与 .floating-action-panel 同宽 */
+  width: 220px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 8px;
+  box-sizing: border-box;
+  background: #0d2240;       /* 与底部栏一致的深蓝底色，便于辨认边界 */
+  border-left: 1px solid rgba(90,160,230,0.35);
+  overflow: hidden;
+  transition: margin-right 0.28s ease;
+}
+/* 折叠：整条边栏向右滑出视口，腾出地图横向空间 */
+.right-sidebar.collapsed {
+  margin-right: -220px;
+}
+/* 折叠把手：fixed 钉在视口右边缘，始终可见（不受侧栏 overflow:hidden 影响） */
+.rs-toggle {
+  position: fixed;
+  right: 220px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #ffb000;
+  background: rgba(13, 34, 64, 0.92);
+  border: 1px solid rgba(90, 160, 230, 0.4);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer;
+  z-index: 60;
+  transition: right 0.28s ease;
+}
+/* 侧栏收起后，把手移到视口最右边缘 */
+.rs-toggle.collapsed {
+  right: 0;
+}
+.rs-toggle:hover {
+  background: rgba(255, 176, 0, 0.18);
+}
+/* 底部操作栏折叠把手：fixed 钉在视口底边缘，始终可见 */
+.lz-toggle {
+  position: fixed;
+  bottom: 230px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #ffb000;
+  background: rgba(13, 34, 64, 0.92);
+  border: 1px solid rgba(90, 160, 230, 0.4);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  z-index: 60;
+  transition: bottom 0.28s ease;
+}
+/* 下栏收起后，把手移到视口最底边缘 */
+.lz-toggle.collapsed {
+  bottom: 0;
+}
+.lz-toggle:hover {
+  background: rgba(255, 176, 0, 0.18);
+}
+/* 敌方检索：仅一个输入框 */
+.rs-search {
+  flex: 0 0 auto;
+}
+.rs-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font-size: 13px;
+  color: #e6f0ff;
+  background: rgba(8,51,68,0.7);
+  border: 1px solid rgba(255,176,0,0.3);
+  border-radius: 5px;
+  outline: none;
+}
+.rs-search-input::placeholder {
+  color: rgba(180,215,255,0.45);
+}
+.rs-search-input:focus {
+  border-color: #ffb000;
+}
+/* 阵营列表 / 敌单位详情 区块（替换出现，占满剩余空间） */
+.rs-faction-detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;           /* 占满检索框下方的全部空间 */
+  min-height: 0;
+  background: rgba(8,51,68,0.6);
+  border: 1px solid rgba(255,176,0,0.25);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.rs-block-title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffb000;
+  border-bottom: 1px solid rgba(255,176,0,0.2);
+  background: rgba(255,176,0,0.06);
+}
+.rs-back-btn {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #ffb000;
+  background: transparent;
+  border: 1px solid rgba(255,176,0,0.4);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rs-back-btn:hover {
+  background: rgba(255,176,0,0.12);
+}
+.rs-collapse-btn {
+  flex: 0 0 auto;
+  margin-right: 6px;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  font-size: 12px;
+  color: #ffb000;
+  background: transparent;
+  border: 1px solid rgba(255,176,0,0.4);
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rs-collapse-btn:hover {
+  background: rgba(255,176,0,0.12);
+}
+.rs-block-title small {
+  font-weight: 400;
+  font-size: 10px;
+  color: rgba(180,215,255,0.55);
+  margin-left: 6px;
+}
+.rs-block-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.rs-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(180,215,255,0.45);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+/* ===== Step 5: 阵营列表 / 敌单位详情 真实内容 ===== */
+.rs-list { padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+.rs-group-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(180,215,255,0.75);
+  padding: 6px 4px 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.rs-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.rs-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 5px 6px;
+  font-size: 12px;
+  color: #e6f0ff;
+  background: rgba(8,51,68,0.45);
+  border: 1px solid rgba(90,160,230,0.18);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rs-unit:hover { background: rgba(255,176,0,0.14); border-color: rgba(255,176,0,0.45); }
+.rs-unit-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-unit-hpbar {
+  flex: 0 0 42px; height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.12); overflow: hidden;
+}
+.rs-unit-hpbar i { display: block; height: 100%; background: #2ec27e; }
+.rs-unit-hp { flex: 0 0 auto; font-size: 10px; color: rgba(180,215,255,0.6); }
+.rs-empty, .rs-d-empty { padding: 16px; text-align: center; font-size: 12px; color: rgba(180,215,255,0.45); }
+/* 详情 */
+.rs-detail { padding: 8px; display: flex; flex-direction: column; gap: 7px; }
+.rs-d-title { font-size: 15px; font-weight: 700; color: #ffb000; }
+.rs-d-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rs-d-row > span { flex: 0 0 42px; color: rgba(180,215,255,0.6); }
+.rs-d-row > b { color: #e6f0ff; font-weight: 600; }
+.rs-hpbar { flex: 1 1 auto; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.rs-hpbar i { display: block; height: 100%; background: #2ec27e; }
+.rs-d-sub { margin-top: 4px; font-size: 11px; font-weight: 700; color: rgba(180,215,255,0.7); border-top: 1px solid rgba(255,176,0,0.18); padding-top: 6px; }
+.rs-d-skill { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding: 4px 6px; background: rgba(8,51,68,0.45); border-radius: 4px; }
+.rs-d-skill-meta { font-size: 10px; color: rgba(180,215,255,0.6); white-space: nowrap; }
+
+/* ===== Step 3: 点击棋子行动菜单（跟随点击点，占位骨架） ===== */
+.uam-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+.unit-action-menu {
+  position: absolute;
+  z-index: 41;
+  min-width: 140px;
+  padding: 6px;
+  background: rgba(13,34,64,0.97);
+  border: 1px solid rgba(90,160,230,0.5);
+  border-radius: 8px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.uam-title {
+  flex: 0 0 auto;
+  padding: 2px 4px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffb000;
+  border-bottom: 1px solid rgba(255,176,0,0.2);
+  margin-bottom: 2px;
+}
+.uam-item {
+  flex: 0 0 auto;
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: #e6f0ff;
+  background: rgba(8,51,68,0.6);
+  border: 1px solid rgba(90,160,230,0.25);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.uam-item:hover {
+  background: rgba(255,176,0,0.16);
+  border-color: rgba(255,176,0,0.5);
+}
+/* Step 4: 战术行动技能竖列表 */
+.uam-back {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #ffb000;
+  background: transparent;
+  border: 1px solid rgba(255,176,0,0.4);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.uam-back:hover { background: rgba(255,176,0,0.12); }
+.uam-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.uam-skill {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  padding: 8px 10px;
+  background: rgba(8,51,68,0.6);
+  border: 1px solid rgba(90,160,230,0.25);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.uam-skill:hover {
+  background: rgba(255,176,0,0.16);
+  border-color: rgba(255,176,0,0.5);
+}
+.uam-skill-name {
+  font-size: 13px;
+  color: #e6f0ff;
+  font-weight: 600;
+}
+.uam-skill-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: rgba(180,215,255,0.6);
+  white-space: nowrap;
+}
+.uam-skill-empty {
+  padding: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(180,215,255,0.45);
 }
 
 .floating-action-panel .floating-card-body {

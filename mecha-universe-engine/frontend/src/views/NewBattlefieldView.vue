@@ -16,6 +16,17 @@
         <div class="info-item"><span class="info-label">地图尺寸</span><span class="info-value">{{ gridW }} × {{ gridH }}</span></div>
         <div class="info-item"><span class="info-label">当前画笔</span><span class="info-value" :style="{ color: currentTerrainColor }">{{ brushName }}</span></div>
         <button class="btn-save" @click="saveMap" :disabled="saving">{{ saving ? '保存中...' : '保存地图' }}</button>
+        <button
+          class="btn-apply-public"
+          :class="{ applied: applyPublic }"
+          @click="toggleApplyPublic"
+          :disabled="!battlefield || !battlefield.id"
+          title="保存后向「管理员 / 主宰」申请公开，审核通过后全员可用"
+        >{{ applyPublic ? '✓ 已申请公开' : '申请公开' }}</button>
+        <span v-if="reviewStatus === 'pending'" class="review-badge pending">审核中</span>
+        <span v-else-if="reviewStatus === 'approved'" class="review-badge approved">已公开</span>
+        <span v-else-if="reviewStatus === 'rejected'" class="review-badge rejected">已驳回</span>
+        <button class="btn-export" @click="showMapPicker = true">[ 切换地图 ]</button>
         <button class="btn-export" @click="exportJSON">📤 导出 JSON</button>
         <button class="btn-export" @click="showNewMapModal = true">[ 新建地图 ]</button>
         <button class="btn-export btn-danger" @click="deleteCurrentMap" :disabled="!battlefield || !battlefield.id" title="删除当前已加载（已保存）的地图">[ 删除地图 ]</button>
@@ -127,6 +138,32 @@
         </div>
       </div>
     </div>
+    <!-- 前置「地图选择」界面：未进入编辑器时展示，便于选择已有地图或新建 -->
+    <div v-if="showMapPicker" class="terrain-mgr-overlay" @click.self="showMapPicker=false">
+      <div class="terrain-mgr-panel" style="max-width: 560px;">
+        <div class="terrain-mgr-header">
+          <span>[ 选择地图 ]</span>
+          <button class="tm-close btn btn-ghost btn-mini" @click="showMapPicker=false">✕</button>
+        </div>
+        <div class="terrain-mgr-body" style="display:flex;flex-direction:column;gap:10px;padding:18px;max-height:60vh;overflow-y:auto;">
+          <p style="color:#9f8e78;font-size:12px;margin:0 0 6px;">选择一张已有地图进行编辑，或新建一张地图。</p>
+          <div v-if="mapFileList.length === 0" style="color:#9f8e78;font-size:12px;text-align:center;padding:18px 0;">暂无已保存地图，请点击「新建地图」。</div>
+          <button
+            v-for="m in mapFileList"
+            :key="m.id"
+            class="map-pick-item"
+            @click="pickMap(m.id)"
+          >
+            <span class="mp-name">{{ m.name }}</span>
+            <span class="mp-meta">[{{ m.terrainCount ?? 0 }}格]{{ m.review_status === 'pending' ? ' · 审核中' : m.review_status === 'approved' ? ' · 已公开' : '' }}</span>
+          </button>
+        </div>
+        <div class="terrain-mgr-footer">
+          <button class="btn-save" style="width:100%;" @click="showMapPicker=false; showNewMapModal=true">+ 新建地图</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Phase9: 自定义地形管理弹窗 -->
     <div v-if="showTerrainMgr" class="terrain-mgr-overlay" @click.self="showTerrainMgr=false">
       <div class="terrain-mgr-panel">
@@ -140,8 +177,9 @@
               <label :for="`tm-name-${key}`" class="sr-only">地形名</label>
               <input :id="`tm-name-${key}`" v-model="editableTerrains[key].name" class="tm-input-name" placeholder="地形名" />
               <span class="tm-swatch" :style="{background: editableTerrains[key].color||'#888'}"></span>
-              <label :for="`tm-color-${key}`" class="sr-only">颜色</label>
-              <input :id="`tm-color-${key}`" v-model="editableTerrains[key].color" class="tm-input-color" placeholder="#hex" />
+              <label :for="`tm-color-${key}`" class="sr-only">颜色（光谱选择）</label>
+              <input :id="`tm-color-${key}`" type="color" v-model="editableTerrains[key].color" class="tm-color-picker" />
+              <input :id="`tm-hex-${key}`" v-model="editableTerrains[key].color" class="tm-hex-input" placeholder="#hex" @input="normalizeHex($event, key)" />
             </div>
             <div class="tm-row">
               <label :for="`tm-move-${key}`">移动消耗<input :id="`tm-move-${key}`" v-model.number="editableTerrains[key].move_cost" type="number" min="0" class="tm-input-num" /></label>
@@ -186,7 +224,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { mapAPI, glossaryAPI, terrainAPI } from '@/api/client'
 import {
   DEFAULT_SPACING_H, DEFAULT_SPACING_V, DEFAULT_OFFSET_FACTOR,
-  UNIVERSAL_TERRAIN_MAP, syncTerrainFromGlossary,
+  UNIVERSAL_TERRAIN_MAP, syncTerrainFromGlossary, TERRAIN_COLORS,
   ISO_DEFAULTS,
   parseCoord, parseCoordRange, colToLetter,
 } from '../utils/hexUtils.js'
@@ -225,6 +263,12 @@ const showNewMapModal = ref(false)
 const newMapWidth = ref(100)
 const newMapHeight = ref(100)
 const newMapError = ref('')
+// 「申请公开」状态：保存时透传 is_public，由后端审核状态机置 pending
+const applyPublic = ref(false)
+// 前置地图选择界面：true 时展示地图列表/新建，不进入编辑器
+const showMapPicker = ref(false)
+// 当前地图的审核状态回显（pending/approved/rejected）
+const reviewStatus = ref('')
 
 // ---- HexGridCanvas 组件引用 ----
 const hexGrid = ref(null)
@@ -343,8 +387,8 @@ async function loadTerrainDefinitions() {
   }
   Object.keys(editableTerrains).forEach(k => delete editableTerrains[k])
   Object.assign(editableTerrains, merged)
-  // 方案A：把 glossary 地形同步进前端唯一地形表，并重建画笔调色板
-  syncTerrainFromGlossary(terrains)
+  // 方案A：把合并后的地形同步进前端唯一地形表，并重建画笔调色板
+  syncTerrainFromGlossary(merged)
   rebuildTerrainPalette()
 }
 
@@ -359,13 +403,36 @@ function addTerrainType() {
   newTerrainKey.value = ''
   terrainSaveMsg.value = `已添加: ${key}`
   setTimeout(() => { terrainSaveMsg.value = '' }, 2000)
+  // 立即落库，确保刷新后不丢（与 deleteTerrainType 行为一致）
+  saveTerrainConfig().catch(err => {
+    console.error('新增地形落库失败:', err)
+  })
+}
+
+// 十六进制输入框：自动补 # 并过滤非法字符，保证颜色值合法（原生 color input 只接受 #RRGGBB）
+function normalizeHex(e, key) {
+  let v = (e.target.value || '').trim().replace(/[^0-9a-fA-F#]/g, '')
+  if (v && v[0] !== '#') v = '#' + v
+  if (v === '#' || v.length > 7) return
+  editableTerrains[key].color = v
+  e.target.value = v
 }
 
 function deleteTerrainType(key) {
   if (!confirm(`确认删除地形 "${key}"?`)) return
+  if (!(key in editableTerrains)) return
   delete editableTerrains[key]
-  terrainSaveMsg.value = `已删除: ${key}`
-  setTimeout(() => { terrainSaveMsg.value = '' }, 2000)
+  // 同步从前端唯一地形表移除，避免画笔/调色板/画布残留
+  if (UNIVERSAL_TERRAIN_MAP[key]) delete UNIVERSAL_TERRAIN_MAP[key]
+  if (TERRAIN_COLORS && TERRAIN_COLORS[key]) delete TERRAIN_COLORS[key]
+  rebuildTerrainPalette()
+  if (hexGrid.value) hexGrid.value.invalidateTerrain()
+  terrainSaveMsg.value = `已删除: ${key}（请点保存地形库以落库）`
+  setTimeout(() => { terrainSaveMsg.value = '' }, 2500)
+  // 立即落库，确保重新打开/刷新后不再复活
+  saveTerrainConfig().catch(err => {
+    console.error('删除地形落库失败:', err)
+  })
 }
 
 // 需求④ 上传/清除地形素材，写回 glossary 配置（material_url）
@@ -399,7 +466,17 @@ async function saveTerrainConfig() {
     await glossaryAPI.saveConfig(current)
     // 方案A：保存后立即把最新地形同步进前端唯一地形表，使新增/修改的地形即时反映到画笔
     syncTerrainFromGlossary(editableTerrains)
+    // 清理已被删除的地形：从唯一地形表与颜色表移除，避免画笔/画布残留
+    const alive = new Set(Object.keys(editableTerrains))
+    Object.keys(UNIVERSAL_TERRAIN_MAP).forEach(k => {
+      if (!alive.has(k) && k !== 'void' && k !== 'space') {
+        delete UNIVERSAL_TERRAIN_MAP[k]
+        if (TERRAIN_COLORS && TERRAIN_COLORS[k]) delete TERRAIN_COLORS[k]
+      }
+    })
     rebuildTerrainPalette()
+    // 重绘已有格子以反映颜色变化（含删除后残留格子的回退）
+    if (hexGrid.value) hexGrid.value.invalidateTerrain()
     terrainSaveMsg.value = '地形库保存成功!'
     addLog('terrain', '地形库配置已保存')
   } catch (e) {
@@ -543,6 +620,22 @@ function resetSpacing() {
 
 function navigateTo(path) { router.push(path) }
 
+// 「申请公开」显式按钮：切换 is_public，保存时由后端审核状态机置 pending
+function toggleApplyPublic() {
+  if (!battlefield.value || !battlefield.value.id) return
+  applyPublic.value = !applyPublic.value
+  if (applyPublic.value && reviewStatus.value === 'rejected') {
+    reviewStatus.value = '' // 重新申请，清除旧驳回标记
+  }
+}
+
+// 前置地图选择器：选中某地图后加载并关闭选择器
+async function pickMap(id) {
+  selectedMapFile.value = id
+  showMapPicker.value = false
+  await onSelectMapFile()
+}
+
 // ================================================================
 //  数据加载 / 保存 / 导出
 // ================================================================
@@ -649,6 +742,28 @@ async function loadMapData(mapData) {
     if (hc.spacingV !== undefined) spacingV.value = hc.spacingV
     if (hc.offsetFactor !== undefined) offsetFactor.value = hc.offsetFactor
   }
+  // === 自定义地形传导：把地图自带的 terrain_defs 同步回唯一地形表 ===
+  // 保存地图时 terrain_defs 携带了自定义地形(如「保护罩」)的 name/color，
+  // 但 UNIVERSAL_TERRAIN_MAP 重新初始化后只剩 20 种硬编码地形，地图引用的
+  // 自定义 id 会读取失败并回退 void(灰背景)。此处从 terrain_defs 重建，
+  // 保证画布颜色与调色板两栏都能正确反映自定义地形色彩。
+  const _defs = mapData.terrain_defs || mapData.terrainDefs
+  if (Array.isArray(_defs) && _defs.length) {
+    const _defMap = {}
+    for (const d of _defs) {
+      if (!d || !d.id) continue
+      _defMap[d.id] = {
+        name: d.name || d.id,
+        color: d.color || (UNIVERSAL_TERRAIN_MAP[d.id] && UNIVERSAL_TERRAIN_MAP[d.id].color) || '#888888',
+        cost: d.moveCost ?? (UNIVERSAL_TERRAIN_MAP[d.id] && UNIVERSAL_TERRAIN_MAP[d.id].cost) ?? 1,
+      }
+    }
+    if (Object.keys(_defMap).length) {
+      syncTerrainFromGlossary(_defMap)
+      rebuildTerrainPalette()
+      addLog('info', `已恢复 ${Object.keys(_defMap).length} 个自定义地形色彩定义`)
+    }
+  }
   // 强制等待 Vue 在微任务队列中完成对 terrainMap 的数据更新与计算流传播
   await nextTick()
   await nextTick()
@@ -659,6 +774,9 @@ async function loadMapData(mapData) {
     }
   }
   addLog('system', `加载地图: ${mapData.name || '未命名'} (${Object.keys(terrainMap).filter(k => terrainMap[k] && extractTerrainId(terrainMap[k]) !== 'void').length} 个地形格子)`)
+  // 同步公开申请/审核状态回显
+  reviewStatus.value = mapData.review_status || ''
+  applyPublic.value = mapData.review_status === 'pending' || mapData.review_status === 'approved' || !!mapData.is_public
 }
 
 onMounted(async () => {
@@ -747,7 +865,8 @@ async function saveMap() {
       // 留白(void)=画板背景，不入库；月面(moon)是真实地形，入库
       if (tid !== 'void') terrainData[key] = val
     })
-    await mapAPI.updateBattlefield(battlefield.value.id, {
+    const payload = {
+      name: battlefield.value.name || '未命名地图',
       terrain: terrainData,
       terrain_defs: terrainTypes.value.map(t => ({ id: t.id, name: t.name, color: t.color, moveCost: t.moveCost })),
       hex_config: {
@@ -755,12 +874,38 @@ async function saveMap() {
         spacingV: spacingV.value,
         offsetFactor: offsetFactor.value,
       },
-    })
+      is_public: applyPublic.value,
+    }
+    let res
+    if (battlefield.value.id) {
+      // 已有地图：直接更新
+      res = await mapAPI.updateBattlefield(battlefield.value.id, payload)
+    } else {
+      // 新建地图：后端尚未分配 id，先 create 拿到 id 再视为已保存
+      res = await mapAPI.createBattlefield(payload)
+      if (res && res.data && res.data.id) {
+        battlefield.value.id = res.data.id
+      }
+    }
     saveStatus.value = `已保存 ${Object.keys(terrainData).length} 个地形 (${new Date().toLocaleTimeString()})`
+    // 后端审核状态机回显：普通用户提交公开会变为 pending，等待 admin/dominator 审核
+    reviewStatus.value = (res && res.data && res.data.review_status) || reviewStatus.value
     addLog('info', `地图已保存: ${battlefield.value?.name || '未命名'} (${Object.keys(terrainData).length} 个地形格子)`)
+
+    // 落库校验：保存后回读一次，确认后端确实持久化成功（避免「显示成功但刷新即丢」）
+    try {
+      const { data: verify } = await mapAPI.getBattlefield(battlefield.value.id)
+      const vCells = verify && (verify.cells || verify.terrain || verify.terrainData)
+      const vCount = Array.isArray(vCells) ? vCells.length : Object.keys(vCells || {}).length
+      if (vCount !== Object.keys(terrainData).length) {
+        addLog('warn', `保存落库校验不一致: 本地 ${Object.keys(terrainData).length} ≠ 后端 ${vCount}`)
+      }
+    } catch (ve) {
+      addLog('warn', '保存落库校验回读失败(不影响主流程): ' + (ve?.message || ve))
+    }
   } catch (e) {
     saveStatus.value = '保存失败!'
-    addLog('error', '地图保存失败')
+    addLog('error', '地图保存失败: ' + (e?.response?.data?.error || e?.message || String(e)))
   } finally {
     saving.value = false
   }
@@ -927,6 +1072,33 @@ function exportJSON() {
   font-family: monospace;
 }
 .btn-export:hover { background: rgba(255,176,0,0.3); }
+
+/* 「申请公开」按钮（与单位编辑器一致） */
+.btn-apply-public {
+  padding: 6px 16px; background: transparent; border: 1px solid rgba(255,176,0,0.45);
+  color: #ffb000; font-size: 11px; cursor: pointer; font-family: monospace;
+  text-transform: uppercase; letter-spacing: .03em; border-radius: 3px; transition: all .15s;
+}
+.btn-apply-public:hover:not(:disabled) { background: rgba(255,176,0,0.1); border-color: #ffb000; }
+.btn-apply-public:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-apply-public.applied { background: rgba(255,176,0,0.18); border-color: #ffb000; color: #ffd76a; }
+
+/* 审核状态徽标 */
+.review-badge { font-size: 10px; padding: 3px 8px; border-radius: 3px; font-family: monospace; }
+.review-badge.pending { background: rgba(255,176,0,0.15); color: #ffb000; border: 1px solid rgba(255,176,0,0.4); }
+.review-badge.approved { background: rgba(79,209,99,0.15); color: #4fd163; border: 1px solid rgba(79,209,99,0.4); }
+.review-badge.rejected { background: rgba(255,99,99,0.15); color: #ff6363; border: 1px solid rgba(255,99,99,0.4); }
+
+/* 前置地图选择列表项 */
+.map-pick-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 11px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(159,142,120,0.2);
+  color: #f1f3fc; font-family: monospace; font-size: 13px; cursor: pointer; text-align: left; transition: all .15s;
+}
+.map-pick-item:hover { background: rgba(255,176,0,0.1); border-color: #ffb000; }
+.mp-name { color: #f1f3fc; font-weight: 700; }
+.mp-meta { color: #9f8e78; font-size: 11px; }
+
 .btn-danger {
   padding: 6px 16px;
   background: rgba(255,64,64,0.15);
@@ -1090,7 +1262,7 @@ function exportJSON() {
 .footer {
   position: fixed;
   bottom: 0;
-  left: var(--sidebar-w, 240px);
+  left: 0;
   right: 0;
   background: rgba(2,9,17,0.92);
   border-top: 1px solid rgba(255,176,0,0.1);
@@ -1230,8 +1402,14 @@ function exportJSON() {
   background: rgba(0,0,0,0.5); color: #c1e8ff;
   border: 1px solid rgba(159,142,120,0.4); font-size: 11px; font-family: monospace;
 }
-.tm-input-color {
-  width: 72px; padding: 3px 6px;
+.tm-color-picker {
+  width: 30px; height: 26px; padding: 0; border: 1px solid rgba(159,142,120,0.4);
+  background: none; border-radius: 4px; cursor: pointer; flex-shrink: 0;
+}
+.tm-color-picker::-webkit-color-swatch-wrapper { padding: 2px; }
+.tm-color-picker::-webkit-color-swatch { border: none; border-radius: 2px; }
+.tm-hex-input {
+  width: 78px; padding: 3px 6px;
   background: rgba(0,0,0,0.5); color: #c1e8ff;
   border: 1px solid rgba(159,142,120,0.4); font-size: 11px; font-family: monospace;
 }

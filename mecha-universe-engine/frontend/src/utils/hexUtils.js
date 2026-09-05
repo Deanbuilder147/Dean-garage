@@ -306,6 +306,32 @@ export function hexDistance(q1, r1, q2, r2) {
 }
 
 /**
+ * ★ I-6 (K9)：六角格直线插值（cube lerp + cube round），含两端。
+ * 前端镜像真相源，算法与 @mecha/shared-kernel/src/hexMath.ts 的 hexLineDraw 逐字一致。
+ * 仅用于客户端 LoS 预览/高亮，服务端权威判定以 shared-kernel.computeLoS 为准。
+ */
+export function hexLineDraw(fromQ, fromR, toQ, toR) {
+  const offToAx = (q, r) => ({ q: q - (r + (r & 1)) / 2, r });
+  const axToOff = (q, r) => ({ q: q + (r + (r & 1)) / 2, r });
+  const a = offToAx(fromQ, fromR);
+  const b = offToAx(toQ, toR);
+  const aC = { q: a.q, r: a.r, s: -a.q - a.r };
+  const bC = { q: b.q, r: b.r, s: -b.q - b.r };
+  const n = hexDistance(fromQ, fromR, toQ, toR);
+  if (n === 0) return [{ q: fromQ, r: fromR }];
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const c = hexRound(
+      aC.q + (bC.q - aC.q) * t,
+      aC.r + (bC.r - aC.r) * t,
+    );
+    out.push(axToOff(c.q, c.r));
+  }
+  return out;
+}
+
+/**
  * ★ Phase 30-HexTruth：枚举以 (centerQ, centerR) 为中心、半径 range 内的所有格（含中心）。
  * 前端镜像真相源，算法与 @mecha/shared-kernel/src/hexMath.ts 的 getHexesInRange 逐字一致。
  * 基于 axial/cube 范围环（满足 |q|+|r|+|s| <= range 的六边形范围），与 hexDistance 同源，
@@ -371,20 +397,25 @@ export function resolveSkillCategory(skill) {
 }
 
 // 由技能对象推导归一化射程字段（与 shared-kernel.getSkillRangeFields 逐字镜像）
-// ★ 加法模型（2026-08-03 用户裁定 · 严格收敛版）：
-//   range = 类型基准(近战1/远程3/auto0) + bonusRange
+// ★ 加法模型（裁定 6.1）：maxRange = 基准 + bonusRange；minRange = 配置 min_range 优先否则分类基准
 //   bonusRange = Number(bonus_range || extra_range) || 0
-// ★★★ 彻底切断历史绝对射程字段：cast_range/range/max_range/range_max/rangeLabel/
-//     min_cast_range/min_range/range_min 一律不再读取（避免 range:2 语义歧义导致误算）。
-export function getSkillRangeFields(skill) {
+// ★ 红线：严禁读取 cast_range/range/max_range/range_max/rangeLabel 等绝对射程字段。
+//   min_range 与 bonus_range 是合法相对字段（盲区/加成），保留使用。
+// casterContext（隐患7.3预留）：{ passiveBonusRange, envModifier } 动态叠加进 maxRange。
+export function getSkillRangeFields(skill, casterContext) {
   const cat = resolveSkillCategory(skill);
   const baseRange = DEFAULT_RANGE_BY_CATEGORY[cat];
   const baseMin = DEFAULT_MIN_RANGE_BY_CATEGORY[cat];
   if (!skill) return { minRange: baseMin, maxRange: baseRange };
   const bonusRaw = skill.bonus_range ?? skill.extra_range;
-  const bonusRange = Number(bonusRaw) || 0;
+  let bonusRange = Number(bonusRaw) || 0;
+  const ctx = casterContext || skill.__casterContext;
+  if (ctx) {
+    bonusRange += (Number(ctx.passiveBonusRange) || 0) + (Number(ctx.envModifier) || 0);
+  }
   const maxRange = baseRange + bonusRange;
-  const minRange = baseMin;
+  const minRaw = skill.min_range;
+  const minRange = (minRaw != null) ? (Number(minRaw) || 0) : baseMin;
   return { minRange, maxRange };
 }
 

@@ -33,7 +33,6 @@
           </div>
         </div>
         <button class="card-btn">启动</button>
-        <div class="scanline"></div>
       </div>
 
       <div class="card" @click="router.push('/units')">
@@ -47,7 +46,6 @@
           </div>
         </div>
         <button class="card-btn">配置</button>
-        <div class="scanline"></div>
       </div>
 
       <div class="card" @click="router.push('/battlefield-edit')">
@@ -61,11 +59,10 @@
           </div>
         </div>
         <button class="card-btn">构建</button>
-        <div class="scanline"></div>
       </div>
 
       <!-- Phase 19: 词条造词工厂卡片 -->
-      <div class="card" @click="router.push('/glossary')">
+      <div class="card" @click="router.push('/glossary-studio')">
         <div class="card-text">
           <div class="card-icon">
             <svg class="icon icon-xl" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor" opacity="0.15"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
@@ -76,7 +73,6 @@
           </div>
         </div>
         <button class="card-btn">查阅</button>
-        <div class="scanline"></div>
       </div>
 
     </div>
@@ -139,26 +135,20 @@ function handleLogout() {
 .tactical-header {
   position: relative;
   margin-bottom: 40px;
-  padding-left: 16px;
-}
-.tactical-header::before {
-  content: ''; position: absolute;
-  left: 0; top: 0;
-  width: 4px; height: 100%;
-  background: #ffb000;
 }
 .tactical-header h1 {
-  font-size: 32px;
-  font-weight: 900;
+  font-size: 26px;
+  font-weight: 700;
   color: #c1e8ff;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
+  text-shadow: 0 0 6px rgba(0,229,255,.7), 0 0 14px rgba(0,229,255,.35);
   margin-bottom: 8px;
 }
 .header-meta {
   display: flex; align-items: center; gap: 16px;
   font-family: 'Fira Code', monospace;
   font-size: 11px;
-  color: #d7c4ac;
+  color: #9f8e78;
 }
 .status-dot {
   display: inline-flex; align-items: center; gap: 6px;
@@ -183,24 +173,16 @@ function handleLogout() {
 }
 .card {
   position: relative;
-  background: #001e2b;
-  border: 1px solid rgba(255,176,0,0.25);
-  padding: 32px;
+  background: transparent;
+  border: none;
+  padding: 8px 0;
   display: flex;
   flex-direction: row;
   align-items: center;
   cursor: pointer;
-  transition: background 0.2s, box-shadow 0.2s;
-  box-shadow: 6px 6px 0 rgba(0,0,0,0.3), 10px 10px 16px rgba(0,0,0,0.2);
+  transition: transform 0.15s;
 }
-.card::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 0;
-  width: 4px; height: 100%;
-  background: #ffb000;
-}
-.card:hover { background: #002e3f; box-shadow: 8px 8px 0 rgba(0,0,0,0.35), 14px 14px 20px rgba(0,0,0,0.25); }
+.card:hover { transform: translateX(8px); }
 .card-tag {
   position: absolute;
   top: 16px; right: 16px;
@@ -291,7 +273,7 @@ function handleLogout() {
 .status-bar .sep { color: #9f8e78; }
 
 .footer {
-  position: fixed; bottom: 0; left: var(--sidebar-w, 240px); right: 0;
+  position: fixed; bottom: 0; left: 0; right: 0;
   transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   background: rgba(2,9,17,0.92);
   border-top: 1px solid rgba(255,176,0,0.18);

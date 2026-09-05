@@ -7,7 +7,7 @@
     3. props → 单向数据管道的入口；emits → 纯粹坐标广播的出口
     4. Canvas 尺寸由逻辑脚本硬性控制，严禁 CSS Flex/百分比拉伸
   -->
-  <div class="hex-engine-sandbox" ref="engineWrapper">
+  <div class="hex-engine-sandbox" ref="engineWrapper" :style="sandboxStyle">
     <div class="hex-engine-container" ref="engineContainer">
       <canvas ref="mainCanvas"></canvas>
     </div>
@@ -139,14 +139,47 @@ const props = defineProps({
   /** 是否显示坐标标签 */
   showCoords: { type: Boolean, default: true },
 
+  // ===== dominator 专用地图视图设置（传入即覆盖默认样式）=====
+  /** 地形格子整体透明度 0-1（默认 1 = 不透明） */
+  terrainOpacity: { type: Number, default: 1 },
+  /** 地形颜色覆盖（hex 字符串）；为空则用原地形色/材质 */
+  terrainOverrideColor: { type: String, default: '' },
+  /** 网格线 / 描边透明度 0-1（默认 0.08） */
+  gridLineOpacity: { type: Number, default: 0.08 },
+  /** 单位层透明度 0-1（默认 1，透传 safeDrawBattleScene 使用） */
+  unitOpacity: { type: Number, default: 1 },
+  /** dominator 本地视图：横向格子间距倍率（默认 1，仅影响本地渲染） */
+  spacingHScale: { type: Number, default: 1 },
+  /** dominator 本地视图：纵向格子间距倍率（默认 1，仅影响本地渲染） */
+  spacingVScale: { type: Number, default: 1 },
+
   /** 悬停时是否显示坐标提示 */
   showHover: { type: Boolean, default: true },
 
   /** 是否启用离屏地形缓存 (编辑模式建议关闭，战场模式建议开启) */
   useTerrainCache: { type: Boolean, default: true },
 
+  /** 战斗画布底色（覆盖默认 #061218；canvas 用 clearRect 透明，底色由 CSS 提供） */
+  bgColor: { type: String, default: '#061218' },
+  /** 战斗画布背景图（dataURL 或 url）；透明 canvas 下透出，受异形 clip-path 自动裁切 */
+  bgImage: { type: String, default: '' },
+
   /** 动画时钟间隔 (ms) */
   clockInterval: { type: Number, default: 100 },
+
+  /**
+   * 触控支持开关（方案 A）
+   * 仅 MobileBattleView 传 true；NewBattleView（PC）保持 false。
+   * 开启后叠加 Pointer Events 抽象（单指平移/双指捏合/点按），
+   * 不触动原有 mouse/wheel 事件，确保 PC 零回归。
+   */
+  enableTouch: { type: Boolean, default: false },
+
+  /**
+   * 进场/自愈是否适配「整张非 void 地图」（而非默认聚焦中心 10×10）。
+   * 战场视图传 true → 进场即可见完整战场，无需手动缩放；默认 false 保持编辑器/其他用途原行为。
+   */
+  fitAllOnMount: { type: Boolean, default: false },
 })
 
 // ================================================================
@@ -156,6 +189,16 @@ const emit = defineEmits([
   /** cell-clicked: 用户点击任意像素 → 反算 Even-R (q,r) → 广播 */
   'cell-clicked',
 ])
+
+// 战斗画布背景（底色 + 背景图）；canvas 本身透明，背景由 CSS 提供，
+// 且位于 .sc-hit 的 clip-path 内，自动被异形裁切。
+const sandboxStyle = computed(() => ({
+  backgroundColor: props.bgColor || '#061218',
+  backgroundImage: props.bgImage ? `url("${props.bgImage}")` : 'none',
+  backgroundSize: 'cover',
+  backgroundPosition: 'center',
+  backgroundRepeat: 'no-repeat',
+}))
 
 // ================================================================
 //  内部响应式状态
@@ -239,10 +282,10 @@ const visibleRange = reactive({ minQ: 0, maxQ: 0, minR: 0, maxR: 0 })
 // ================================================================
 
 function getSpacingH() {
-  return props.gridData?.topologyParam?.spacingH ?? DEFAULT_SPACING_H
+  return (props.gridData?.topologyParam?.spacingH ?? DEFAULT_SPACING_H) * (props.spacingHScale ?? 1)
 }
 function getSpacingV() {
-  return props.gridData?.topologyParam?.spacingV ?? DEFAULT_SPACING_V
+  return (props.gridData?.topologyParam?.spacingV ?? DEFAULT_SPACING_V) * (props.spacingVScale ?? 1)
 }
 // Phase 30-Fix: 偏移系数实时读取并参与六角格定位计算
 function getOffsetFactor() {
@@ -442,20 +485,21 @@ function renderTerrainCache() {
       const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
 
       // 留白(void)地形：透明填充，但保留极淡边线使网格结构可见（编辑器与战场均画）。
+      const gl = props.gridLineOpacity
       if (terrainId === 'void') {
         if (props.mode === 'planar') {
           drawHexPath(tctx, flatX, flatY)
-          tctx.strokeStyle = 'rgba(255,255,255,0.25)'
+          tctx.strokeStyle = `rgba(255,255,255,${Math.max(gl * 3, 0.05)})`
           tctx.lineWidth = 0.5
           tctx.stroke()
         } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
           drawIsoHexPathDeformed(tctx, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
-          tctx.strokeStyle = 'rgba(255,255,255,0.10)'
+          tctx.strokeStyle = `rgba(255,255,255,${gl})`
           tctx.lineWidth = 0.5
           tctx.stroke()
         } else {
           drawIsoHexPath(tctx, flatX, flatY, ISO)
-          tctx.strokeStyle = 'rgba(255,255,255,0.10)'
+          tctx.strokeStyle = `rgba(255,255,255,${gl})`
           tctx.lineWidth = 0.5
           tctx.stroke()
         }
@@ -468,30 +512,38 @@ function renderTerrainCache() {
       const matPattern = (matImg && matImg.complete && !matImg.__failed) ? tctx.createPattern(matImg, 'repeat') : null
 
       // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：挤出/等距绘制。
+      // dominator 视图设置：整格地形统一透明度 + 可选颜色覆盖
+      const terrainFill = props.terrainOverrideColor || matPattern || terrainInfo.color
+      tctx.globalAlpha = props.terrainOpacity
       if (props.mode === 'planar') {
         drawHexPath(tctx, flatX, flatY)
-        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fillStyle = terrainFill
         tctx.fill()
-        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.globalAlpha = 1
+        tctx.strokeStyle = `rgba(255,255,255,${gl})`
         tctx.lineWidth = 0.5
         tctx.stroke()
       } else if (props.extrude && (terrainInfo.height || 0) > 0) {
-        drawIsoHexColumn(tctx, flatX, flatY, ISO, terrainInfo.height, terrainInfo.color, matPattern || terrainInfo.color)
+        drawIsoHexColumn(tctx, flatX, flatY, ISO, terrainInfo.height, terrainInfo.color, terrainFill)
+        tctx.globalAlpha = 1
       } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
         drawIsoHexPathDeformed(tctx, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
-        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fillStyle = terrainFill
         tctx.fill()
-        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.globalAlpha = 1
+        tctx.strokeStyle = `rgba(255,255,255,${gl})`
         tctx.lineWidth = 0.5
         tctx.stroke()
       } else {
         drawIsoHexPath(tctx, flatX, flatY, ISO)
-        tctx.fillStyle = matPattern || terrainInfo.color
+        tctx.fillStyle = terrainFill
         tctx.fill()
-        tctx.strokeStyle = 'rgba(255,255,255,0.08)'
+        tctx.globalAlpha = 1
+        tctx.strokeStyle = `rgba(255,255,255,${gl})`
         tctx.lineWidth = 0.5
         tctx.stroke()
       }
+      tctx.globalAlpha = 1
 
       // 坐标标签 — planar 用纯净 2D，iso 用 ISO 变换
       if (props.showCoords) {
@@ -610,14 +662,14 @@ function computeFitScale() {
     if (c.y < minY) minY = c.y
     if (c.y > maxY) maxY = c.y
   }
-  // 用户需求：最小缩放下整张网格(含最上/最下排)完整可见，并额外空出约 1 个单元格行的边距。
+  // 用户需求：最小缩放下整张网格(含最上/最下排)完整可见。margin=1.0 → 战场高度正好等于外框高度。
   // fit 区域 = 网格包围盒 + 上下各约 1 行(HEX_HEIGHT) + 左右各约 1 列(HEX_WIDTH)。
   const padX = HEX_WIDTH
   const padY = HEX_HEIGHT
   minX -= padX; maxX += padX; minY -= padY; maxY += padY
   const regionW = Math.max(1, maxX - minX)
   const regionH = Math.max(1, maxY - minY)
-  const margin = 0.98
+  const margin = 1.0
   const fitW = (canvas.width / regionW) * margin
   const fitH = (canvas.height / regionH) * margin
   // 下限即"整图入框+1 行边距"，不再用固定硬下限(避免大地图无法缩到整图)
@@ -670,7 +722,8 @@ function focusCentralGrid(sideN = 10) {
   minY -= HEX_HEIGHT / 2; maxY += HEX_HEIGHT / 2
   const regionW = maxX - minX
   const regionH = maxY - minY
-  const margin = 0.9
+  // 进场 fit-all：整图缩放控制在 67%，留出充足边距，确保部署动画完整可见（非 fit-all 撑满外框高度）
+  const margin = props.fitAllOnMount ? 0.67 : 1.0
   const fitW = (canvas.width / regionW) * margin
   const fitH = (canvas.height / regionH) * margin
   let ns = Math.min(fitW, fitH)
@@ -701,10 +754,10 @@ function initCanvas() {
   camera.viewport.width = canvas.width
   camera.viewport.height = canvas.height
 
-  // 战场(iso)：进入默认聚焦地图正中 10×10 格，其余靠玩家缩放/平移。
+  // 战场(iso)：进入默认聚焦地图正中 10×10 格，其余靠玩家缩放/平移；fitAllOnMount 时整图居中(缩放 67%)。
   // 编辑器(planar)：大网格自动缩放到整图可见的 0.5x。
   if (props.mode === 'iso') {
-    focusCentralGrid(10)
+    focusCentralGrid(props.fitAllOnMount ? 9999 : 10)
   } else if (props.gridData.width > 30 || props.gridData.height > 30) {
     scale.value = 0.5
   }
@@ -727,7 +780,7 @@ function initCanvas() {
         canvas.height = ch
         camera.viewport.width = cw
         camera.viewport.height = ch
-        if (props.mode === 'iso') focusCentralGrid(10)
+        if (props.mode === 'iso') focusCentralGrid(props.fitAllOnMount ? 9999 : 10)
         else centerGrid()
         invalidateTerrain()
         draw()
@@ -788,6 +841,8 @@ function draw() {
       visibleRange,
       isInViewport,
       iso: { ...ISO },
+      hoverHex: { q: hlQ, r: hlR },
+      unitOpacity: props.unitOpacity,
     })
     ctx.restore()
   }
@@ -816,20 +871,21 @@ function renderTerrainInline(ctx2d) {
       const { flatX, flatY } = pointyTopCenter(q, r, HEX_RADIUS, h, v)
 
       // 留白(void)地形：透明填充，但保留极淡边线使网格结构可见（编辑器与战场均画）。
+      const gl = props.gridLineOpacity
       if (terrainId === 'void') {
         if (props.mode === 'planar') {
           drawHexPath(ctx2d, flatX, flatY)
-          ctx2d.strokeStyle = 'rgba(255,255,255,0.25)'
+          ctx2d.strokeStyle = `rgba(255,255,255,${Math.max(gl * 3, 0.05)})`
           ctx2d.lineWidth = 0.5
           ctx2d.stroke()
         } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
           drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
-          ctx2d.strokeStyle = 'rgba(255,255,255,0.10)'
+          ctx2d.strokeStyle = `rgba(255,255,255,${gl})`
           ctx2d.lineWidth = 0.5
           ctx2d.stroke()
         } else {
           drawIsoHexPath(ctx2d, flatX, flatY, ISO)
-          ctx2d.strokeStyle = 'rgba(255,255,255,0.10)'
+          ctx2d.strokeStyle = `rgba(255,255,255,${gl})`
           ctx2d.lineWidth = 0.5
           ctx2d.stroke()
         }
@@ -842,17 +898,33 @@ function renderTerrainInline(ctx2d) {
       const matImg = matUrl ? ensureMaterialImage(matUrl) : null
       const matPattern = (matImg && matImg.complete && !matImg.__failed) ? ctx2d.createPattern(matImg, 'repeat') : null
 
-      // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：等距逐顶点绘制。
+      // 编辑器(planar)：标准正六边形（无等距变形）。战场(iso)：挤出/等距绘制。
+      // dominator 视图设置：整格地形统一透明度 + 可选颜色覆盖
+      const terrainFill = props.terrainOverrideColor || matPattern || terrainInfo.color
       if (props.mode === 'planar') {
         drawHexPath(ctx2d, flatX, flatY)
+        ctx2d.globalAlpha = props.terrainOpacity
+        ctx2d.fillStyle = terrainFill
+        ctx2d.fill()
+        ctx2d.globalAlpha = 1
+      } else if (props.extrude && (terrainInfo.height || 0) > 0) {
+        ctx2d.globalAlpha = props.terrainOpacity
+        drawIsoHexColumn(ctx2d, flatX, flatY, ISO, terrainInfo.height, terrainInfo.color, terrainFill)
+        ctx2d.globalAlpha = 1
       } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
         drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+        ctx2d.globalAlpha = props.terrainOpacity
+        ctx2d.fillStyle = terrainFill
+        ctx2d.fill()
+        ctx2d.globalAlpha = 1
       } else {
         drawIsoHexPath(ctx2d, flatX, flatY, ISO)
+        ctx2d.globalAlpha = props.terrainOpacity
+        ctx2d.fillStyle = terrainFill
+        ctx2d.fill()
+        ctx2d.globalAlpha = 1
       }
-      ctx2d.fillStyle = matPattern || terrainInfo.color
-      ctx2d.fill()
-      ctx2d.strokeStyle = 'rgba(255,255,255,0.08)'
+      ctx2d.strokeStyle = `rgba(255,255,255,${gl})`
       ctx2d.lineWidth = 0.5
       ctx2d.stroke()
 
@@ -916,18 +988,45 @@ function renderHighlights(ctx2d) {
   // === 鼠标悬停高亮边框 (hlQ/hlR 复活) ===
   if (props.showHover && hlQ >= 0 && hlR >= 0 && isInViewport(hlQ, hlR)) {
     const { flatX, flatY } = pointyTopCenter(hlQ, hlR, HEX_RADIUS, h, v)
-    // 编辑器(planar)：标准正六边形；战场(iso)：等距
+    // 计算六边形 6 个顶点（顺序与绘制路径对齐：v0=正上, v1=右上, v2=右下, v3=正下, v4=左下, v5=左上）
+    const verts = []
     if (props.mode === 'planar') {
-      drawHexPath(ctx2d, flatX, flatY)
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 2
+        verts.push({ x: flatX + HEX_RADIUS * Math.cos(a), y: flatY + HEX_RADIUS * Math.sin(a) })
+      }
     } else if (ISO.topFlat > 0.01 || ISO.bottomFlat > 0.01) {
-      drawIsoHexPathDeformed(ctx2d, flatX, flatY, HEX_WIDTH, HEX_HEIGHT, ISO.topFlat, ISO.bottomFlat, ISO)
+      const hw = HEX_WIDTH / 2, hh = HEX_HEIGHT / 2
+      const sideTopY = flatY - hh + ISO.topFlat * HEX_HEIGHT
+      const sideBotY = flatY + hh - ISO.bottomFlat * HEX_HEIGHT
+      const raw = [
+        { x: flatX, y: flatY - hh }, { x: flatX + hw, y: sideTopY }, { x: flatX + hw, y: sideBotY },
+        { x: flatX, y: flatY + hh }, { x: flatX - hw, y: sideBotY }, { x: flatX - hw, y: sideTopY },
+      ]
+      for (const p of raw) verts.push(isoTransformPoint(p.x, p.y, ISO))
     } else {
-      drawIsoHexPath(ctx2d, flatX, flatY, ISO)
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 2
+        verts.push(isoTransformPoint(flatX + HEX_RADIUS * Math.cos(a), flatY + HEX_RADIUS * Math.sin(a), ISO))
+      }
     }
-    ctx2d.strokeStyle = 'rgba(255, 215, 0, 0.85)'
-    ctx2d.lineWidth = 2.5
-    ctx2d.stroke()
-    ctx2d.lineWidth = 1
+    // 仅正上(0)/右下(2)/左下(4) 三个角，从顶点向相邻两边各延伸半条边
+    const corners = [0, 2, 4]
+    ctx2d.strokeStyle = 'rgba(255, 215, 0, 0.9)'
+    ctx2d.lineWidth = 2
+    for (const i of corners) {
+      const cur = verts[i]
+      const prev = verts[(i + 5) % 6]
+      const next = verts[(i + 1) % 6]
+      const midPrev = { x: (cur.x + prev.x) / 2, y: (cur.y + prev.y) / 2 }
+      const midNext = { x: (cur.x + next.x) / 2, y: (cur.y + next.y) / 2 }
+      ctx2d.beginPath()
+      ctx2d.moveTo(cur.x, cur.y)
+      ctx2d.lineTo(midPrev.x, midPrev.y)
+      ctx2d.moveTo(cur.x, cur.y)
+      ctx2d.lineTo(midNext.x, midNext.y)
+      ctx2d.stroke()
+    }
   }
 }
 
@@ -1034,6 +1133,129 @@ function getGridDims() {
 }
 
 // ================================================================
+//  触控/指针共享的相机原语（方案 A，阶段 0 抽离）
+//  纯函数：仅操作相机状态与重绘，不绑定任何事件，PC mouse 路径可复用。
+// ================================================================
+
+const SLOP_PX = 8 // Tap/Pan 位移容差（用户指定 8px）
+
+/** 按下起点记录（单指/鼠标共用） */
+function startPan(clientX, clientY) {
+  dragStartX = clientX; dragStartY = clientY
+  dragStartOX = offsetX.value; dragStartOY = offsetY.value
+  isDragging = false
+}
+
+/** 平移过程：位移超过 SLOP_PX 升级为拖拽 */
+function doPan(clientX, clientY) {
+  const canvas = mainCanvas.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const sx = canvas.width / rect.width
+  const sy = canvas.height / rect.height
+  const dx = clientX - dragStartX
+  const dy = clientY - dragStartY
+  if (Math.abs(dx) > SLOP_PX || Math.abs(dy) > SLOP_PX) isDragging = true
+  if (isDragging) {
+    offsetX.value = dragStartOX + dx * sx
+    offsetY.value = dragStartOY + dy * sy
+    draw()
+  }
+}
+
+/** 平移结束：刷新可见格并复位拖拽标志 */
+function endPan() {
+  if (isDragging) updateVisibleRange()
+  isDragging = false
+}
+
+/** 以屏幕点(clientX,clientY)为锚点缩放 factor 倍（Pivot Zoom 复用数学） */
+function doZoomAt(clientX, clientY, factor) {
+  const canvas = mainCanvas.value
+  if (!canvas) return
+  const ns = Math.max(computeFitScale(), Math.min(3, scale.value * factor))
+  const worldPos = canvasPosToWorld(
+    (clientX - canvas.getBoundingClientRect().left) * (canvas.width / canvas.getBoundingClientRect().width),
+    (clientY - canvas.getBoundingClientRect().top) * (canvas.height / canvas.getBoundingClientRect().height)
+  )
+  offsetX.value += (scale.value - ns) * worldPos.wx
+  offsetY.value += (scale.value - ns) * worldPos.wy
+  scale.value = ns
+  updateVisibleRange()
+  draw()
+}
+
+/** 点按：复用现有 click 逻辑 emit cell-clicked（绕过原生 click，消除 Ghost Click） */
+function doTap(clientX, clientY) {
+  const canvas = mainCanvas.value
+  if (!canvas) return
+  const hex = getHexAtEvent({ clientX, clientY })
+  const data = props.gridData
+  if (hex.q >= 0 && hex.q < (data.width || 100) && hex.r >= 0 && hex.r < (data.height || 100)) {
+    const rect = canvas.getBoundingClientRect()
+    emit('cell-clicked', {
+      q: hex.q, r: hex.r,
+      screen: { x: clientX - rect.left, y: clientY - rect.top }
+    })
+  }
+}
+
+// ================================================================
+//  触控事件绑定（方案 A，阶段 1）
+//  仅在 props.enableTouch === true 时绑定；PC 路由永不开启 → 零回归。
+//  使用 Pointer Events 统一抽象（鼠标/触控笔/手指），消除 Ghost Clicks。
+// ================================================================
+
+const activePointers = new Map()
+let pinchStartDist = 0
+
+function setupPointerEvents() {
+  const canvas = mainCanvas.value
+  if (!canvas || !props.enableTouch) return
+
+  canvas.style.touchAction = 'none' // 阻止浏览器默认手势（滚动/缩放）
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId)
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (activePointers.size === 1) {
+      startPan(e.clientX, e.clientY)
+    } else if (activePointers.size === 2) {
+      const pts = [...activePointers.values()]
+      pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+    }
+  })
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (activePointers.size === 1) {
+      doPan(e.clientX, e.clientY)
+    } else if (activePointers.size === 2) {
+      const pts = [...activePointers.values()]
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      if (pinchStartDist > 0) {
+        // Pivot Zoom：以两指中点为锚点
+        const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+        doZoomAt(mid.x, mid.y, dist / pinchStartDist)
+      }
+    }
+  })
+
+  const onPointerEnd = (e) => {
+    const wasSingle = activePointers.size === 1
+    activePointers.delete(e.pointerId)
+    if (canvas.hasPointerCapture?.(e.pointerId)) canvas.releasePointerCapture(e.pointerId)
+    // Slop 内未拖动 → Tap；否则已平移无需触发
+    if (wasSingle && !isDragging) doTap(e.clientX, e.clientY)
+    if (activePointers.size < 2) pinchStartDist = 0
+    if (activePointers.size === 0) endPan()
+  }
+  canvas.addEventListener('pointerup', onPointerEnd)
+  canvas.addEventListener('pointercancel', onPointerEnd)
+}
+
+// ================================================================
 //  事件绑定
 // ================================================================
 
@@ -1043,11 +1265,17 @@ function setupEvents() {
 
   // ---- click → cell-clicked 广播 ----
   canvas.addEventListener('click', (e) => {
+    // 阶段 2 防 Ghost Click：触控端由 doTap 直接 emit，屏蔽浏览器合成的重复 click
+    if (props.enableTouch && e.pointerType !== 'mouse') return
     if (isDragging) return
     const hex = getHexAtEvent(e)
     const data = props.gridData
     if (hex.q >= 0 && hex.q < (data.width || 100) && hex.r >= 0 && hex.r < (data.height || 100)) {
-      emit('cell-clicked', { q: hex.q, r: hex.r })
+      // screen: 相对 canvas 左上角的像素坐标，供外壳定位「跟随点击点」的浮动菜单
+      const rect = canvas.getBoundingClientRect()
+      const sx = e.clientX - rect.left
+      const sy = e.clientY - rect.top
+      emit('cell-clicked', { q: hex.q, r: hex.r, screen: { x: sx, y: sy } })
     }
   })
 
@@ -1188,7 +1416,7 @@ function redraw() {
       camera.viewport.width = cw
       camera.viewport.height = ch
       // 战场(iso)重聚焦默认视角；编辑器回到整图居中
-      if (props.mode === 'iso') focusCentralGrid(10)
+      if (props.mode === 'iso') focusCentralGrid(props.fitAllOnMount ? 9999 : 10)
       else centerGrid()
       invalidateTerrain()
     }
@@ -1259,6 +1487,9 @@ watch(() => props.gridData?.topologyParam?.spacingH, () => {
 watch(() => props.gridData?.topologyParam?.spacingV, () => {
   terrainDirty = true; renderTerrainCache(); draw()
 })
+// dominator 本地视图：格子横/纵间距倍率变化 → 立即重绘
+watch(() => props.spacingHScale, () => { terrainDirty = true; renderTerrainCache(); draw() })
+watch(() => props.spacingVScale, () => { terrainDirty = true; renderTerrainCache(); draw() })
 // Phase 30-Fix: offsetFactor 变化时触发地形缓存重绘
 watch(() => props.gridData?.topologyParam?.offsetFactor, () => {
   terrainDirty = true; renderTerrainCache(); draw()
@@ -1276,6 +1507,12 @@ watch(() => props.isoConfig, (cfg) => {
 
 watch(() => props.highlightCells, () => { draw() }, { deep: true })
 
+// dominator 视图设置：任一图层样式变化时立即重绘（不依赖动画时钟）
+watch(
+  () => [props.terrainOpacity, props.terrainOverrideColor, props.gridLineOpacity, props.unitOpacity, props.showCoords],
+  () => { draw() }
+)
+
 // ================================================================
 //  生命周期
 // ================================================================
@@ -1284,6 +1521,7 @@ onMounted(async () => {
   await nextTick()
   initCanvas()
   setupEvents()
+  if (props.enableTouch) setupPointerEvents()
   setupResizeObserver()
   startClock()
 
@@ -1295,7 +1533,7 @@ onMounted(async () => {
       canvas.width = container.clientWidth
       canvas.height = container.clientHeight
       // 战场(iso)保持 focusCentralGrid 的 10×10 默认视角；编辑器回到整图居中
-      if (props.mode === 'iso') focusCentralGrid(10)
+      if (props.mode === 'iso') focusCentralGrid(props.fitAllOnMount ? 9999 : 10)
       else centerGrid()
       updateVisibleRange()
       draw()

@@ -99,6 +99,20 @@
               <p class="file-hint">封面自动取自「七视图」正视图（方向 0），无需单独上传主图。</p>
             </div>
           </div>
+          <div class="form-row">
+            <label>申请公开</label>
+            <div class="public-toggle-row">
+              <button
+                type="button"
+                class="btn btn-apply-public"
+                :class="{ applied: form.is_public }"
+                @click="toggleApplyPublic"
+              >
+                {{ form.is_public ? '✓ 已申请公开（保存后提交审核）' : '申请公开' }}
+              </button>
+              <span class="public-hint">点击后保存，将向「管理员 / 主宰」申请把该棋子发布到公开库（全员可用），由其审核通过后生效。</span>
+            </div>
+          </div>
         </section>
 
         <!-- Phase 28-D: 机体七视图配置区 -->
@@ -138,7 +152,7 @@
               {{ viewUploading ? '上传中...' : '上传已选视图' }}
             </button>
             <button class="btn btn-secondary" @click="generateAIViews" :disabled="viewUploading">
-              AI 动态生成七视图
+              生成七视图（限免）
             </button>
           </div>
           <p v-if="viewUploading" class="import-status">正在上传七视图...</p>
@@ -358,6 +372,7 @@ import { normSize, SIZE_LABELS, SIZE_HP_FACTOR, SIZE_MOB_FACTOR, SIZE_RENDER_SCA
 const router = useRouter()
 const userStore = useUserStore()
 const user = computed(() => userStore.user)
+// 「申请公开」入口对所有可创建单位的账号开放，由审核流（管理员/主宰审批）把关
 
 const units = ref([])
 const editingUnit = ref(null)
@@ -681,11 +696,8 @@ async function uploadAllViews() {
 }
 
 function generateAIViews() {
-  // AI 动态生成七视图 — 预留接口，调用合作商 API
-  const unitCode = (form.value.codename || form.value.name || 'UNIT').replace(/[^a-zA-Z0-9_-]/g, '')
-  if (!unitCode) { viewError.value = '请先填写机体番号或行动代号'; return }
-  alert(`AI 七视图生成接口预留: 将为核心 "${unitCode}" 生成 0-6 七个角度的 PNG 精灵图。
-当前为合作商 API 对接预留位，请确认 API Key 后启用。`)
+  // 动态生成七视图 — 暂未开放，引导用户到 meowa.ai 免费生成后上传
+  alert('功能完善中，请登录 https://meowa.ai/?invite=VSQBQTY 注册账号，免费生成七视图，然后回来上传。')
   viewError.value = ''
 }
 
@@ -720,7 +732,8 @@ function createEmptyForm() {
     right_格斗:0, right_射击:0, right_结构:0, right_机动:0, right_skills:[],
     extra_type:'none', extra_image_url:null,
     extra_格斗:0, extra_射击:0, extra_结构:0, extra_机动:0, extra_skills:[],
-    view_urls: {}
+    view_urls: {},
+    is_public: false  // 是否申请公开（提交审核队列，需 unit.publish 权限）
   }
 }
 
@@ -840,6 +853,11 @@ async function loadUnits() { try { const {data}=await hangarAPI.getUnits(); unit
 
 function createNew() { form.value=createEmptyForm(); editingUnit.value={id:null}; errors.value=[]; highlightFields.value={} }
 
+// 「申请公开」显式按钮：切换 is_public，保存时由后端审核状态机置为 pending
+function toggleApplyPublic() {
+  form.value.is_public = !form.value.is_public
+}
+
 async function editUnit(unit) {
   try {
     const {data}=await hangarAPI.getUnit(unit.id)
@@ -929,13 +947,28 @@ function inferDamageType(attribute){
   return 'PHYSICAL'
 }
 function makeUnitSkill(s,min,max,label){
+  // ★ 射程加法模型（Phase 31-RangeNormalize）：引擎只读相对字段 bonus_range（= 绝对射程 - 类型基准）。
+  //   类型基准：近战=1 / 远程=3 / 自动(自动化/辅助)=0。
+  //   源头即折算，避免把绝对字段 cast_range 透传给战场后被 getSkillRangeFields 拒绝读取（射程丢失）。
+  const t = String(s.type || '自动').toLowerCase()
+  const cat = (t === 'ranged' || t === '远程') ? 'ranged' : (t === 'auto' || t === '自动化') ? 'auto' : 'melee'
+  const BASE_RANGE = { melee: 1, ranged: 3, auto: 0 }
+  const bonusRange = Math.max(0, (Number(max) || 0) - BASE_RANGE[cat])
   return {
     id: (crypto && crypto.randomUUID) ? crypto.randomUUID() : 'sk_'+Math.random().toString(36).slice(2),
     name: s.name, description: s.effect||s.special||'', effect: s.effect||'',
     type: s.type||'自动', script:'', cooldown:0, currentCooldown:0, energyCost:0,
     damageType: inferDamageType(s.attribute),
-    range: max, range_min: min, range_max: max, max_range: max, min_range: min,
+    // 相对射程字段（引擎唯一合法入口）
+    bonus_range: bonusRange,
+    min_range: min || (cat === 'auto' ? 0 : 1),
+    // 仍保留只读快照字段供前端展示（战场不读这些绝对字段，仅作录入回溯）
+    range: max, range_min: min, range_max: max, max_range: max,
     cast_range: max, min_cast_range: min, rangeLabel: label,
+    // 透传词条前置（来自关联skill词条的prerequisite；无则省略）
+    ...(s.prerequisite ? { prerequisite: s.prerequisite } : {}),
+    // Phase 30-Perm/T5：强引用锚点（绑定全局词条时的 skill_key；无则空）
+    ...(s.skill_key ? { skill_key: s.skill_key } : {}),
   }
 }
 function buildUnitPayload(f){
@@ -1235,7 +1268,7 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 .error-text { color: #ff7351; font-size: 12px; margin: 8px 0; font-family: 'Fira Code', monospace; }
 
 /* Footer */
-.footer { position:fixed; bottom:0; left:var(--sidebar-w, 240px); right:0;
+.footer { position:fixed; bottom:0; left:0; right:0;
   transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background:rgba(2,9,17,0.92); border-top:1px solid rgba(255,176,0,0.1); padding:6px 24px; display:flex; justify-content:space-between; align-items:center; font-family:'Fira Code',monospace; font-size:10px; z-index:50; }
 .footer-left span { color:#ffb000; font-weight:700; letter-spacing:2px; text-transform:uppercase; }
 .footer-right { display:flex; gap:28px; letter-spacing:2px; text-transform:uppercase; }
@@ -1278,6 +1311,16 @@ onMounted(()=>{ loadUnits(); loadFactions() })
 .btn-small.btn-danger { background: rgba(255,99,99,0.15); color: #ff6363; border: 1px solid rgba(255,99,99,0.45); }
 .btn-small.btn-danger:hover:not(:disabled) { background: rgba(255,99,99,0.32); }
 .btn-small.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-apply-public {
+  background: transparent; border: 1px solid rgba(255,176,0,0.45); color: #ffb000;
+  padding: 9px 18px; font-size: 12px; font-family: 'Fira Code', monospace; font-weight: 700;
+  letter-spacing: .03em; text-transform: uppercase; cursor: pointer; transition: all .15s; border-radius: 3px;
+  white-space: nowrap;
+}
+.btn-apply-public:hover { background: rgba(255,176,0,0.1); border-color: #ffb000; }
+.btn-apply-public.applied { background: rgba(255,176,0,0.18); border-color: #ffb000; color: #ffd76a; }
+.public-toggle-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.public-hint { font-size: 11px; color: #9f8e78; max-width: 460px; line-height: 1.5; }
 .views-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; margin-bottom: 4px; flex-wrap: wrap; }
 .section-desc { font-size: 11px; color: rgba(193,232,255,0.4); margin-bottom: 10px; font-family: 'Fira Code', monospace; }
 .faction-code { color: #ffd597; font-family: 'Fira Code', monospace; }

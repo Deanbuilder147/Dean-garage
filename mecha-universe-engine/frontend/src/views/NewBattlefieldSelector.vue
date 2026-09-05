@@ -258,7 +258,7 @@ async function doJoin(id) {
     } catch (e) {}
     // 重连场景：若房间已在战斗中，直接回到战场；否则进入整备室（权限范围由房间名册还原）
     if (roomStatus === 'in_battle' && battleId) {
-      router.push(`/battle-pc/${battleId}`)
+      router.push(`/battle/${battleId}`)
     } else {
       router.push(`/preparation/${id}`)
     }
@@ -286,7 +286,17 @@ function openJoinModal(id) {
     if (room && room.status === 'in_battle' && room.battleId) {
       // 战斗中对局：直接重连，与 resumeLast/doJoin 一致
       showJoinModal.value = false
-      router.push(`/battle-pc/${room.battleId}`)
+      router.push(`/battle/${room.battleId}`)
+      return
+    }
+    // 重连场景：若当前用户本就在该房间（中途退出后回来），后端会保留原有阵营，
+    // 无需再次弹"选择阵营"弹窗，直接复用 doJoin 的幂等路径（回整备室/战场）即可。
+    const myId = user.value?.id
+    const alreadyIn = Array.isArray(room.players) && myId && room.players.some((p) => p.userId === myId)
+    if (alreadyIn) {
+      showJoinModal.value = false
+      joining.value = false
+      doJoin(room.id)
       return
     }
     joinTargetRoom.value = room
@@ -308,7 +318,7 @@ async function navigateAfterJoin(id) {
     roomStatus = rm?.status
     battleId = rm?.battleId
   } catch (e) {}
-  if (roomStatus === 'in_battle' && battleId) router.push(`/battle-pc/${battleId}`)
+  if (roomStatus === 'in_battle' && battleId) router.push(`/battle/${battleId}`)
   else router.push(`/preparation/${id}`)
 }
 async function confirmJoin() {
@@ -503,7 +513,7 @@ function navigateTo(path) { router.push(path) }
 .btn-deploy:hover { background: #ffc840; }
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; background: #001e2b; border: 1px solid rgba(255,176,0,0.1); color: rgba(193,232,255,0.3); gap: 16px; }
 .empty-state p { font-size: 14px; }
-.footer { position: fixed; bottom: 0; left: var(--sidebar-w, 240px); right: 0;
+.footer { position: fixed; bottom: 0; left: 0; right: 0;
   transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1); background: rgba(2,9,17,0.92); border-top: 1px solid rgba(255,176,0,0.18); padding: 6px 24px; display: flex; justify-content: space-between; align-items: center; font-family: 'Fira Code', monospace; font-size: 10px; z-index: 50; }
 .footer-left span { color: #ffb000; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
 .footer-right { display: flex; gap: 28px; letter-spacing: 2px; text-transform: uppercase; }

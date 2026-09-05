@@ -82,6 +82,15 @@
             <b v-if="dodged" class="ar-miss">被闪避，未造成伤害</b>
             <b v-else>对防御方造成 {{ finalDamage }} 点伤害</b>
           </div>
+          <!-- ★ Phase 32-AOE：范围技能多目标战报汇总 -->
+          <div v-if="aoeTargets.length" class="ar-aoe-summary">
+            <div class="ar-aoe-title">🎯 范围打击：命中 {{ aoeTargets.length }} 个目标</div>
+            <div v-for="(t, i) in aoeTargets" :key="i" class="ar-aoe-row">
+              <span class="ar-aoe-name">{{ t.name }}</span>
+              <span class="ar-aoe-dmg">-{{ t.damage }}</span>
+              <span v-if="t.status" class="ar-aoe-st">（{{ t.status }}）</span>
+            </div>
+          </div>
           <div v-if="report.sizeTactic" class="ar-size-banner ar-size-mob">
             💨 体型机动补偿：攻击方体型更大（{{ sizeLabel(report.sizeTactic.attackerSize) }} ▷ {{ sizeLabel(report.sizeTactic.defenderSize) }}，{{ report.sizeTactic.amount }} 档）→ 防守方下回合移动 +{{ report.sizeTactic.amount }}
           </div>
@@ -122,6 +131,7 @@ const target = computed(() => props.report?.target || {})
 const formula = computed(() => props.report?.formula || [])
 const finalDamage = computed(() => props.report?.finalDamage ?? 0)
 const dodged = computed(() => !!props.report?.dodged)
+const aoeTargets = computed(() => props.report?.aoeTargets || [])
 
 // 取指定方向视图；若缺失且传入 fallbackKey，则回退到该方向（如正面 key 0）
 function viewUrl(unit, key, fallbackKey) {
@@ -318,6 +328,32 @@ function hpColor(pct) {
 }
 .ar-result b { color: #ff7a59; }
 .ar-miss { color: #ff5252 !important; }
+
+/* ★ Phase 32-AOE：范围打击汇总 */
+.ar-aoe-summary {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(80, 160, 255, 0.10);
+  border: 1px solid rgba(80, 160, 255, 0.4);
+  border-radius: 8px;
+}
+.ar-aoe-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9fd0ff;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.ar-aoe-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.ar-aoe-name { color: #e8eefc; font-weight: 600; }
+.ar-aoe-dmg { color: #ff7a59; font-weight: 700; }
+.ar-aoe-st { color: #9fe3ff; font-size: 12px; }
 .ar-block-reason {
   background: rgba(255, 82, 82, 0.08);
   border: 1px solid #5c1f16;

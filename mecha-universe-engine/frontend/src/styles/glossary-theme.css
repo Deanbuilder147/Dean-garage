@@ -11,6 +11,40 @@
    本文件在 main.js 中最后导入，配合 !important 以稳定覆盖各页 scoped 样式。
    ========================================================================== */
 
+/* ----------------------------- Chrontor 字体（全局默认） ----------------------------- */
+/* SIL OFL-1.1（Tianhao Zhang / TianType）。字体文件位于 public/fonts/，构建时随 dist 拷贝。
+   该字体为几何科幻模块化字（New Alphabet 风格），主要覆盖拉丁字符；
+   不含中文字形，中文及缺失字符自动回退到 variables.css 的 --font-chrontor 字体栈。 */
+@font-face {
+  font-family: 'Chrontor';
+  src: url('/fonts/Chrontor.otf') format('opentype'),
+       url('/fonts/Chrontor.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+html, body, #app {
+  font-family: var(--font-chrontor);
+}
+
+/* ----------------------------- 英文小字副标（中英双语） ----------------------------- */
+/* 用法：在中文文本后紧跟 <span class="en-sub">English</span>。
+   英文走 Chrontor 几何字（科幻感），小字灰色，作副标不喧宾夺主。
+   本类在全局生效，配合 !important 稳定覆盖各页 scoped 样式。 */
+.en-sub {
+  font-family: var(--font-chrontor) !important;
+  font-size: 0.72em !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  letter-spacing: 0.04em !important;
+  color: #8aa0b8 !important;
+  opacity: 0.72 !important;
+  margin-left: 0.45em !important;
+  white-space: nowrap !important;
+}
+.en-sub::before { content: "·" !important; opacity: 0.5 !important; margin-right: 0.45em !important; }
+
 /* ----------------------------- 面板 (panel) ----------------------------- */
 .panel {
   background: rgba(0, 0, 0, 0.1) !important;
