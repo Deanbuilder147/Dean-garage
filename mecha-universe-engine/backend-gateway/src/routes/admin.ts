@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { authenticate, requireAuth, requireRole } from '../middleware/auth.js';
 import { run, get, all, persistChanges } from '../db/sqlite.js';
 import { ErrorCode, UserRole } from '@mecha/shared-kernel';
+import { resolveRoleFeatures, clearFeatureCache } from '../services/featurePermissions.js';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.use('/api/admin', authenticate, requireAuth);
 // POST /api/admin/gift-credits
 // Body: { targetUserId: string, amount: number }
 // ========================================
-router.post('/api/admin/gift-credits', requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+router.post('/api/admin/gift-credits', requireRole(UserRole.ADMIN, UserRole.REFEREE, UserRole.DOMINATOR), (req, res) => {
   try {
     const { targetUserId, amount } = req.body;
 
@@ -105,7 +106,7 @@ router.put('/api/admin/set-role', requireRole(UserRole.DOMINATOR), (req, res) =>
 // 查询用户积分
 // GET /api/admin/user-credits/:userId
 // ========================================
-router.get('/api/admin/user-credits/:userId', requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+router.get('/api/admin/user-credits/:userId', requireRole(UserRole.ADMIN, UserRole.REFEREE, UserRole.DOMINATOR), (req, res) => {
   const user = get('SELECT id, username, credits, role FROM users WHERE id = ?', [req.params.userId]) as any;
   if (!user) {
     res.status(404).json({ error: 'USER_NOT_FOUND', message: '用户不存在' });
@@ -141,8 +142,8 @@ router.post('/api/admin/reset-rooms', requireRole(UserRole.DOMINATOR), (req, res
 });
 
 // ============================================================
-// 等级-功能权限矩阵后台（仅 dominator 可见）
-// 等级(levels) = 角色 user / referee / admin；功能(features) = 应用各能力模块
+// 等级-功能权限矩阵后台（仅 dominator 可见并修改）
+// 等级(levels) = 角色 dominator / admin / referee / user；功能(features) = 应用各能力模块
 // ============================================================
 interface FeatureDef { key: string; label: string; group: string }
 
@@ -155,11 +156,9 @@ const FEATURE_CATALOG: FeatureDef[] = [
   // 单位
   { key: 'unit.create', label: '创建单位', group: '单位' },
   { key: 'unit.review', label: '审核单位', group: '单位' },
-  { key: 'unit.publish', label: '发布到公开库', group: '单位' },
   // 地图
   { key: 'map.create', label: '创建地图', group: '地图' },
   { key: 'map.review', label: '审核地图', group: '地图' },
-  { key: 'map.publish', label: '发布到公开库', group: '地图' },
   // 词条库
   { key: 'glossary.edit', label: '编辑词条库', group: '词条库' },
   { key: 'glossary.excel', label: '上传 Excel 词库', group: '词条库' },
@@ -173,40 +172,29 @@ const FEATURE_CATALOG: FeatureDef[] = [
 ];
 const FEATURE_KEYS = FEATURE_CATALOG.map((f) => f.key);
 
-const MANAGED_ROLES: UserRole[] = [UserRole.USER, UserRole.REFEREE, UserRole.ADMIN];
+// 权限等级体系（dominator > admin > referee > user > guest，2026-08-05 恢复统一）：
+//   dominator = 主宰（dean147 独有，全服最高权限，管理所有等级权限与账号）
+//   admin     = 管理员（后台管理、赠送积分、单位/地图审核）
+//   referee   = 裁判（创建联机房间、主持对战、上帝视角裁决）
+//   user      = 普通用户（基础对战与私人格纳库）
+//   guest     = 游客（免 Token 柔性放行，仅公开内容/试玩）
+// dominator 可在后台逐一检查并修改每个受管等级的功能权限矩阵。
+const MANAGED_ROLES: UserRole[] = [UserRole.DOMINATOR, UserRole.ADMIN, UserRole.REFEREE, UserRole.USER];
 const ROLE_LABELS: Record<string, string> = {
+  [UserRole.GUEST]: '游客',
   [UserRole.USER]: '普通用户',
   [UserRole.REFEREE]: '裁判',
   [UserRole.ADMIN]: '管理员',
   [UserRole.DOMINATOR]: '主宰',
 };
 
-const DEFAULT_FEATURE_PERMISSIONS: Record<string, string[]> = {
+export const DEFAULT_FEATURE_PERMISSIONS: Record<string, string[]> = {
+  [UserRole.GUEST]: ['room.spectate', 'leaderboard.view'],
   [UserRole.USER]: ['room.create', 'room.spectate', 'unit.create', 'map.create', 'leaderboard.view'],
-  [UserRole.REFEREE]: [
-    'room.create', 'room.private', 'room.host', 'room.spectate',
-    'unit.create', 'unit.review', 'unit.publish',
-    'map.create', 'map.review', 'map.publish',
-    'glossary.edit', 'glossary.excel', 'glossary.dice',
-    'leaderboard.view', 'campaign.create',
-  ],
+  [UserRole.REFEREE]: ['room.create', 'room.private', 'room.host', 'room.spectate', 'unit.create', 'unit.review', 'map.create', 'map.review', 'glossary.edit', 'glossary.excel', 'glossary.dice', 'leaderboard.view', 'campaign.create'],
   [UserRole.ADMIN]: [...FEATURE_KEYS],
+  [UserRole.DOMINATOR]: [...FEATURE_KEYS],
 };
-
-// 解析某等级当前启用的功能（缺表行时回退默认并自动落库，幂等）
-function resolveRoleFeatures(role: string): string[] {
-  const row = get('SELECT enabled FROM feature_permissions WHERE role = ?', [role]) as any;
-  if (row && row.enabled) {
-    try {
-      return JSON.parse(row.enabled);
-    } catch {
-      /* 落库脏数据 → 回退默认 */
-    }
-  }
-  const def = DEFAULT_FEATURE_PERMISSIONS[role] || [];
-  run('INSERT OR REPLACE INTO feature_permissions (role, enabled) VALUES (?, ?)', [role, JSON.stringify(def)]);
-  return [...def];
-}
 
 // 功能目录 + 受管等级
 router.get('/api/admin/features', requireRole(UserRole.DOMINATOR), (req, res) => {
@@ -236,6 +224,14 @@ router.put('/api/admin/permissions', requireRole(UserRole.DOMINATOR), (req, res)
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: `无效等级，可管理: ${MANAGED_ROLES.join(', ')}` });
       return;
     }
+    // 主宰(dominator)权限为最高统帅权，恒定全开，禁止任何收窄以防锁死后台
+    if (role === UserRole.DOMINATOR) {
+      run('INSERT OR REPLACE INTO feature_permissions (role, enabled) VALUES (?, ?)', [role, JSON.stringify([...FEATURE_KEYS])]);
+      clearFeatureCache(role);
+      persistChanges();
+      res.json({ success: true, role, features: [...FEATURE_KEYS], forced: true, message: '主宰权限恒定全开，不可收窄' });
+      return;
+    }
     if (!Array.isArray(features)) {
       res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: 'features 必须是数组' });
       return;
@@ -247,6 +243,7 @@ router.put('/api/admin/permissions', requireRole(UserRole.DOMINATOR), (req, res)
     }
     const unique = Array.from(new Set(features));
     run('INSERT OR REPLACE INTO feature_permissions (role, enabled) VALUES (?, ?)', [role, JSON.stringify(unique)]);
+    clearFeatureCache(role); // 失效该等级缓存，使新矩阵立即生效
     persistChanges();
     logger.info({ msg: `[Admin] ${req.auth!.username} 更新等级 ${role} 功能权限: ${unique.join(', ')}` });
     res.json({ success: true, role, features: unique });
@@ -278,6 +275,30 @@ router.get('/api/admin/search-users', requireRole(UserRole.DOMINATOR), (req, res
       credits: typeof r.credits === 'number' ? r.credits : 10,
     })),
   });
+});
+
+// 列出全部账号（仅 dominator）
+router.get('/api/admin/list-users', requireRole(UserRole.DOMINATOR), (req, res) => {
+  try {
+    const rows = all(
+      'SELECT id, username, email, faction, role, permission, credits, created_at FROM users ORDER BY created_at DESC',
+    ) as any[];
+    res.json({
+      users: rows.map((r: any) => ({
+        id: r.id,
+        username: r.username,
+        email: r.email,
+        faction: r.faction || '',
+        role: r.role || 'user',
+        permission: typeof r.permission === 'number' ? r.permission : 1,
+        credits: typeof r.credits === 'number' ? r.credits : 10,
+        createdAt: r.created_at || '',
+      })),
+    });
+  } catch (err) {
+    logger.error({ msg: `[Admin] 列出账号错误: ${ err }` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '列出账号失败' });
+  }
 });
 
 // 修改账号权限：role / permission / credits
@@ -343,6 +364,97 @@ router.put('/api/admin/users/:userId', requireRole(UserRole.DOMINATOR), (req, re
   } catch (err) {
     logger.error({ msg: `[Admin] 修改账号权限错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '修改失败' });
+  }
+});
+
+// ===== dominator 删除账号（清理测试/违规账号，并清理其关联数据）=====
+router.delete('/api/admin/users/:userId', requireRole(UserRole.DOMINATOR), (req, res) => {
+  try {
+    const targetId = req.params.userId
+    const operatorId = (req.user?.userId ?? req.auth?.username) as string
+    if (!targetId) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: '缺少用户 ID' })
+      return
+    }
+    // 禁止删除当前登录账号
+    if (targetId === operatorId) {
+      res.status(400).json({ error: 'VALIDATION_ERROR', message: '不能删除当前登录账号' })
+      return
+    }
+    const target = get('SELECT id, username, role FROM users WHERE id = ?', [targetId]) as any
+    if (!target) {
+      res.status(404).json({ error: 'NOT_FOUND', message: '账号不存在' })
+      return
+    }
+    // 禁止删除其他主宰，防止锁死后台
+    if (target.role === UserRole.DOMINATOR) {
+      res.status(403).json({ error: 'FORBIDDEN', message: '不能删除其他主宰账号' })
+      return
+    }
+    // 清理关联数据（孤儿行）
+    run('DELETE FROM units WHERE owner_id = ? OR original_author_id = ?', [targetId, targetId])
+    run('DELETE FROM room_players WHERE user_id = ?', [targetId])
+    run('DELETE FROM room_chats WHERE user_id = ?', [targetId])
+    run('DELETE FROM bug_reports WHERE reporter_id = ?', [targetId])
+    run('UPDATE rooms SET host_id = NULL WHERE host_id = ?', [targetId])
+    // 删除账号本体
+    run('DELETE FROM users WHERE id = ?', [targetId])
+    persistChanges()
+    logger.info({ msg: `[Admin] ${operatorId} 删除账号 ${target.username}(${targetId})` })
+    res.json({ success: true, deleted: { id: target.id, username: target.username } })
+  } catch (err) {
+    logger.error({ msg: `[Admin] deleteUser 错误: ${ err }` })
+    res.status(500).json({ error: 'INTERNAL_ERROR', message: '删除失败' })
+  }
+})
+
+// ===== dominator 地图视图设置（全局默认，所有 dominator 共享，跨设备同步）=====
+const MAP_VIEW_KEY = 'mapViewSettings.default';
+const DEFAULT_MAP_VIEW = {
+  terrainOpacity: 0.3,
+  terrainOverrideColor: '',
+  gridLineOpacity: 0.08,
+  unitOpacity: 1,
+  showCoords: true,
+  spacingHScale: 1,
+  spacingVScale: 1,
+};
+function sanitizeMapView(input: any): any {
+  const o: any = { ...DEFAULT_MAP_VIEW };
+  if (typeof input?.terrainOpacity === 'number') o.terrainOpacity = Math.min(1, Math.max(0, input.terrainOpacity));
+  if (typeof input?.terrainOverrideColor === 'string') o.terrainOverrideColor = input.terrainOverrideColor;
+  if (typeof input?.gridLineOpacity === 'number') o.gridLineOpacity = Math.min(1, Math.max(0, input.gridLineOpacity));
+  if (typeof input?.unitOpacity === 'number') o.unitOpacity = Math.min(1, Math.max(0, input.unitOpacity));
+  if (typeof input?.showCoords === 'boolean') o.showCoords = input.showCoords;
+  if (typeof input?.spacingHScale === 'number') o.spacingHScale = Math.min(3, Math.max(0.3, input.spacingHScale));
+  if (typeof input?.spacingVScale === 'number') o.spacingVScale = Math.min(3, Math.max(0.3, input.spacingVScale));
+  return o;
+}
+
+// 读取全局默认设置
+router.get('/api/admin/map-view-settings', requireRole(UserRole.DOMINATOR), (req, res) => {
+  try {
+    const row = get('SELECT value FROM kv WHERE key = ?', [MAP_VIEW_KEY]) as any;
+    const settings = row ? { ...DEFAULT_MAP_VIEW, ...JSON.parse(row.value) } : { ...DEFAULT_MAP_VIEW };
+    res.json({ settings });
+  } catch (err) {
+    logger.error({ msg: `[Admin] 读取地图视图设置错误: ${ err }` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '读取失败' });
+  }
+});
+
+// 保存全局默认设置（覆盖写入）
+router.put('/api/admin/map-view-settings', requireRole(UserRole.DOMINATOR), (req, res) => {
+  try {
+    const settings = sanitizeMapView(req.body);
+    run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      [MAP_VIEW_KEY, JSON.stringify(settings)]);
+    persistChanges();
+    logger.info({ msg: `[Admin] ${req.user?.userId ?? req.auth?.username ?? '?'} 保存地图视图设置` });
+    res.json({ success: true, settings });
+  } catch (err) {
+    logger.error({ msg: `[Admin] 保存地图视图设置错误: ${ err }` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '保存失败' });
   }
 });
 

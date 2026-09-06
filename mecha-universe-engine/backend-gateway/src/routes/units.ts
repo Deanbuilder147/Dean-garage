@@ -13,9 +13,11 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate, requireAuth } from '../middleware/auth.js';
+import { authenticate, requireAuth, requireRole } from '../middleware/auth.js';
 import { run, get, all, persistChanges } from '../db/sqlite.js';
+import { resolveRoleFeatures } from '../services/featurePermissions.js';
 import { ErrorCode, UserRole } from '@mecha/shared-kernel';
+import { UnitContract, makeDiagnostic } from '@mecha/shared-kernel/contracts';
 import { ExcelParser } from '../services/excel-parser.js';
 import { ExcelValidator } from '../services/excel-validator.js';
 import { normalizeParsedData } from '../services/excel-schema-normalizer.js';
@@ -52,10 +54,15 @@ const upload = multer({
 // 所有单位路由需认证；但图片/Logo 静态服务公开（浏览器 <img> 不携带 token，否则 401 裂图）
 // 注意：router.use('/api/units', mw) 会把前缀从 req.path 剥离，故中间件内 req.path 形如 /views/...
 const PUBLIC_IMAGE_RE = /^\/?(api\/units\/)?(images|views|factions\/logo)\//;
+// 棋子公开审核链路白名单：仅 public 端点游客可见，跳过全局强制鉴权。
+// 注意：my-submissions / review-queue 必须走全局 authenticate 以挂载 req.auth（其内部依赖 req.auth.userId / role），
+//       各自的 requireAuth / requireRole 再决定是否放行，因此不能放进白名单。
+const PUBLIC_UNIT_RE = /^\/public\/?$/;
 router.use('/api/units', (req, res, next) => {
-  if (PUBLIC_IMAGE_RE.test(req.path)) {
-    return next(); // 静态资源公开访问
+  if (PUBLIC_IMAGE_RE.test(req.path) || PUBLIC_UNIT_RE.test(req.path)) {
+    return next(); // 静态资源 / 公开棋子库：跳过全局强制鉴权
   }
+  // 其余端点（含 my-submissions / review-queue）统一挂载 req.auth，放行与否由各自路由中间件决定
   return authenticate(req, res, () => requireAuth(req, res, next));
 });
 
@@ -64,7 +71,8 @@ router.use('/api/units', (req, res, next) => {
 // ========================================
 /** 根据角色计算 is_public 与 review_status */
 function computeVisibility(userRole: string, requestedPublic: boolean): { is_public: number; review_status: string } {
-  const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
+  // Phase 30-Perm：admin/dominator 可跳过审核直接 approved；勾选 units.edit 的等级（如 referee，由 dominator 后台授权）亦可跳过
+  const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR || resolveRoleFeatures(userRole).includes('units.edit');
 
   if (isAdminOrAbove) {
     // 管理员/主宰：自由设置 is_public，直接 approved
@@ -94,6 +102,59 @@ router.get('/api/units', (req, res) => {
     ...r,
     size: r.size || 'm',
     main_image_url: r.sprite_key || null,
+  }));
+  res.json({ units });
+});
+
+// ========================================
+// 棋子公开审核链路（Phase 公开审核）：补齐缺失的 3 个列表接口
+// 语义：普通用户上传 → is_public=0 + review_status='pending'（computeVisibility 卡口）
+//       管理员(referee/dominator)审核通过 → is_public=1 + review_status='approved' → 全员可用
+// ========================================
+
+// 公开棋子库：所有 is_public=1 且 review_status='approved' 的单位（游客/登录均可访问）
+router.get('/api/units/public', (req, res) => {
+  const rows = all(
+    `SELECT id, name, codename, faction, category, tier, size, sprite_key, view_urls, total_points, attributes, owner_id, original_author_id, review_status, updated_at
+     FROM units WHERE is_public = 1 AND review_status = 'approved' ORDER BY updated_at DESC`
+  ) as any[];
+  const units = rows.map((r) => ({
+    ...r,
+    size: r.size || 'm',
+    main_image_url: r.sprite_key || null,
+    view_urls: r.view_urls ? JSON.parse(r.view_urls) : {},
+    attributes: r.attributes ? JSON.parse(r.attributes) : {},
+  }));
+  res.json({ units });
+});
+
+// 我的投稿：当前用户全部单位（含审核状态回显）
+router.get('/api/units/my-submissions', (req, res) => {
+  const rows = all(
+    `SELECT id, name, codename, faction, category, tier, size, is_public, review_status, updated_at
+     FROM units WHERE owner_id = ? ORDER BY
+       CASE review_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END, updated_at DESC`,
+    [req.auth!.userId]
+  ) as any[];
+  res.json({ units: rows });
+});
+
+// 审核队列：待审核(pending)单位，仅管理员(referee)/主宰可见
+router.get('/api/units/review-queue', requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+  const rows = all(
+    `SELECT u.id, u.owner_id, u.name, u.codename, u.faction, u.category, u.tier, u.size, u.sprite_key, u.view_urls, u.stats, u.skills, u.attributes, u.total_points, u.is_public, u.review_status, u.created_at, u.updated_at,
+            (SELECT username FROM users WHERE id = u.owner_id) AS owner_name
+     FROM units u WHERE u.review_status = 'pending' ORDER BY u.created_at ASC`
+  ) as any[];
+  const units = rows.map((r) => ({
+    ...r,
+    size: r.size || 'm',
+    owner_name: r.owner_name || r.owner_id || '未知投稿者',
+    main_image_url: r.sprite_key || null,
+    view_urls: r.view_urls ? JSON.parse(r.view_urls) : {},
+    stats: r.stats ? JSON.parse(r.stats) : {},
+    skills: r.skills ? JSON.parse(r.skills) : [],
+    attributes: r.attributes ? JSON.parse(r.attributes) : {},
   }));
   res.json({ units });
 });
@@ -187,6 +248,19 @@ router.post('/api/units', (req, res) => {
     const { is_public: finalIsPublic, review_status } = computeVisibility(userRole, is_public);
 
     const id = uuidv4();
+
+    // ★ 阶段3 软着陆：UnitContract 非阻塞校验（绝不 400 阻断）
+    //   失败时仅 logger.warn 落盘 + 推入响应 diagnostics，供前端黄条提示。
+    //   仅对真实入库字段做断言；id/owner_id 为即将写入值，避免对「新建占位」误报。
+    const unitDiagnostics: any[] = [];
+    const unitParse = UnitContract.safeParse({ id, owner_id: req.auth!.userId, name, codename, faction, category, tier, stats, skills, attributes, size });
+    if (!unitParse.success) {
+      for (const issue of unitParse.error.issues) {
+        const diag = makeDiagnostic('warn', 'UNIT_SCHEMA_VIOLATION', `单位字段校验告警: ${issue.path.join('.')} ${issue.message}`, { field: issue.path.join('.'), entity: id });
+        unitDiagnostics.push(diag);
+      }
+      logger.warn({ msg: `[UNITS] POST /api/units 契约告警 (单位 ${name})`, diagnostics: unitDiagnostics });
+    }
     run(
       `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, sprite_key, view_urls, stats, skills, is_public, review_status, attributes, size)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -196,7 +270,7 @@ router.post('/api/units', (req, res) => {
 
     logger.info({ msg: `[Units] 创建: ${name} (is_public=${finalIsPublic}, review=${review_status}, size=${normSize(size)})` });
 
-    res.status(201).json({ unit: { id, name, faction, category, tier, size: normSize(size), owner_id: req.auth!.userId, is_public: finalIsPublic, review_status } });
+    res.status(201).json({ unit: { id, name, faction, category, tier, size: normSize(size), owner_id: req.auth!.userId, is_public: finalIsPublic, review_status }, diagnostics: unitDiagnostics });
   } catch (err) {
     logger.error({ msg: `[Units] 创建单位错误: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '创建单位失败' });
@@ -264,6 +338,26 @@ router.put('/api/units/:unitId', (req, res) => {
   // Phase 30-Cover: 移除废弃 main_image_url 映射，仅保留七视图 view_urls
   const sprite_key = sk ?? unit.sprite_key;
 
+  // ★ 阶段3 软着陆：UnitContract 非阻塞校验（绝不 400 阻断）
+  const putDiagnostics: any[] = [];
+  const putParse = UnitContract.safeParse({
+    name: name ?? unit.name,
+    codename: codename ?? unit.codename,
+    faction: faction ?? unit.faction,
+    category: category ?? unit.category,
+    tier: tier ?? unit.tier,
+    stats: stats ?? (unit.stats ? JSON.parse(unit.stats) : {}),
+    skills: skills ?? (unit.skills ? JSON.parse(unit.skills || '[]') : []),
+    attributes: attributes ?? (unit.attributes ? JSON.parse(unit.attributes) : {}),
+    size: size !== undefined ? size : unit.size,
+  });
+  if (!putParse.success) {
+    for (const issue of putParse.error.issues) {
+      putDiagnostics.push(makeDiagnostic('warn', 'UNIT_SCHEMA_VIOLATION', `更新单位字段校验告警: ${issue.path.join('.')} ${issue.message}`, { field: issue.path.join('.') }));
+    }
+    logger.warn({ msg: `[UNITS] PUT /api/units/${req.params.unitId} 契约告警`, diagnostics: putDiagnostics });
+  }
+
   // Phase 29-DataSecurity: 审核状态机卡口
   const userRole = req.auth!.role || 'user';
   const requestedPublic = is_public !== undefined ? is_public : (unit.is_public === 1);
@@ -286,9 +380,59 @@ router.put('/api/units/:unitId', (req, res) => {
 
   logger.info({ msg: `[Units] 更新: ${name || unit.name} (is_public=${finalIsPublic}, review=${review_status})` });
 
-  res.json({ success: true, is_public: finalIsPublic, review_status });
+  res.json({ success: true, is_public: finalIsPublic, review_status, diagnostics: putDiagnostics });
 });
 
+// ========================================
+// 审核操作：管理员(referee/dominator)对 pending 单位通过/驳回
+// approve 时可指定 isPublic（默认 true 即公开给全员使用）；reject 驳回
+// ========================================
+router.post('/api/units/:unitId/review', requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+  const unit = get('SELECT * FROM units WHERE id = ?', [req.params.unitId]) as any;
+  if (!unit) {
+    res.status(404).json({ error: 'UNIT_NOT_FOUND', message: '单位不存在' });
+    return;
+  }
+  const { action, isPublic } = req.body || {};
+  if (action !== 'approve' && action !== 'reject') {
+    res.status(400).json({ error: 'INVALID_ACTION', message: 'action 必须为 approve 或 reject' });
+    return;
+  }
+
+  if (action === 'reject') {
+    run(`UPDATE units SET review_status = 'rejected', is_public = 0, updated_at = datetime('now') WHERE id = ?`, [req.params.unitId]);
+    persistChanges();
+    res.json({ success: true, review_status: 'rejected', is_public: 0 });
+    return;
+  }
+
+  // approve：公开与否由审核者决定（默认公开，全员可用）
+  const finalPublic = isPublic === false ? 0 : 1;
+  run(`UPDATE units SET review_status = 'approved', is_public = ?, updated_at = datetime('now') WHERE id = ?`, [finalPublic, req.params.unitId]);
+  persistChanges();
+  res.json({ success: true, review_status: 'approved', is_public: finalPublic });
+});
+
+// ========================================
+// 克隆公开棋子到自己的库：玩家把公开棋子复制一份到自己名下
+// 克隆体归当前用户所有：is_public=0, review_status='pending'，original_author_id 记录原作者
+// ========================================
+router.post('/api/units/:unitId/clone', requireAuth, (req, res) => {
+  const src = get('SELECT * FROM units WHERE id = ? AND is_public = 1 AND review_status = \'approved\'', [req.params.unitId]) as any;
+  if (!src) {
+    res.status(404).json({ error: 'UNIT_NOT_FOUND', message: '该棋子不可克隆（未公开或未通过审核）' });
+    return;
+  }
+  const newId = uuidv4();
+  run(
+    `INSERT INTO units (id, owner_id, name, codename, faction, category, tier, size, total_points, sprite_key, view_urls, stats, skills, attributes, is_public, review_status, original_author_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, datetime('now'), datetime('now'))`,
+    [newId, req.auth!.userId, src.name, src.codename, src.faction, src.category, src.tier, src.size, src.total_points,
+     src.sprite_key, src.view_urls, src.stats, src.skills, src.attributes, src.original_author_id || src.owner_id]
+  );
+  persistChanges();
+  res.status(201).json({ id: newId, message: '已克隆到我的棋子库' });
+});
 // ========================================
 // Phase 29-HangarRestoration: Excel 文件解析端点
 // POST /api/units/parse-excel
@@ -415,8 +559,8 @@ router.post('/api/units/create-from-json', (req, res) => {
 
     const { name, codename = '', faction = 'earth', category = 'melee', tier = 1, sprite_key, stats = {}, skills = [], attributes = {}, totalPoints = 0, view_urls = {}, size = 'm' } = normalized;
 
-    // Phase 29-DataSecurity: 审核状态机卡口
-    const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
+    // Phase 29-DataSecurity: 审核状态机卡口（Phase 30-Perm: units.edit 授权等级亦可跳过审核）
+    const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR || resolveRoleFeatures(userRole).includes('units.edit');
     const finalIsPublic = isAdminOrAbove ? 1 : 0;
     const reviewStatus = isAdminOrAbove ? 'approved' : 'pending';
 

@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>组合构建器 · 六边形词条（含切面翻转）</title>
+<style>
+  :root {
+    --bg: #0b0f1a; --panel: #121a2b; --panel-2: #0f1626; --line: rgba(120,140,180,0.18);
+    --accent: #36c5f0; --accent-2: #ffb000; --txt: #e9eef7; --muted: #8294b4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    color: var(--txt); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 26px 28px 80px; }
+  h1 { font-size: 22px; letter-spacing: 1px; margin: 0 0 4px; }
+  .sub { font-size: 12px; color: var(--muted); margin-bottom: 22px; line-height: 1.6; }
+  .layout { display: grid; grid-template-columns: 300px 1fr; gap: 22px; align-items: start; }
+  .panel { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 16px 18px; }
+  .panel h3 { font-size: 13px; letter-spacing: 1px; color: var(--accent); margin: 4px 0 12px;
+    border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  .panel h3:not(:first-child) { margin-top: 22px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; font-size: 13px; }
+  .row label { color: var(--txt); }
+  .row .val { color: var(--accent-2); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+  select, input[type=range] { accent-color: var(--accent); }
+  select { background: #0c1322; color: var(--txt); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 8px; font-size: 13px; width: 150px; }
+  input[type=range] { width: 150px; }
+  .chk { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; font-size: 13px; cursor: pointer; }
+  .chk input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .btns { display: flex; gap: 10px; margin-top: 8px; }
+  .btn { flex: 1; background: rgba(54,197,240,0.1); border: 1px solid rgba(54,197,240,0.4);
+    color: #cdeefb; padding: 9px 12px; border-radius: 9px; font-size: 13px; cursor: pointer; transition: .15s; }
+  .btn:hover { background: rgba(54,197,240,0.22); }
+  .btn.alt { background: rgba(255,176,0,0.12); border-color: rgba(255,176,0,0.45); color: #ffe2a8; }
+  .btn.alt:hover { background: rgba(255,176,0,0.24); }
+
+  .stage { position: relative; height: 620px; border-radius: 14px; overflow: hidden;
+    background: repeating-linear-gradient(45deg, #0c1322 0 12px, #0e1525 12px 24px);
+    border: 1px solid rgba(120,140,180,0.14); perspective: 900px; }
+
+  /* ===== 词条槽位：尖顶正六边形比例 92 : 106 (≈0.866) ===== */
+  .card-slot { position: absolute; left: 50%; top: 50%; width: 92px; height: 106px; margin: -53px 0 0 -46px;
+    transform-style: preserve-3d; cursor: pointer; will-change: transform; }
+
+  /* ===== 六边形词条 ===== */
+  .hex-card { position: relative; width: 100%; height: 100%;
+    --flip-scale: 1.35;                      /* 切面翻开后的放大倍数（给编辑区腾空间） */
+    transform-style: preserve-3d; will-change: transform;
+    filter: drop-shadow(0 6px 14px rgba(0,0,0,.55)); }
+  /* 3 套配色轮换（琥珀 / 青 / 品红） */
+  .hex-card { --g0:#ffb000; --g1:#e89a00; --g2:#c48400; --g3:#a06d00; --g4:#8a5e00; --g5:#d49100; --frame:#ffb000; }
+  .card-slot:nth-child(3n+1) .hex-card { --g0:#36c5f0; --g1:#2aa8d0; --g2:#1f8bb0; --g3:#166e90; --g4:#0f5170; --g5:#2db8e0; --frame:#36c5f0; }
+  .card-slot:nth-child(3n+2) .hex-card { --g0:#ff5d8f; --g1:#e04a78; --g2:#c13a62; --g3:#a02b4d; --g4:#7f1d38; --g5:#f05080; --frame:#ff5d8f; }
+
+  .hex-outer, .hex-inner-bg { position: absolute; inset: 0;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); }
+  .hex-outer { inset: -3px; background: var(--frame); }
+  .hex-inner-bg { background: #0a1628; }
+
+  /* ==================================================================
+     切面翻转（沿用「词条编辑」的 flip-card 结构）
+       .fsector       = perspective 容器
+       .fsector-inner = preserve-3d 旋转体（绕「外边轴」翻 180° + 放大）
+       .fsector-front = 正面（金色切面）
+       .fsector-back  = 背面（灰色容器 + 原子输入区），绕「高线轴」预转 180°
+     ⚠ 背面必须绕高线轴而非外边轴，否则背面不跟着切片翻出去
+     ⚠ 所有切片层必须有 inset:0，否则绝对定位成 0×0 不可见
+     ================================================================== */
+  /* ⚠ 不可给 .fsector 开 pointer-events：6 片均为 inset:0 全尺寸矩形且互相重叠，
+     一旦开启，DOM 最后一片（左上 COST）会压在最上层吞掉全部点击，
+     表现为「点任意切片都只翻左上角那片」。clip-path 也不能上移到 .fsector
+     （会把 3D 翻转中的切片按 2D 平面裁掉）。
+     → 切面永不接点击，命中改由 .hex-card 用点击角度做几何判定（见 facetIndexAt）。 */
+  .fsector { position: absolute; inset: 0; perspective: 430px; pointer-events: none; }
+
+  .fsector-inner { position: relative; width: 100%; height: 100%;
+    transform-style: preserve-3d; transform-origin: var(--ox) var(--oy);
+    transition: transform .7s cubic-bezier(.4, 0, .2, 1); }
+  .fsector.open .fsector-inner { transform: rotate3d(var(--ax), var(--ay), 0, 180deg) scale(var(--flip-scale)); }
+
+  .fsector-face { position: absolute; inset: 0;
+    clip-path: var(--clip);
+    -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+  .fsector-front { background: var(--gold); }
+  .fsector-back { background: rgba(180, 195, 210, 0.34);
+    transform-origin: var(--ox) var(--oy);
+    transform: rotate3d(var(--bx), var(--by), 0, 180deg);
+    box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+
+  /* 各片：翻转轴(外边) / 背面轴(高线) / 轴经过点 / 质心 / 裁切三角 / 色阶 */
+  .fsector[data-i="0"] { --ax:0.866;  --ay:0.5;  --bx:-0.5; --by:0.866;  --ox:75%;  --oy:12.5%; --cx:66.67%; --cy:25%; --gold:var(--g0); --clip:polygon(50% 50%, 50% 0%, 100% 25%); }
+  .fsector[data-i="1"] { --ax:0;      --ay:1;    --bx:-1;   --by:0;      --ox:100%; --oy:50%;   --cx:83.33%; --cy:50%; --gold:var(--g1); --clip:polygon(50% 50%, 100% 25%, 100% 75%); }
+  .fsector[data-i="2"] { --ax:-0.866; --ay:0.5;  --bx:-0.5; --by:-0.866; --ox:75%;  --oy:87.5%; --cx:66.67%; --cy:75%; --gold:var(--g2); --clip:polygon(50% 50%, 100% 75%, 50% 100%); }
+  .fsector[data-i="3"] { --ax:-0.866; --ay:-0.5; --bx:0.5;  --by:-0.866; --ox:25%;  --oy:87.5%; --cx:33.33%; --cy:75%; --gold:var(--g3); --clip:polygon(50% 50%, 50% 100%, 0% 75%); }
+  .fsector[data-i="4"] { --ax:0;      --ay:-1;   --bx:1;    --by:0;      --ox:0%;   --oy:50%;   --cx:16.67%; --cy:50%; --gold:var(--g4); --clip:polygon(50% 50%, 0% 75%, 0% 25%); }
+  .fsector[data-i="5"] { --ax:0.866;  --ay:-0.5; --bx:0.5;  --by:0.866;  --ox:25%;  --oy:12.5%; --cx:33.33%; --cy:25%; --gold:var(--g5); --clip:polygon(50% 50%, 0% 25%, 50% 0%); }
+
+  /* ===== 背面的原子输入区 =====
+     A∘B = 绕 Z 轴 180°（内容面内倒转）+ 放大 s
+     → rotate(180deg) 抵消倒转、scale(1/s) 抵消放大 ⇒ 正立 + 原尺寸
+     字号按「本地极小值」书写，选中放大 2.5× 后即为正常可读尺寸 */
+  .fedit { position: absolute; left: var(--cx); top: var(--cy);
+    width: 50%; height: 27%;
+    transform-origin: center;
+    transform: translate(-50%, -50%) rotate(180deg) scale(calc(1 / var(--flip-scale)));
+    display: flex; flex-direction: column; gap: 1.5px;
+    padding: 2px 2.5px;
+    background: rgba(10, 22, 40, 0.9);
+    border: 1px solid rgba(90, 200, 255, 0.5);
+    border-radius: 2px; }
+  .fe-title { font-size: 5px; font-weight: 800; color: var(--frame);
+    text-align: center; line-height: 1.1; letter-spacing: .2px; }
+  .fe-bar { height: 3px; border-radius: 1px;
+    background: rgba(200, 220, 240, .26);
+    border: 1px solid rgba(120, 160, 200, .38); }
+  .fe-btn { font-size: 4.4px; font-weight: 800; text-align: center;
+    padding: .6px 0; border-radius: 1px;
+    background: var(--frame); color: #0a1628; line-height: 1.4; }
+
+  .hex-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 44%; height: 30%; border-radius: 50%;
+    background: radial-gradient(circle, rgba(4,12,26,.96), rgba(4,12,26,.78));
+    border: 1px solid rgba(255,255,255,.22);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px; color: var(--frame);
+    text-shadow: 0 0 8px rgba(0,0,0,.7); z-index: 5; }
+  .hex-card.editing .hex-label { cursor: pointer; border-color: var(--frame);
+    box-shadow: 0 0 10px var(--frame); }
+
+  .hint { font-size: 12px; color: var(--muted); margin: 12px 2px 0; line-height: 1.7; }
+  .hint b { color: var(--accent); }
+  .out { margin-top: 22px; }
+  .out-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .out-head h3 { font-size: 14px; color: var(--accent); margin: 0; letter-spacing: 1px; }
+  pre { margin: 0; background: #070b14; border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+    font-size: 12px; line-height: 1.6; color: #9fd6ee; overflow: auto; max-height: 460px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; white-space: pre; }
+  .back { display:inline-block; margin-bottom:14px; color:var(--muted); font-size:12px; text-decoration:none; }
+  .back:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">← 返回效果库总览</a>
+  <h1>组合构建器 · 六边形词条</h1>
+  <div class="sub">每张卡 = <b style="color:#ffb000">一个完整词条</b>（六边形 6 切面宝石）。<b style="color:#ffb000">点选放大后进入「词条编辑」</b>：点<b>中心徽章</b>=六片全开，点<b>单个切面</b>=只翻那片，翻开的切面背面即原子输入区。</div>
+
+  <div class="layout">
+    <div class="panel">
+      <h3>① 组合效果（来自效果库勾选）</h3>
+      <div id="fxList"></div>
+      <div class="sub" id="fxHint" style="margin:6px 0 0"></div>
+      <button class="btn" id="btnClear" style="margin-top:10px">清空选择</button>
+
+      <h3>② 参数</h3>
+      <div class="row"><label>词条数量</label><input type="range" id="pCount" min="3" max="12" value="7" /><span class="val" id="vCount">7</span></div>
+      <div class="row"><label>放大倍数</label><input type="range" id="pScale" min="1" max="5" value="2.5" step="0.5" /><span class="val" id="vScale">2.5</span></div>
+      <div class="row"><label>放大卡位置</label>
+        <select id="pBig">
+          <option value="center" selected>居中</option><option value="left">左侧</option><option value="right">右侧</option>
+          <option value="top">顶部</option><option value="bottom">底部</option><option value="leftBottom">左下</option>
+        </select></div>
+      <div class="row"><label>展开方向</label>
+        <select id="pDir">
+          <option value="up" selected>上弧</option><option value="down">下弧</option><option value="left">左弧</option>
+          <option value="right">右弧</option><option value="line">横排</option><option value="wheel">轮播 3D</option>
+        </select></div>
+      <div class="row"><label>收纳方向</label>
+        <select id="pPile">
+          <option value="leftBottom" selected>左下</option><option value="rightBottom">右下</option>
+          <option value="leftTop">左上</option><option value="rightTop">右上</option><option value="bottomCenter">底部中心</option>
+        </select></div>
+
+      <div class="btns">
+        <button class="btn" id="btnReplay">↺ 重播预览</button>
+        <button class="btn alt" id="btnGen">⚙ 生成代码</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="stage" id="stage"></div>
+      <div class="hint">
+        <b>①</b> 弧形轮播展开 &nbsp; <b>②</b> 悬停 → 3D 倾斜 &nbsp; <b>③</b> 点击一个 → 放大居中，进入「词条编辑」<br />
+        <b>④</b> 编辑态：点<b>中心徽章</b>=六片全开 / 点<b>单个切面</b>=只翻那片 / 点<b>已翻开的切面</b>=收回 / 点<b>空白处</b>=归队
+      </div>
+
+      <div class="out">
+        <div class="out-head">
+          <h3>导出代码</h3>
+          <button class="btn" id="btnCopy" style="flex:none;width:auto;padding:7px 16px">复制</button>
+        </div>
+        <pre id="code"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="anime.min.js"></script>
+<script>
+/* ===== 通用工厂：弧形「六边形词条」卡组 + 词条编辑（切面翻转）=====
+   自包含（含布局/锚点/词条 DOM 构建/切面翻转），可直接 toString() 导出。
+   依赖页面 CSS：.card-slot / .hex-card / .hex-outer / .hex-inner-bg /
+                .fsector / .fsector-inner / .fsector-face / .fedit / .hex-label */
+function createDeck(stage, options) {
+  const ANCHOR = {
+    center: { x: 0, y: 0 }, left: { x: -320, y: 0 }, right: { x: 320, y: 0 },
+    top: { x: 0, y: -150 }, bottom: { x: 0, y: 150 },
+    leftBottom: { x: -320, y: 150 }, rightBottom: { x: 320, y: 150 },
+    leftTop: { x: -320, y: -150 }, rightTop: { x: 320, y: -150 },
+    bottomCenter: { x: 0, y: 150 }
+  };
+  function layoutPos(i, n, dir) {
+    const mid = (n - 1) / 2, R = 150;
+    const a = (i / mid - 1) * 60 * Math.PI / 180;
+    switch (dir) {
+      case 'down':  return { x: Math.sin(a) * R, y: Math.cos(a) * R * 0.55, rot: a * 180 / Math.PI };
+      case 'left':  return { x: -Math.cos(a) * R * 0.55, y: Math.sin(a) * R, rot: a * 180 / Math.PI };
+      case 'right': return { x: Math.cos(a) * R * 0.55, y: Math.sin(a) * R, rot: a * 180 / Math.PI };
+      case 'line':  return { x: (i - mid) * 78, y: 0, rot: 0 };
+      case 'wheel': { const w = Math.PI * i / (n - 1);
+        return { x: Math.sin(w) * 120, y: -Math.cos(w) * 120, rot: w * 180 / Math.PI,
+                 z: -(1 - Math.cos(w)) * 60, ry: -w * 180 / Math.PI * 0.6,
+                 scale: 0.9 + Math.cos(w) * 0.12 }; }
+      default:      return { x: Math.sin(a) * R, y: -Math.cos(a) * R * 0.55, rot: a * 180 / Math.PI };
+    }
+  }
+
+  const SEG = ['WHEN', 'IF', 'ROLL', 'DO', 'AFTER', 'COST'];   // 六段：与「词条编辑」一致
+
+  /* 构建一个「六边形词条」：外框 + 6 个可翻转切面（flip-card 双面）+ 中心徽章 */
+  function buildHex(label) {
+    const hex = document.createElement('div');
+    hex.className = 'hex-card';
+    const o = document.createElement('div'); o.className = 'hex-outer';
+    const b = document.createElement('div'); b.className = 'hex-inner-bg';
+    hex.appendChild(o); hex.appendChild(b);
+
+    for (let s = 0; s < 6; s++) {
+      const fs = document.createElement('div');
+      fs.className = 'fsector';
+      fs.dataset.i = s;
+
+      const inner = document.createElement('div');
+      inner.className = 'fsector-inner';
+
+      const front = document.createElement('div');
+      front.className = 'fsector-face fsector-front';
+
+      const back = document.createElement('div');
+      back.className = 'fsector-face fsector-back';
+
+      const edit = document.createElement('div');
+      edit.className = 'fedit';
+      const t = document.createElement('div');
+      t.className = 'fe-title'; t.textContent = SEG[s];
+      edit.appendChild(t);
+      for (let k = 0; k < 2; k++) {
+        const bar = document.createElement('div');
+        bar.className = 'fe-bar';
+        edit.appendChild(bar);
+      }
+      const btn = document.createElement('div');
+      btn.className = 'fe-btn'; btn.textContent = '保存';
+      edit.appendChild(btn);
+
+      back.appendChild(edit);
+      inner.appendChild(front);
+      inner.appendChild(back);
+      fs.appendChild(inner);
+      hex.appendChild(fs);
+    }
+
+    const lab = document.createElement('div');
+    lab.className = 'hex-label';
+    lab.textContent = label;
+    hex.appendChild(lab);
+    return hex;
+  }
+
+  const opts = Object.assign(
+    { count: 7, dir: 'up', bigPos: 'center', pile: 'leftBottom', scale: 2.5,
+      hover: true, select: true, gather: true, pileClick: true, flip: true }, options || {});
+  const N = opts.count;
+  const big = ANCHOR[opts.bigPos] || ANCHOR.center;
+  const pile = ANCHOR[opts.pile] || ANCHOR.leftBottom;
+
+  stage.innerHTML = '';
+  stage.style.perspective = '900px';
+  const slots = [];
+  for (let i = 0; i < N; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'card-slot';
+    slot.appendChild(buildHex(i + 1));
+    stage.appendChild(slot);
+    slots.push(slot);
+  }
+  let selected = null;
+
+  const base = i => layoutPos(i, N, opts.dir);
+  const pilePos = i => ({ x: pile.x + (i % 3) * 7 - 7, y: pile.y + (i % 4) * 7 - 7,
+                          rot: (i - (N - 1) / 2) * 3, scale: 0.7 });
+
+  /* ---- 切面开合 ---- */
+  const facetsOf = i => slots[i].querySelectorAll('.fsector');
+
+  /* 切面命中：按「点击点相对中心的角度」判定属于哪一片。
+     正六边形切面 = 绕中心 6 个 60° 扇区；顶点方向角
+     上=270° 右上=330° 右下=30° 下=90° 左下=150° 左上=210°，第 i 片起点 (270+i*60)%360。
+     先做六边形包含判定（3 条法向半平面），避免点到包围盒四角误判。 */
+  function facetIndexAt(hex, clientX, clientY) {
+    const r = hex.getBoundingClientRect();
+    const dx = (clientX - r.left) - r.width / 2;
+    const dy = (clientY - r.top) - r.height / 2;
+    const a = r.width / 2;                       // 边心距（尖顶六边形：宽/2 = R*√3/2）
+    const inHex = Math.abs(dx) <= a + 2
+      && Math.abs(dx * 0.5 - dy * 0.866) <= a + 2
+      && Math.abs(dx * 0.5 + dy * 0.866) <= a + 2;
+    if (!inHex) return -1;
+    let ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (ang < 0) ang += 360;
+    for (let i = 0; i < 6; i++) {
+      const start = (270 + i * 60) % 360;
+      if ((ang - start + 360) % 360 < 60) return i;
+    }
+    return -1;
+  }
+
+  function closeFacets() { slots.forEach((_, i) => facetsOf(i).forEach(f => f.classList.remove('open'))); }
+  function toggleAllFacets(i) {
+    const list = facetsOf(i);
+    const allOpen = [...list].every(f => f.classList.contains('open'));
+    list.forEach(f => f.classList.toggle('open', !allOpen));
+  }
+
+  function innerReset(i) {
+    anime.set(slots[i].firstChild, { scale: 1, rotateX: 0, rotateY: 0, opacity: 1 });
+  }
+  function expand() {
+    selected = null;
+    closeFacets();
+    slots.forEach((s, i) => s.firstChild.classList.remove('editing'));
+    for (let i = 0; i < N; i++) {
+      const p = base(i);
+      anime({ targets: slots[i], translateX: p.x, translateY: p.y, translateZ: p.z || 0,
+        rotate: p.rot || 0, rotateY: p.ry || 0, scale: p.scale || 1, opacity: 1,
+        duration: 800, easing: 'easeOutBack', delay: anime.stagger(45) });
+      innerReset(i);
+    }
+  }
+  function selectCard(i) {
+    if (!opts.select || selected !== null) return;
+    selected = i;
+    closeFacets();
+    slots.forEach((s, k) => s.firstChild.classList.toggle('editing', k === i));
+    anime({ targets: slots[i], translateX: big.x, translateY: big.y, translateZ: 0,
+      rotate: 0, rotateY: 0, scale: 1, duration: 600, easing: 'easeOutBack' });
+    anime({ targets: slots[i].firstChild, scale: opts.scale, duration: 600, easing: 'easeOutBack' });
+    for (let k = 0; k < N; k++) {
+      if (k === i) continue;
+      const t = opts.gather ? pilePos(k) : base(k);
+      anime({ targets: slots[k], translateX: t.x, translateY: t.y, translateZ: t.z || 0,
+        rotate: t.rot || 0, rotateY: t.ry || 0, scale: t.scale || 1,
+        duration: 600, easing: 'easeOutQuad', delay: (k - i) * 18 });
+      if (!opts.gather) anime({ targets: slots[k].firstChild, opacity: 0.3, duration: 400 });
+    }
+  }
+
+  slots.forEach((slot, i) => {
+    const inner = slot.firstChild;
+    if (opts.hover) {
+      slot.addEventListener('mousemove', e => {
+        if (selected !== null) return;
+        const r = stage.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width - 0.5;
+        const py = (e.clientY - r.top) / r.height - 0.5;
+        inner.style.transform = 'rotateY(' + (px * 26) + 'deg) rotateX(' + (-py * 26) + 'deg)';
+      });
+      slot.addEventListener('mouseleave', () => { if (selected === null) inner.style.transform = ''; });
+    }
+    slot.addEventListener('click', (e) => {
+      // 已选中的词条 → 进入「词条编辑」：切面翻转
+      if (selected === i) {
+        if (e.target.closest('.hex-label')) {                          // 中心徽章 → 六片全开 / 全收
+          if (opts.flip) toggleAllFacets(i);
+          return;
+        }
+        const idx = opts.flip ? facetIndexAt(slot.firstChild, e.clientX, e.clientY) : -1;
+        if (idx >= 0) { facetsOf(i)[idx].classList.toggle('open'); return; }  // 单片翻转（按角度判定）
+        if (opts.pileClick) expand();                                  // 点在六边形外 → 归队并收起
+        return;
+      }
+      if (selected === null) selectCard(i);
+      else if (opts.pileClick) expand();
+    });
+  });
+
+  expand();
+  return { expand, selectCard, get selected() { return selected; } };
+}
+
+/* ===== 构建器 UI ===== */
+const $ = id => document.getElementById(id);
+let deck = null;
+
+const DEFAULT_FX = [
+  { id: 'def:hover', title: '悬停 3D 倾斜', cat: 'hover' },
+  { id: 'def:select', title: '点击放大（移到放大位）', cat: 'cards' },
+  { id: 'def:flip', title: '切面翻转（词条编辑）', cat: 'cards' },
+  { id: 'def:gather', title: '其余归拢成堆', cat: 'cards' },
+  { id: 'def:pile', title: '点击卡堆→归队原队列', cat: 'cards' }
+];
+
+function getSel() { try { return JSON.parse(localStorage.getItem('deckSel')) || []; } catch (e) { return []; } }
+
+function populateFxList() {
+  const sel = getSel();
+  const list = sel.length ? sel : DEFAULT_FX;
+  const box = $('fxList');
+  box.innerHTML = '';
+  list.forEach(fx => {
+    const lab = document.createElement('label');
+    lab.className = 'chk';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = fx.id; cb.checked = true;
+    cb.dataset.title = fx.title; cb.dataset.cat = fx.cat;
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(' ' + fx.title));
+    box.appendChild(lab);
+  });
+  $('fxHint').textContent = sel.length
+    ? '（以上来自效果库勾选；回到 index 页可增删效果）'
+    : '（未在效果库勾选，显示默认组合；去 index 页勾选效果可自定义）';
+}
+
+function checkedEffects() {
+  return [...document.querySelectorAll('#fxList input:checked')].map(cb => ({
+    id: cb.value, title: cb.dataset.title, cat: cb.dataset.cat
+  }));
+}
+function flagsFromEffects(list) {
+  const f = { hover: false, select: false, gather: false, pileClick: false, flip: false };
+  list.forEach(s => {
+    if (s.cat === 'hover') f.hover = true;
+    if (s.cat === 'cards' || s.cat === 'threed') { f.select = true; f.gather = true; }
+    if (/归拢|堆|收纳|gather|stamp|scatter|fan|arc|弧|spread|级联/i.test(s.title)) f.gather = true;
+    if (/归队|回原|队列|返回|reset/i.test(s.title)) f.pileClick = true;
+    if (/放大|点击|select|carousel|轮播|cover/i.test(s.title)) f.select = true;
+    if (/倾斜|tilt|hover|磁性|magnet/i.test(s.title)) f.hover = true;
+    if (/翻转|翻面|flip|切面|展开/i.test(s.title)) f.flip = true;
+  });
+  f.flip = true;                        // 切面翻转是词条本体能力，恒开
+  if (f.select && f.gather) f.pileClick = true;
+  return f;
+}
+
+function readOpts() {
+  const fl = flagsFromEffects(checkedEffects());
+  return {
+    count: +$('pCount').value, scale: +$('pScale').value,
+    bigPos: $('pBig').value, dir: $('pDir').value, pile: $('pPile').value,
+    hover: fl.hover, select: fl.select, gather: fl.gather, pileClick: fl.pileClick, flip: fl.flip
+  };
+}
+function refresh() { deck = createDeck($('stage'), readOpts()); generate(); }
+
+function generate() {
+  const opts = readOpts();
+  const src = createDeck.toString();
+  const usage =
+    '/* 用法：确保已加载 anime（<script src="anime.min.js"><\/script>） */\n' +
+    '/* 并引入词条 CSS：.card-slot / .hex-card / .hex-outer / .hex-inner-bg /\n' +
+    '   .fsector / .fsector-inner / .fsector-face(.front/.back) / .fedit / .hex-label */\n' +
+    'const deck = createDeck(document.querySelector("#stage"), ' +
+    JSON.stringify(opts, null, 2).replace(/\n/g, '\n  ') + '\n);\n' +
+    'deck.expand();      // 展开 / 归队（同时收起所有切面）\n' +
+    '// deck.selectCard(2); // 程序化放大第 3 个词条（进入词条编辑态）';
+  $('code').textContent = src + '\n\n' + usage;
+  $('code').scrollTop = 0;
+}
+
+['pCount','pScale','pBig','pDir','pPile'].forEach(id => $(id).addEventListener('input', () => {
+  $('vCount').textContent = $('pCount').value;
+  $('vScale').textContent = $('pScale').value;
+  refresh();
+}));
+$('fxList').addEventListener('change', refresh);
+$('btnReplay').addEventListener('click', () => deck && deck.expand());
+$('btnGen').addEventListener('click', generate);
+$('btnClear').addEventListener('click', () => { localStorage.removeItem('deckSel'); populateFxList(); refresh(); });
+$('btnCopy').addEventListener('click', () => {
+  navigator.clipboard.writeText($('code').textContent).then(() => {
+    const b = $('btnCopy'); const t = b.textContent; b.textContent = '已复制';
+    setTimeout(() => b.textContent = t, 1200);
+  });
+});
+
+populateFxList();
+refresh();
+</script>
+</body>
+</html>

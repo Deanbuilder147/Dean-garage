@@ -5,18 +5,114 @@
  */
 
 import { logger } from '../utils/logger.js';
+import { createRequire } from 'module';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { authenticate, requireAuth, requireRole } from '../middleware/auth.js';
 import { run, get, all, persistChanges } from '../db/sqlite.js';
 import { ErrorCode, RoomStatus, UserRole } from '@mecha/shared-kernel';
+import { validateBody } from '../middleware/validateBody.js';
+import { z } from 'zod';
+import { UnitContract, SkillContract, makeDiagnostic } from '@mecha/shared-kernel/contracts';
 import type { CreateRoomRequest, JoinRoomRequest } from '@mecha/shared-kernel';
 import { pushRoomUpdate } from '../services/commPush.js';
 import { seedRoomBattle, clearBattle } from './combat.js';
 import { applySizeHp } from '../unitSize.js';
+// ★ AOE 投影桥接：复用 combat-service configLoader（存储A 权威源），与引擎 skillExecutor 同读一份
+//   保证单位携带技能的 aoe_mode / range.mcShapes 与后端结算完全一致。
+let _configLoader: any = null;
+const nodeRequire = createRequire(import.meta.url);
+function getGlossaryConfigLoader() {
+  if (_configLoader) return _configLoader;
+  _configLoader = nodeRequire('../../services/combat-service/src/services/combatCore/configLoader.cjs');
+  return _configLoader;
+}
 // ★ C5 防投毒：settings 接口的 Schema 强校验模块
 import { validateRoomSettings } from './roomSettingsSchema.js';
+
+// ★ 开战技能聚合专用透传函数（路径 A / Phase 32 红线）——替代 Excel 导入器的白名单 mapSkills。
+// 设计原则：
+//   1) 保留强引用与相对射程字段：skill_key（T5 强引用外键）、min_range（盲区）、
+//      bonus_range（加成射程）、prerequisite（前置条件）、split_damage（均摊伤害）、原始 id。
+//   2) 彻底剔除 cast_range（引擎层 getSkillRangeFields 已废除绝对射程，强行透传只会产生
+//      无人读取的垃圾字段，且会引入红线违反回归风险）。
+//   3) 合并后按 skill_key（优先）或 name+category 组合键去重，防止底栏渲染重复技能卡片。
+function passthroughSkills(rawList: any[]): any[] {
+  const list = Array.isArray(rawList) ? rawList : [];
+  // ★ AOE 投影桥接：按 skill_key 取存储A 最新技能定义，补全 aoe_mode / range.mcShapes
+  let glossarySkills: Record<string, any> = {};
+  try {
+    const { getGlossaryConfig } = getGlossaryConfigLoader();
+    glossarySkills = (getGlossaryConfig()?.skills || {});
+  } catch {
+    glossarySkills = {};
+  }
+  const seen = new Map<string, any>();
+  for (const s of list) {
+    if (!s || typeof s !== 'object') continue;
+    if (!(s.name || s.skill_key)) continue; // 无标识的脏技能跳过
+    const key = s.skill_key
+      ? 'k:' + s.skill_key
+      : 'n:' + (s.name || '') + '|' + (s.category || '');
+    if (seen.has(key)) continue;
+    // ★ 不再误删 range（range.mcShapes 是 AOE 形状数据，必须保留）；仅剔除废弃的绝对射程字段
+    const { cast_range, max_range, range_max, rangeLabel, ...rest } = s;
+    // ★ 方案C·方案A陷阱修正：glossarySkills 主键是英文 key（如 sweep），
+    //   绝不能用中文 s.name / s.effect 直接索引（glossarySkills["扫射"] → undefined）。
+    //   1) 优先按 skill_key 查找；2) skill_key 缺失时按中文 name（优先）/ effect 反查值列表。
+    let gSkill: any = s.skill_key ? glossarySkills[s.skill_key] : null;
+    if (!gSkill) {
+      const targetCn = s.name || s.effect;
+      if (targetCn) {
+        gSkill = Object.values(glossarySkills).find((g: any) => g && g.name === targetCn) || null;
+      }
+    }
+    // 3) 命中词条后强行回填英文外键，给后续 combat.ts / skillExecutor 提供锚点
+    const effectiveKey = s.skill_key || (gSkill ? gSkill.key : null);
+    const aoeMode = rest.aoe_mode ?? (gSkill?.aoe_mode ?? null);
+    const aoeRange = rest.range ?? (gSkill?.range ?? null);
+    // ★ 遗漏2治本：历史单位技能直接用绝对射程字段（cast_range/max_range/range_max），
+    //   而引擎 getSkillRangeFields 只读相对字段 bonus_range（= 绝对 - 类型基准）。
+    //   此处做绝对→相对折算，保证旧数据（编辑器未产出 bonus_range 前）射程不丢失。
+    const BASE_RANGE = { melee: 1, ranged: 3, auto: 0 } as Record<string, number>;
+    const catForBase = (() => {
+      const t = String(rest.type || gSkill?.type || '').toLowerCase();
+      if (t === 'ranged' || t === '远程') return 'ranged';
+      if (t === 'auto' || t === '自动化') return 'auto';
+      return 'melee';
+    })();
+    const absMax = Number(cast_range ?? max_range ?? range_max ?? rest.range) || 0;
+    const absMin = Number(rest.min_cast_range ?? rest.range_min ?? 0) || 0;
+    const legacyBonus = absMax > 0 ? Math.max(0, absMax - (BASE_RANGE[catForBase] || 0)) : null;
+    const bonusRange = (rest.bonus_range != null) ? Number(rest.bonus_range) : legacyBonus;
+    const minRange = (rest.min_range != null) ? Number(rest.min_range)
+      : (absMin > 0 ? Math.max(0, absMin - (BASE_RANGE[catForBase] || 0)) : (catForBase === 'auto' ? 0 : 1));
+    seen.set(key, {
+      id: rest.id,                 // 保留原始 id，避免 UUID 重生成导致前端引用错位
+      name: rest.name,
+      description: rest.description ?? '',
+      skill_key: effectiveKey ?? rest.skill_key ?? null,  // ★ 方案C：中文反查回填的英文外键透传
+      category: rest.category ?? null,
+      type: rest.type ?? rest.category ?? null,
+      min_range: minRange,                     // 盲区（相对，合规）
+      bonus_range: bonusRange,                 // 加成射程（相对，合规）→ 引擎唯一合法射程入口
+      prerequisite: rest.prerequisite ?? null,  // ★ 遗漏1：前置条件（也叫 prereq）透传
+      split_damage: rest.split_damage ?? null,  // 均摊伤害
+      effect: rest.effect ?? null,
+      script: rest.script ?? '',
+      cooldown: rest.cooldown ?? 0,
+      currentCooldown: rest.currentCooldown ?? 0,
+      energyCost: rest.energyCost ?? 0,
+      damageType: rest.damageType ?? null,
+      // ★ AOE 形状桥接：透传给前端供方向投影 + 多目标高亮
+      aoe_mode: aoeMode,
+      range: aoeRange,
+      map_cannon: rest.map_cannon ?? gSkill?.map_cannon ?? null,
+    });
+  }
+  return [...seen.values()];
+}
 
 const router = Router();
 
@@ -164,7 +260,8 @@ router.get('/api/rooms', (req, res) => {
   res.json({ rooms: result });
 });
 
-router.post('/api/rooms', async (req, res) => {
+// B-4 Macro 边界：房间创建入口全量 safeParse（name/mapId 必填，英文键）
+router.post('/api/rooms', validateBody(z.object({ name: z.string().min(1), mapId: z.string().min(1) })), async (req, res) => {
   try {
     // 只有 GM（裁判/管理员/主宰）才能开房间；玩家与观众仅可加入
     if (!isGmRole(req.auth!.role)) {
@@ -481,9 +578,34 @@ router.post('/api/rooms/:roomId/start', (req, res) => {
       let equipment: any = {};
       let attributes: any = {};
       try { stats = JSON.parse(u.stats || '{}'); } catch { stats = {}; }
-      try { skills = JSON.parse(u.skills || '[]'); } catch { skills = []; }
-      try { equipment = JSON.parse(u.equipment || '{}'); } catch { equipment = {}; }
+      // ★ 2026-08-06 P0-2 决策落地：units 表【无 equipment 列】（见 db/sqlite.ts CREATE TABLE units），
+      //   `u.equipment` 恒为 undefined，此处原先的 JSON.parse 是「幽灵外键」——消费端凭空期望一个
+      //   从不存在的写入端。现显式置空并保留变量，避免下游 equipSkills 聚合出现 undefined 解引用。
+      //   装备耐久结算已按决策在引擎/网关侧整体跳过（equipmentDurability 模块不再接入调用链）。
+      //   若未来补齐装备系统，须同时：①加 units.equipment 列 ②建前端装备编辑器 ③恢复此处解析。
+      equipment = {};
       try { attributes = JSON.parse(u.attributes || '{}'); } catch { attributes = {}; }
+      // ★ 技能聚合（路径 A / Phase 32 红线）：passthroughSkills 仅透传白名单字段，
+      // 彻底剔除 cast_range（引擎层加法模型已废除绝对射程），并合并全部来源后去重：
+      //   1) u.skills（主机体扁平列）
+      //   2) attributes.skills_by_owner（含左臂/右臂/背包等非 Royroy 子部件挂载技能）
+      //   3) equipment 各槽位内嵌 skills（装备自带战术技能）
+      // 合并后按 skill_key（优先）或 name+category 组合键去重，防止底栏渲染重复技能卡片。
+      let uSkills: any[] = [];
+      try { uSkills = JSON.parse(u.skills || '[]'); } catch { uSkills = []; }
+      // ★ 2026-08-06 契约修复：三处写入端（Excel normalizer / 手动编辑器 / hangar-service）
+      //   统一落库 snake_case 的 `skills_by_owner`，此处原先只读 camelCase `skillsByOwner`，
+      //   永远为 undefined → 部件（左臂/右臂/背包）技能在开战聚合时全量丢失。
+      //   以 snake_case 为主、camelCase 仅作历史数据兼容。
+      const byOwner: any = (attributes && (attributes.skills_by_owner ?? attributes.skillsByOwner)) || null;
+      const ownerSkills: any[] = byOwner
+        ? Object.values(byOwner).flat().filter((s: any) => s && (s.name || s.skill_key))
+        : [];
+      const equipSkills: any[] = (equipment && typeof equipment === 'object')
+        ? Object.values(equipment).flatMap((slot: any) =>
+            (slot && Array.isArray(slot.skills)) ? slot.skills.filter((s: any) => s && (s.name || s.skill_key)) : [])
+        : [];
+      skills = passthroughSkills([...uSkills, ...ownerSkills, ...equipSkills]);
       // HP 真相源：优先取单位录入 stats.hp，缺省 100；再经体型系数修正（s -10%/m 0/l +5%/xl +10%）
       const baseHp = (stats && typeof stats.hp === 'number' && stats.hp > 0) ? stats.hp : 100;
       const sizedHp = applySizeHp(baseHp, u.size || 'm');
@@ -518,6 +640,43 @@ router.post('/api/rooms/:roomId/start', (req, res) => {
     }
   }
 
+  // ★ 阶段3 软着陆：开战聚合入口非阻塞 Schema 校验（绝不 400 阻断流程）。
+  //   对每个部署池单位跑 UnitContract.safeParse，并对其携带的每个技能跑 SkillContract.safeParse；
+  //   失败仅 logger.warn 落盘 + 收集进 diagnostics 数组，最终透传到开战响应，前端可黄条提示。
+  const startDiagnostics: any[] = [];
+  for (const pu of pendingUnits) {
+    const unitParse = UnitContract.safeParse({
+      id: pu.unitId || pu.id,
+      owner_id: pu.ownerId || pu.owner_id,
+      name: pu.name,
+      codename: pu.codename,
+      faction: pu.faction,
+      category: pu.category,
+      tier: pu.tier,
+      stats: pu.stats,
+      skills: pu.skills,
+      attributes: pu.attributes,
+      size: pu.size,
+    });
+    if (!unitParse.success) {
+      for (const issue of unitParse.error.issues) {
+        startDiagnostics.push(makeDiagnostic('warn', 'UNIT_SCHEMA_VIOLATION', `开战单位[${pu.name}]字段校验告警: ${issue.path.join('.')} ${issue.message}`, { field: issue.path.join('.'), entity: pu.id }));
+      }
+      logger.warn({ msg: `[ROOMS] POST /rooms/start 单位契约告警 (单位 ${pu.name})`, diagnostics: unitParse.error.issues });
+    }
+    if (Array.isArray(pu.skills)) {
+      for (const sk of pu.skills) {
+        const skillParse = SkillContract.safeParse(sk);
+        if (!skillParse.success) {
+          for (const issue of skillParse.error.issues) {
+            startDiagnostics.push(makeDiagnostic('warn', 'SKILL_SCHEMA_VIOLATION', `开战单位[${pu.name}]技能[${sk?.name || sk?.skill_key || '?'}]校验告警: ${issue.path.join('.')} ${issue.message}`, { field: issue.path.join('.'), entity: sk?.skill_key || sk?.name || pu.id }));
+          }
+          logger.warn({ msg: `[ROOMS] POST /rooms/start 技能契约告警 (单位 ${pu.name})`, diagnostics: skillParse.error.issues });
+        }
+      }
+    }
+  }
+
   // 19.7.4 暗雷修复：轮转权威源统一为 room.rules.factionRoles（GM 配置），缺失时退回实际部署推导
   const authoritativeFR = (roomRules.factionRoles && typeof roomRules.factionRoles === 'object' && Object.keys(roomRules.factionRoles).length)
     ? roomRules.factionRoles
@@ -540,7 +699,7 @@ router.post('/api/rooms/:roomId/start', (req, res) => {
   seedRoomBattle(battleId, room.map_id, pendingUnits, factionRolesConfig, room.host_id);
   pushRoomUpdate(room.id);
 
-  res.json({ success: true, battleId, pendingUnitCount: pendingUnits.length });
+  res.json({ success: true, battleId, pendingUnitCount: pendingUnits.length, diagnostics: startDiagnostics });
 });
 
 // B-2.1 名册锁定/解锁（仅房主）

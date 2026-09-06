@@ -286,7 +286,7 @@ class BuffManager {
    * @param {Object} uf - _getUniversalFields 产出的通用字段
    * @returns {Object} statusEffects 实例
    */
-  static buildStatusInstance(skillType, uf) {
+  static buildStatusInstance(skillType, uf, expiryPhase) {
     const c = uf && uf.consumption;
     let consumption;
     if (c && c.mode === 'duration' && c.duration != null) {
@@ -304,6 +304,8 @@ class BuffManager {
     const appliesOn = (uf && uf.applies_on) || 'attack';
     const actionType = (uf && uf.modifier) || 'attack_buff';
     const value = Number((uf && (uf.base_damage || uf.bonus || uf.value || uf.reduction)) || 0);
+    // ★ §8.9②：结算相位（默认 turn_end；被动 on_turn_start Buff 用 turn_start 避免秒失效）
+    const expiry_phase = expiryPhase || (uf && uf.expiry_phase) || 'turn_end';
 
     return {
       id: 'st_' + Date.now().toString(36) + '_' + skillType + '_' + Math.random().toString(36).slice(2, 7),
@@ -314,6 +316,7 @@ class BuffManager {
       consumption,
       trigger,
       applies_on: appliesOn,
+      expiry_phase,
     };
   }
 
@@ -363,17 +366,114 @@ class BuffManager {
   }
 
   /**
-   * 回合末：扣减 duration 类 status 的 remaining，归零则移除。
+   * 回合相位结算：扣减 duration 类 status 的 remaining，归零则移除。
+   * ★ §8.9②：按 expiry_phase 相位过滤——仅扣减与当前相位匹配的 status。
+   *   - 'turn_end'（默认）：回合结束时递减（主动技默认）。
+   *   - 'turn_start'：下一回合开始时递减（被动 on_turn_start Buff 默认，避免「刚挂上就秒失效」）。
+   * @param {Object} unit
+   * @param {string} phase - 'turn_end' | 'turn_start'（默认 'turn_end'，向后兼容）
    */
-  static tickStatus(unit) {
+  static tickStatus(unit, phase = 'turn_end') {
     if (!unit || !Array.isArray(unit.statusEffects)) return;
     for (let i = unit.statusEffects.length - 1; i >= 0; i--) {
       const s = unit.statusEffects[i];
-      if (s && s.consumption && s.consumption.mode === 'duration') {
-        s.consumption.remaining = (s.consumption.remaining || 1) - 1;
-        if (s.consumption.remaining <= 0) unit.statusEffects.splice(i, 1);
-      }
+      if (!s || !s.consumption || s.consumption.mode !== 'duration') continue;
+      if ((s.expiry_phase || 'turn_end') !== phase) continue; // 仅扣减匹配相位的 status
+      s.consumption.remaining = (s.consumption.remaining || 1) - 1;
+      if (s.consumption.remaining <= 0) unit.statusEffects.splice(i, 1);
     }
+  }
+
+  /** ★ §8.9②：回合开始相位结算（递减 expiry_phase='turn_start' 的 status）。 */
+  static tickStatusStart(unit) {
+    BuffManager.tickStatus(unit, 'turn_start');
+  }
+
+  // ============================================================
+  // B.6 属性修正栈（stat_modifier）+ 管线纯函数（2026-08-23，档位 X）
+  // 规范：六段式画布 UI 规范 · 动作原子分层模型
+  // 数据契约 StatModifierInstance：
+  //   { type:'stat_modifier', key, stat_type, op:'add'|'percent'|'multiplier',
+  //     value, duration, consumption:{mode:'duration',remaining,max},
+  //     undispellable:false, source }
+  // 叠加三规则：同 key 同 value 同 op → 续时长；异 → 独立计时压栈。
+  // 算值：base + Σadd → ×(1+Σpercent) → ×Πmultiplier（固定顺序，天然支持规则3）。
+  // ============================================================
+
+  /**
+   * 向单位 statusEffects 压入/续期一个 stat_modifier 实例（实现叠加三规则）。
+   * @param {Object} unit
+   * @param {Object} mod - 完整 StatModifierInstance（不含 consumption 时自动补）
+   */
+  static addStatModifier(unit, mod) {
+    if (!unit) return;
+    if (!Array.isArray(unit.statusEffects)) unit.statusEffects = [];
+    const key = mod.key;
+    const op = mod.op || 'add';
+    const value = Number(mod.value || 0);
+    // 规则 1：同 key 同 value 同 op → 叠加时效（不新增实例）
+    const matched = unit.statusEffects.find(
+      e => e && e.type === 'stat_modifier' && e.key === key
+        && Number(e.value || 0) === value && (e.op || 'add') === op
+    );
+    if (matched) {
+      const dur = Number(mod.duration || (mod.consumption && mod.consumption.max) || 0);
+      matched.consumption = matched.consumption || { mode: 'duration', remaining: 0, max: dur };
+      matched.consumption.remaining = (matched.consumption.remaining || 0) + dur;
+      matched.consumption.max = Math.max(matched.consumption.max || 0, matched.consumption.remaining);
+      return matched;
+    }
+    // 规则 2：异 value/异 op → 独立计时压栈
+    const duration = Number(mod.duration || 0);
+    const instance = {
+      type: 'stat_modifier',
+      key,
+      stat_type: mod.stat_type,
+      op,
+      value,
+      duration,
+      undispellable: !!mod.undispellable,
+      source: mod.source || 'stat_mod',
+      expiry_phase: mod.expiry_phase || 'turn_end',
+      consumption: { mode: 'duration', remaining: duration, max: duration },
+    };
+    unit.statusEffects.push(instance);
+    return instance;
+  }
+
+  /**
+   * 动态算值纯函数（管线）：对任意 stat 按固定顺序求值，百分比/倍率天然基于当前已生效值。
+   * 不回写 currentStats（档位 X：消费侧按需调用本函数取值，避免全局收口回归风险）。
+   * @param {Object} unit
+   * @param {string} statType
+   * @returns {number}
+   */
+  static calculateEffectiveStat(unit, statType) {
+    if (!unit) return 0;
+    const base = Number(
+      (unit.baseStats && unit.baseStats[statType] != null) ? unit.baseStats[statType]
+        : (unit.currentStats && unit.currentStats[statType] != null) ? unit.currentStats[statType]
+          : 0
+    );
+    const mods = (unit.statusEffects || []).filter(
+      e => e && e.type === 'stat_modifier' && e.stat_type === statType
+        && e.consumption && Number(e.consumption.remaining) > 0
+    );
+    let addSum = 0, pctSum = 0, mulProd = 1;
+    for (const m of mods) {
+      const op = m.op || 'add';
+      const v = Number(m.value || 0);
+      if (op === 'add') addSum += v;
+      else if (op === 'percent') pctSum += v;
+      else if (op === 'multiplier') mulProd *= v;
+    }
+    // 规则 3 固定顺序：base + 固定值累加 → 百分比叠加 → 倍率叠乘
+    return (base + addSum) * (1 + pctSum) * mulProd;
+  }
+
+  /** 对外便捷入口（语义同 calculateEffectiveStat）。 */
+  static getEffectiveStat(unit, statType) {
+    return BuffManager.calculateEffectiveStat(unit, statType);
   }
 }
 

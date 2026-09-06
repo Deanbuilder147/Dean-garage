@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>词条系统 · 入口导航</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --line:#2b3340;
+    --amber:#ffb000; --cyan:#7fe7ff; --txt:#e6edf3; --txt-dim:#9fb0c4;
+    --green:#5dd47f; --violet:#c08cff; --pink:#ff8ab3; --blue:#4aa3ff; --red:#ff8a80;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px;line-height:1.5;padding:32px 24px 64px;max-width:980px;margin:0 auto;}
+  h1{color:var(--amber);font-size:22px;margin-bottom:4px;}
+  .lead{color:var(--txt-dim);font-size:13px;margin-bottom:28px;}
+  h2{color:var(--cyan);font-size:15px;margin:28px 0 12px;font-weight:700;
+     border-left:3px solid var(--cyan);padding-left:10px;}
+  /* ===== 模块关系树（带连接线） ===== */
+  .tree{position:relative;padding-left:26px;}
+  .tree::before{content:"";position:absolute;left:9px;top:6px;bottom:18px;width:2px;background:var(--line);}
+  .node{position:relative;margin:10px 0;}
+  .node::before{content:"";position:absolute;left:-17px;top:16px;width:14px;height:2px;background:var(--line);}
+  .card{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:12px 16px;transition:.15s;}
+  .card:hover{border-color:var(--amber);background:var(--panel-2);transform:translateX(2px);}
+  .card .t{color:var(--txt);font-weight:600;font-size:14px;}
+  .card .d{color:var(--txt-dim);font-size:12px;margin-top:3px;}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;margin-left:8px;vertical-align:middle;}
+  .tag.open{background:rgba(93,212,127,.15);color:var(--green);border:1px solid rgba(93,212,127,.4);}
+  .tag.src{background:rgba(127,231,255,.12);color:var(--cyan);border:1px solid rgba(127,231,255,.35);}
+  .tag.doc{background:rgba(192,140,255,.12);color:var(--violet);border:1px solid rgba(192,140,255,.35);}
+  /* ===== 六段泳道 ===== */
+  .lanes{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:6px;}
+  .lane{border-radius:10px;padding:14px 10px;text-align:center;color:#0d1117;font-weight:700;font-size:13px;
+    text-decoration:none;box-shadow:0 1px 0 rgba(0,0,0,.3);transition:.15s;}
+  .lane:hover{transform:translateY(-3px);filter:brightness(1.08);}
+  .lane small{display:block;font-weight:500;font-size:10px;margin-top:3px;opacity:.75;}
+  .l1{background:var(--amber);}  .l2{background:var(--cyan);}   .l3{background:var(--green);}
+  .l4{background:var(--pink);}   .l5{background:var(--blue);}   .l6{background:var(--red);}
+  .note{color:var(--txt-dim);font-size:12px;margin-top:18px;background:var(--panel);
+    border:1px dashed var(--line);border-radius:8px;padding:12px 16px;}
+  code{background:var(--panel-2);padding:2px 6px;border-radius:4px;color:var(--cyan);font-size:12px;}
+</style>
+</head>
+<body>
+  <h1>词条系统 · 入口导航</h1>
+  <div class="lead">把现有词条系统的各个入口用连接串起来。绿色=可直接双击打开的成品原型；青色=Vue 源码（需启动前端 dev server 才能渲染）；紫色=设计文档。</div>
+
+  <h2>一、模块展开关系</h2>
+  <div class="tree">
+    <div class="node">
+      <a class="card" href="glossary-six-phase-prototype.html">
+        <span class="t">六段三层 + 原子组合编辑器<span class="tag open">直接打开</span></span>
+        <div class="d">当前词条系统的主交互原型：WHEN/IF/ROLL/DO/AFTER/COST 六段泳道 + 三层结构 + 原子组合。点此即可看到现在的词条系统。</div>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/glossary-edit-prototype.html">
+        <span class="t">六边形切面 · 3D 轴翻转编辑<span class="tag open">直接打开</span></span>
+        <div class="d">单个词条的六边形切面编辑器原型（3D 轴翻转、展开连接）。</div>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryForgePrismView.vue">
+        <span class="t">GlossaryForgePrismView（六段泳道 · 生产代码）<span class="tag src">Vue 源码</span></span>
+        <div class="d">你之前指定为准的 Prism 页：六段泳道 WHEN/IF/ROLL/DO/AFTER/COST。</div>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryStudio.vue">
+        <span class="t">GlossaryStudio（主工作台）<span class="tag src">Vue 源码</span></span>
+        <div class="d">词条库主工作台视图（160KB，功能最全）。</div>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryHubNew.vue">
+        <span class="t">GlossaryHubNew（词条枢纽/总览）<span class="tag src">Vue 源码</span></span>
+        <div class="d">词条枢纽新视图，聚合展示。</div>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryView.vue">
+        <span class="t">GlossaryView（浏览/检索）<span class="tag src">Vue 源码</span></span>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryForgeBlueprintView.vue">
+        <span class="t">GlossaryForgeBlueprintView（蓝图视图）<span class="tag src">Vue 源码</span></span>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/frontend/src/views/GlossaryCarouselView.vue">
+        <span class="t">GlossaryCarouselView（轮播视图）<span class="tag src">Vue 源码</span></span>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="mecha-universe-engine/backend-gateway/src/routes/glossary.ts">
+        <span class="t">后端路由 glossary.ts（数据/接口）<span class="tag src">源码</span></span>
+        <div class="d">词条 CRUD / 同步的 API 实现（46KB）。</div>
+      </a>
+    </div>
+  </div>
+
+  <h2>二、Prism 六段泳道（点击任意段进入主编辑器）</h2>
+  <div class="lanes">
+    <a class="lane l1" href="glossary-six-phase-prototype.html">WHEN<small>触发条件</small></a>
+    <a class="lane l2" href="glossary-six-phase-prototype.html">IF<small>前置判定</small></a>
+    <a class="lane l3" href="glossary-six-phase-prototype.html">ROLL<small>掷骰判定</small></a>
+    <a class="lane l4" href="glossary-six-phase-prototype.html">DO<small>执行效果</small></a>
+    <a class="lane l5" href="glossary-six-phase-prototype.html">AFTER<small>结算后</small></a>
+    <a class="lane l6" href="glossary-six-phase-prototype.html">COST<small>消耗代价</small></a>
+  </div>
+
+  <h2>三、设计文档</h2>
+  <div class="tree">
+    <div class="node">
+      <a class="card" href="glossary-studio-五视图功能定位与待讨论清单-2026-08-10.md">
+        <span class="t">五视图功能定位与待讨论清单<span class="tag doc">文档</span></span>
+      </a>
+    </div>
+    <div class="node">
+      <a class="card" href="glossary-studio-架构重构文档-2026-08-11.md">
+        <span class="t">架构重构文档<span class="tag doc">文档</span></span>
+      </a>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>想看 Vue 生产代码渲染后的真实界面？</strong> 启动前端 dev server：<br/>
+    <code>cd mecha-universe-engine/frontend &amp;&amp; npm install &amp;&amp; npm run dev</code><br/>
+    然后浏览器打开提示的本地地址（通常 <code>http://localhost:5173</code>），即可看到经路由加载的 Prism / Studio / Hub 等视图。
+    本页中带「Vue 源码」标签的链接点开是源码文本，需经 dev server 才能渲染为界面。
+  </div>
+</body>
+</html>

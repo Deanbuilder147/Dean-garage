@@ -1,0 +1,106 @@
+- generic [ref=e4]:
+  - complementary [ref=e29]:
+    - complementary [ref=e30]:
+      - button "收起侧边栏" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+      - generic [ref=e34]:
+        - generic "点击查看 / 修改账号信息" [ref=e35] [cursor=pointer]:
+          - generic [ref=e37]:
+            - paragraph [ref=e38]: "[ deantest ]"
+            - paragraph [ref=e39]: "军衔: Earth"
+        - navigation [ref=e40]:
+          - link "首页" [ref=e41] [cursor=pointer]:
+            - /url: /home
+            - img [ref=e42]
+            - generic [ref=e45]: 首页
+          - link "单位编辑器" [ref=e46] [cursor=pointer]:
+            - /url: /units
+            - img [ref=e47]
+            - generic [ref=e49]: 单位编辑器
+          - link "地图编辑器" [ref=e50] [cursor=pointer]:
+            - /url: /battlefield-edit
+            - img [ref=e51]
+            - generic [ref=e56]: 地图编辑器
+          - link "战术部署" [ref=e57] [cursor=pointer]:
+            - /url: /battlefields
+            - img [ref=e58]
+            - generic [ref=e62]: 战术部署
+          - link "词条库" [ref=e63] [cursor=pointer]:
+            - /url: /glossary-hub
+            - img [ref=e64]
+            - generic [ref=e66]: 词条库
+          - link "词条库·新" [ref=e67] [cursor=pointer]:
+            - /url: /glossary-studio
+            - img [ref=e68]
+            - generic [ref=e70]: 词条库·新
+          - link "AI 素材工坊" [ref=e71] [cursor=pointer]:
+            - /url: /asset-gen
+            - img [ref=e72]
+            - generic [ref=e75]: AI 素材工坊
+          - link "问题反馈" [ref=e76] [cursor=pointer]:
+            - /url: /bug-report
+            - img [ref=e77]
+            - generic [ref=e81]: 问题反馈
+          - link "棋子库" [ref=e82] [cursor=pointer]:
+            - /url: /unit-library
+            - img [ref=e83]
+            - generic [ref=e85]: 棋子库
+          - link "我的投稿" [ref=e86] [cursor=pointer]:
+            - /url: /my-units
+            - img [ref=e87]
+            - generic [ref=e89]: 我的投稿
+          - generic [ref=e90]: 后台管理 / Admin
+          - link "后台管理" [ref=e91] [cursor=pointer]:
+            - /url: /admin-center
+            - img [ref=e92]
+            - generic [ref=e95]: 后台管理
+  - main [ref=e5]:
+    - generic [ref=e96]:
+      - generic [ref=e97]:
+        - heading "战术模拟系统 Alpha 3.0" [level=1] [ref=e98]
+        - generic [ref=e99]:
+          - generic [ref=e100]: "系统: 在线"
+          - generic [ref=e102]: "::"
+          - generic [ref=e103]: "战区: 7-B Alpha"
+          - generic [ref=e104]: "::"
+          - generic [ref=e105]: "核心温度: 42°C"
+      - generic [ref=e106]:
+        - generic [ref=e107] [cursor=pointer]:
+          - generic [ref=e108]:
+            - img [ref=e110]
+            - generic [ref=e112]:
+              - heading "战术部署" [level=3] [ref=e113]
+              - paragraph [ref=e114]: 选择战场，组建机甲编队，投入高强度战术战斗行动。
+          - button "启动" [ref=e115]
+        - generic [ref=e116] [cursor=pointer]:
+          - generic [ref=e117]:
+            - img [ref=e119]
+            - generic [ref=e121]:
+              - heading "单位编辑器" [level=3] [ref=e122]
+              - paragraph [ref=e123]: 校准反应堆输出与武器挂载点，管理驾驶员同步率和机体完整性。
+          - button "配置" [ref=e124]
+        - generic [ref=e125] [cursor=pointer]:
+          - generic [ref=e126]:
+            - img [ref=e128]
+            - generic [ref=e133]:
+              - heading "地图编辑器" [level=3] [ref=e134]
+              - paragraph [ref=e135]: 设计地形与天气变量，构建战术部署所需的战略地图。
+          - button "构建" [ref=e136]
+        - generic [ref=e137] [cursor=pointer]:
+          - generic [ref=e138]:
+            - img [ref=e140]
+            - generic [ref=e143]:
+              - heading "📖 词条造词工厂" [level=3] [ref=e144]
+              - paragraph [ref=e145]: 查阅全部机甲技能、地形特性与战斗机制的完整百科词条库。
+          - button "查阅" [ref=e146]
+      - generic [ref=e147]:
+        - strong [ref=e148]: "系统状态:"
+        - generic [ref=e149]: 同步稳定
+        - generic [ref=e150]: "|"
+        - generic [ref=e151]: "神经链接: 94%"
+        - generic [ref=e152]: "|"
+        - generic [ref=e153]: "反应堆: 低温"
+        - generic [ref=e154]: "|"
+        - generic [ref=e155]: "坐标: 35.6895 N / 139.6917 E"
+        - generic [ref=e156]: "|"
+        - generic [ref=e157]: "战区: 7-B Alpha"

@@ -19,10 +19,11 @@ WORKDIR /build/shared-kernel
 RUN npm install --legacy-peer-deps --install-links=false
 
 # 安装 backend-gateway 依赖并编译
+# 注意：builder 阶段不 tsc（dist 由 rsync 同步提供，见上方注释），仅需安装其余生产依赖。
+# shared-kernel 在运行阶段经 symlink 提供，此处直接删除该行，避免 npm 查 registry 报 404。
 WORKDIR /build/backend-gateway
-RUN sed -i 's|"@mecha/shared-kernel": "\\*"|"@mecha/shared-kernel": "file:../shared-kernel"|' package.json && \
-    npm install --legacy-peer-deps && \
-    npx tsc
+RUN sed -i '/"@mecha\/shared-kernel"/d' package.json && \
+    npm install --legacy-peer-deps
 
 # ========================================
 # 运行阶段：独立安装生产依赖，避免跨阶段 node_modules 复制
@@ -42,7 +43,7 @@ COPY --from=builder /build/shared-kernel/dist/ ./shared-kernel/dist/
 # 打补丁：让 main/exports 指向编译后的 .js 文件（生产环境 Node 不识别 .ts）
 # 保留 ./hexMath 子路径双格式导出（combat-core 的 .cjs 经 require('@mecha/shared-kernel/hexMath') 取 CJS 真相源）
 RUN cd shared-kernel && \
-    node -e "const p=require('./package.json');p.main='./dist/index.js';p.exports={'.':{import:'./dist/index.js',require:'./dist/index.js'},'./hexMath':{import:'./dist/hexMath.js',require:'./dist/hexMath.cjs'},'./tokens':'./dist/tokens.js','./types':'./dist/types.js'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
+    node -e "const p=require('./package.json');p.main='./dist/index.js';p.exports={'.':{import:'./dist/index.js',require:'./dist/index.js'},'./hexMath':{import:'./dist/hexMath.js',require:'./dist/hexMath.cjs'},'./contracts':{import:'./dist/contracts/index.js',require:'./dist/contracts/index.cjs'},'./tokens':'./dist/tokens.js','./types':'./dist/types.js'};require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2))"
 
 # 复制 package.json 并安装生产依赖
 # 策略：先用 sed 移除 @mecha/shared-kernel 依赖（避免 npm 查 registry），
@@ -56,8 +57,8 @@ RUN cp package.json package.json.bak && \
     mkdir -p node_modules/@mecha && \
     ln -s ../../shared-kernel node_modules/@mecha/shared-kernel
 
-# 复制编译产物
-COPY --from=builder /build/backend-gateway/dist ./dist
+# 复制编译产物（dist 由 rsync 同步提供，builder 阶段不 tsc）
+COPY backend-gateway/dist ./dist
 
 # Meowa 地形素材同步脚本（容器内运行：node /app/scripts/syncMeowaTerrains.mjs）
 COPY --from=builder /build/backend-gateway/scripts ./scripts

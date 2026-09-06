@@ -37,6 +37,11 @@ jobs:
           npm install --legacy-peer-deps
           npm run lint
 
+      - name: Frontend Mirror Drift Gate (Phase 7.⑤ 防漂移)
+        run: |
+          cd frontend
+          node scripts/check-mirror.mjs
+
       - name: Build, Tag & Zero-Downtime Deploy
         run: |
           ssh root@${{ secrets.HOST_IP }} << 'EOF'

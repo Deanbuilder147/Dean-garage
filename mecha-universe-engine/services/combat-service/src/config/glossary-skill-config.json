@@ -3,236 +3,1300 @@
     "version": "5.0",
     "description": "机甲战棋词条库中枢配置 — Phase 10 万能语法战斗中枢",
     "generated_from": "GlossaryView.vue 结构化 CRUD + Phase 10 主谓宾定状补语法插槽",
-    "date": "2026-06-21 12:00:00",
-    "principle": "Phase 10 万能语法中枢: 主谓宾定状补插槽 + damage_kind分流 + 高地优势 + 手动摇骰 + 泛化加成累加器"
+    "date": "2026-08-23 07:23:10",
+    "principle": "Phase 10 万能语法中枢: 主谓宾定状补插槽 + damage_kind分流 + 高地优势 + 手动摇骰 + 泛化加成累加器",
+    "migrated_to_editor_dimension": true,
+    "migrated_at": "2026-08-19 08:06:12",
+    "migrated_to_phase_tree": true
   },
   "damage_kinds": {
-    "kinetic": { "label": "动能", "description": "物理冲击伤害" },
-    "beam": { "label": "光束", "description": "能量束伤害" },
-    "explosive": { "label": "爆炸", "description": "范围爆破伤害" },
-    "corrosive": { "label": "腐蚀", "description": "持续性腐蚀伤害" },
-    "thermal": { "label": "热熔", "description": "高温热熔伤害" }
+    "kinetic": {
+      "label": "动能",
+      "description": "物理冲击伤害"
+    },
+    "beam": {
+      "label": "光束",
+      "description": "能量束伤害"
+    },
+    "explosive": {
+      "label": "爆炸",
+      "description": "范围爆破伤害"
+    },
+    "corrosive": {
+      "label": "腐蚀",
+      "description": "持续性腐蚀伤害"
+    },
+    "thermal": {
+      "label": "热熔",
+      "description": "高温热熔伤害"
+    }
   },
   "action_types": {
-    "attack": { "label": "攻击", "description": "对目标造成伤害" },
-    "heal": { "label": "治疗", "description": "回复目标HP" },
-    "buff": { "label": "增益", "description": "施加正面效果" },
-    "debuff": { "label": "减益", "description": "施加负面效果" },
-    "passive": { "label": "被动", "description": "条件触发" }
+    "attack": {
+      "label": "攻击",
+      "description": "对目标造成伤害"
+    },
+    "heal": {
+      "label": "治疗",
+      "description": "回复目标HP"
+    },
+    "buff": {
+      "label": "增益",
+      "description": "施加正面效果"
+    },
+    "debuff": {
+      "label": "减益",
+      "description": "施加负面效果"
+    },
+    "passive": {
+      "label": "被动",
+      "description": "条件触发"
+    }
   },
   "skills": {
     "block": {
+      "entryType": "skill",
+      "name": "格挡",
+      "description": "受攻击时伤害-2",
+      "ap_cost": 1,
+      "category": "melee",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "on_attacked",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SELF",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933622_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "格挡",
+        "category": "melee",
+        "description": "受攻击时伤害-2",
+        "deterministic": true,
+        "reduction": 2,
+        "trigger": "on_attacked",
+        "target_filter": "self",
+        "aoe_radius": 0,
+        "base_damage": 0,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "melee",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "reduction": "伤害减免加值，对应 damage 子字段 fixed_mod/flat_value"
+        }
+      },
       "type": "passive",
       "label": "格挡",
-      "category": "melee",
-      "description": "受攻击时伤害-2",
       "deterministic": true,
       "reduction": 2,
-      "trigger": "on_attacked",
       "target_filter": "self",
-      "cast_range": 0,
       "aoe_radius": 0,
       "base_damage": 0,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "melee",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "reduction": "伤害减免加值，对应 damage 子字段 fixed_mod/flat_value"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "on_attacked"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933622_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "block",
+      "timing": {
+        "trigger": "on_attacked"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "sweep": {
-      "type": "active",
-      "label": "扫射",
+      "entryType": "skill",
+      "name": "扫射",
+      "name_en": "Sweep",
+      "description": "纯 Segment 模型：掷 1d6。1-3 点精准命中单体 -2；4-6 点范围攻击，对所有敌方均摊伤害。",
+      "ap_cost": 1,
       "category": "ranged",
-      "description": "扇形2格范围攻击，不进行机动值判定。精准命中单体造成伤害-2，范围攻击伤害由所有目标均摊",
-      "deterministic": true,
-      "sector_angle": 60,
-      "max_range": 2,
-      "damage_modifier_precise": -2,
-      "mode": "deterministic_sweep",
-      "target_filter": "enemy",
-      "cast_range": 2,
-      "aoe_radius": 0,
-      "base_damage": -2,
-      "status_effects": [],
+      "min_range": 1,
+      "max_range": 3,
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
-      "accuracy_mod": 0,
-      "evasion_mod": 0,
-      "height_bonus_per_diff": 0,
-      "action_type": "attack",
       "attack_stat": "ranged",
-      "requires_unmoved": false,
-      "requires_stealth": false
+      "action_type": "passive",
+      "base_damage": 0,
+      "__segment_model__": true,
+      "roll": {
+        "mode": "dice",
+        "dice_type": "1d6",
+        "segments": [
+          {
+            "lower": 1,
+            "upper": 3,
+            "label": "精准单体",
+            "effects": [
+              {
+                "type": "damage",
+                "flat_value": -2,
+                "target_scope": "SINGLE_ENEMY",
+                "damage_mode": "override",
+                "split_mode": "none"
+              }
+            ]
+          },
+          {
+            "lower": 4,
+            "upper": 6,
+            "label": "范围均摊",
+            "effects": [
+              {
+                "type": "damage",
+                "flat_value": -6,
+                "target_scope": "AREA_ENEMY",
+                "damage_mode": "override",
+                "split_mode": "equal"
+              }
+            ]
+          }
+        ]
+      },
+      "engine_meta": {
+        "model": "pure_segment",
+        "refactored_at": "2026-08-07",
+        "note": "改造为纯 Segment 模型：移除旧 branch/确定性残留（aoe_mode/map_cannon/mcShapes/顶层 effects/base_damage），伤害全部由 roll.segments[].effects 经 effectExecutor 结算；谓语 passive 仅作承载，不重复扣血。"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "active"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "type": "damage",
+              "flat_value": -2,
+              "target_scope": "SINGLE_ENEMY",
+              "damage_mode": "override",
+              "split_mode": "none",
+              "value": -2,
+              "target": "SINGLE_ENEMY"
+            },
+            {
+              "type": "damage",
+              "flat_value": -6,
+              "target_scope": "AREA_ENEMY",
+              "damage_mode": "override",
+              "split_mode": "equal",
+              "value": -6,
+              "target": "AREA_ENEMY"
+            }
+          ]
+        }
+      ],
+      "key": "sweep",
+      "timing": {
+        "trigger": null
+      },
+      "conditions": [],
+      "target": {
+        "shape": "single",
+        "range": 3,
+        "count": 1
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      },
+      "effects": []
     },
     "throw": {
+      "entryType": "skill",
+      "name": "投掷",
+      "description": "1~3格，目标周围2格所有目标下次伤害+5",
+      "ap_cost": 1,
+      "category": "ranged",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": {
+        "type": "none",
+        "value": ""
+      },
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SINGLE_ENEMY",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 2
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_deb",
+          "type": "status",
+          "polarity": "debuff",
+          "target_stat": "DMG_TAKEN",
+          "preset": "",
+          "value": 5,
+          "duration": 3
+        }
+      ],
+      "engine_meta": {
+        "type": "active",
+        "label": "投掷",
+        "category": "ranged",
+        "description": "1~3格，目标周围2格所有目标下次伤害+5",
+        "deterministic": true,
+        "min_range": 1,
+        "max_range": 3,
+        "effect": "damage_amp",
+        "value": 5,
+        "aoe_range": 2,
+        "target_filter": "enemy",
+        "bonus_range": 0,
+        "aoe_radius": 2,
+        "base_damage": 5,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "debuff",
+        "attack_stat": "ranged",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "max_range": "射程归一已由 shared-kernel 实现，与 cast_range 统一",
+          "aoe_range": "与 aoe.spread:2 重复，已由打击范围图层 aoe 样式承载，建议废弃 aoe_range 改读 aoe.spread",
+          "effect": "此为 roll→do 分支标签（1-3 加伤/4-6 减移动），非程序 effects[] 栈；建议归入 roll.segments[].do",
+          "value": "出处=原文'+5/-5'的量化数值，是 roll 分支 DO 的幅度参数，与 effects[].value 巧合同名但语义层不同"
+        }
+      },
       "type": "active",
       "label": "投掷",
-      "category": "ranged",
-      "description": "1~3格，目标周围2格所有目标下次伤害+5",
       "deterministic": true,
-      "min_range": 1,
       "max_range": 3,
       "effect": "damage_amp",
       "value": 5,
       "aoe_range": 2,
       "target_filter": "enemy",
-      "cast_range": 3,
       "aoe_radius": 2,
       "base_damage": 5,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 1,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "debuff",
       "attack_stat": "ranged",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "max_range": "射程归一已由 shared-kernel 实现，与 cast_range 统一",
+        "aoe_range": "与 aoe.spread:2 重复，已由打击范围图层 aoe 样式承载，建议废弃 aoe_range 改读 aoe.spread",
+        "effect": "此为 roll→do 分支标签（1-3 加伤/4-6 减移动），非程序 effects[] 栈；建议归入 roll.segments[].do",
+        "value": "出处=原文'+5/-5'的量化数值，是 roll 分支 DO 的幅度参数，与 effects[].value 巧合同名但语义层不同"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": {
+                "type": "none",
+                "value": ""
+              }
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_deb",
+              "type": "status",
+              "polarity": "debuff",
+              "target_stat": "DMG_TAKEN",
+              "preset": "",
+              "value": 5,
+              "duration": 3,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "throw",
+      "timing": {
+        "trigger": {
+          "type": "none",
+          "value": ""
+        }
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "execute": {
+      "entryType": "skill",
+      "name": "斩杀",
+      "description": "近战伤害结算后，目标HP<10%最大HP时直接斩杀",
+      "ap_cost": 1,
+      "category": "melee",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "post_melee_damage",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SINGLE_ENEMY",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "斩杀",
+        "category": "melee",
+        "description": "近战伤害结算后，目标HP<10%最大HP时直接斩杀",
+        "deterministic": true,
+        "hp_threshold_percent": 10,
+        "trigger": "post_melee_damage",
+        "target_filter": "enemy",
+        "aoe_radius": 0,
+        "base_damage": 999,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "melee",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "hp_threshold_percent": "HP< 阈值条件，归 when.conditions[] 的 hp_compare"
+        }
+      },
       "type": "passive",
       "label": "斩杀",
-      "category": "special",
-      "description": "近战伤害结算后，目标HP<10%最大HP时直接斩杀",
       "deterministic": true,
       "hp_threshold_percent": 10,
-      "trigger": "post_melee_damage",
       "target_filter": "enemy",
-      "cast_range": 1,
       "aoe_radius": 0,
       "base_damage": 999,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "melee",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "hp_threshold_percent": "HP< 阈值条件，归 when.conditions[] 的 hp_compare"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "post_melee_damage"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "execute",
+      "timing": {
+        "trigger": "post_melee_damage"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "duel": {
+      "entryType": "skill",
+      "name": "决斗",
+      "description": "双方在攻击范围内且HP<对方max(格斗,射击)时触发，攻击力高者胜",
+      "ap_cost": 1,
+      "category": "melee",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "when_both_in_range",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SINGLE_ENEMY",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "决斗",
+        "category": "melee",
+        "description": "双方在攻击范围内且HP<对方max(格斗,射击)时触发，攻击力高者胜",
+        "deterministic": true,
+        "stat_comparison": "max_attack",
+        "trigger": "when_both_in_range",
+        "target_filter": "enemy",
+        "aoe_radius": 0,
+        "base_damage": 0,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "max",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "stat_comparison": "属性对比谓词，归 when.conditions[] 的 stat_compare"
+        }
+      },
       "type": "passive",
       "label": "决斗",
-      "category": "special",
-      "description": "双方在攻击范围内且HP<对方max(格斗,射击)时触发，攻击力高者胜",
       "deterministic": true,
       "stat_comparison": "max_attack",
-      "trigger": "when_both_in_range",
       "target_filter": "enemy",
-      "cast_range": 1,
       "aoe_radius": 0,
       "base_damage": 0,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "max",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "stat_comparison": "属性对比谓词，归 when.conditions[] 的 stat_compare"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "when_both_in_range"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "duel",
+      "timing": {
+        "trigger": "when_both_in_range"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "snatch": {
+      "entryType": "skill",
+      "name": "抢夺",
+      "description": "伤害值>被攻击者武器攻击值时触发，伤害减半并获得武器",
+      "ap_cost": 1,
+      "category": "melee",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "on_damage_dealt",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SINGLE_ENEMY",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "抢夺",
+        "category": "melee",
+        "description": "伤害值>被攻击者武器攻击值时触发，伤害减半并获得武器",
+        "deterministic": true,
+        "condition": "damage_greater_than_target_weapon_attack",
+        "damage_multiplier": 0.5,
+        "trigger": "on_damage_dealt",
+        "target_filter": "enemy",
+        "aoe_radius": 0,
+        "base_damage": 0,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "melee",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "condition": "与通用 conditions[] 复数数组需统一读取（见第九章 ⑤ 计划事项）；当前引擎读单数 condition",
+          "damage_multiplier": "本次已结算伤害 ×0.5（incurred×rate），与 fixed_rate_multiplier(base×rate) 不同，不可合并"
+        }
+      },
       "type": "passive",
       "label": "抢夺",
-      "category": "special",
-      "description": "伤害值>被攻击者武器攻击值时触发，伤害减半并获得武器",
       "deterministic": true,
       "condition": "damage_greater_than_target_weapon_attack",
       "damage_multiplier": 0.5,
-      "trigger": "on_damage_dealt",
       "target_filter": "enemy",
-      "cast_range": 1,
       "aoe_radius": 0,
       "base_damage": 0,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "melee",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "condition": "与通用 conditions[] 复数数组需统一读取（见第九章 ⑤ 计划事项）；当前引擎读单数 condition",
+        "damage_multiplier": "本次已结算伤害 ×0.5（incurred×rate），与 fixed_rate_multiplier(base×rate) 不同，不可合并"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "on_damage_dealt"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "snatch",
+      "timing": {
+        "trigger": "on_damage_dealt"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "focused_fire": {
+      "entryType": "skill",
+      "name": "专注射击",
+      "description": "放弃移动，直接获得固定伤害加成+4",
+      "ap_cost": 1,
+      "category": "ranged",
+      "bonus_range": -2,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": {
+        "type": "none",
+        "value": ""
+      },
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SINGLE_ENEMY",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_dmg",
+          "type": "damage",
+          "fixed_rate_multiplier": null,
+          "flat_value": 4,
+          "armor_pen": 0,
+          "mobility_mode": "none",
+          "fixed_mod": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "active",
+        "label": "专注射击",
+        "category": "ranged",
+        "description": "放弃移动，直接获得固定伤害加成+4",
+        "deterministic": true,
+        "bonus": 4,
+        "requires": "no_movement_this_turn",
+        "target_filter": "enemy",
+        "bonus_range": -2,
+        "aoe_radius": 0,
+        "base_damage": 4,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "attack",
+        "attack_stat": "ranged",
+        "requires_unmoved": true,
+        "requires_stealth": false,
+        "_note": {
+          "bonus": "附加伤害加值（加法），对应 effects[].flat_value:4；非乘算，与 fixed_rate_multiplier/damage_multiplier 都不同",
+          "requires": "前置要求（本回合未移动才能发动），归前置条件族；建议迁移到 when.conditions[] 或 meta.prerequisite"
+        }
+      },
       "type": "active",
       "label": "专注射击",
-      "category": "ranged",
-      "description": "放弃移动，直接获得固定伤害加成+4",
       "deterministic": true,
       "bonus": 4,
       "requires": "no_movement_this_turn",
       "target_filter": "enemy",
-      "cast_range": 1,
       "aoe_radius": 0,
       "base_damage": 4,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "attack",
       "attack_stat": "ranged",
       "requires_unmoved": true,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "bonus": "附加伤害加值（加法），对应 effects[].flat_value:4；非乘算，与 fixed_rate_multiplier/damage_multiplier 都不同",
+        "requires": "前置要求（本回合未移动才能发动），归前置条件族；建议迁移到 when.conditions[] 或 meta.prerequisite"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": {
+                "type": "none",
+                "value": ""
+              }
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_dmg",
+              "type": "damage",
+              "fixed_rate_multiplier": null,
+              "flat_value": 4,
+              "armor_pen": 0,
+              "mobility_mode": "none",
+              "fixed_mod": 0,
+              "value": 4,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "focused_fire",
+      "timing": {
+        "trigger": {
+          "type": "none",
+          "value": ""
+        }
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "lucky": {
+      "entryType": "skill",
+      "name": "幸运",
+      "description": "获得空投时可再次移动并攻击",
+      "ap_cost": 1,
+      "category": "auto",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "on_airdrop_received",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "ALL_UNITS",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "幸运",
+        "category": "auto",
+        "description": "获得空投时可再次移动并攻击",
+        "deterministic": true,
+        "action": "remove_and_attack",
+        "trigger": "on_airdrop_received",
+        "target_filter": "all",
+        "aoe_radius": 0,
+        "base_damage": 0,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "melee",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "action": "行动类型 skip/attack/move+attack，可并入 effects[] 行动族"
+        }
+      },
       "type": "passive",
       "label": "幸运",
-      "category": "special",
-      "description": "获得空投时可再次移动并攻击",
       "deterministic": true,
       "action": "remove_and_attack",
-      "trigger": "on_airdrop_received",
       "target_filter": "all",
-      "cast_range": 0,
       "aoe_radius": 0,
       "base_damage": 0,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "melee",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "action": "行动类型 skip/attack/move+attack，可并入 effects[] 行动族"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "on_airdrop_received"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "lucky",
+      "timing": {
+        "trigger": "on_airdrop_received"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
     },
     "reactivate": {
+      "entryType": "skill",
+      "name": "再动",
+      "description": "击杀敌军时触发，额外一回合（不连续触发）",
+      "ap_cost": 1,
+      "category": "auto",
+      "bonus_range": 0,
+      "min_range": 1,
+      "prerequisite": {
+        "skill_type": "",
+        "note": ""
+      },
+      "trigger": "on_kill",
+      "faction": {
+        "limited_to": "all",
+        "limit_count": "faction_once",
+        "stance": "attack"
+      },
+      "target": {
+        "type": "SELF",
+        "filter": {
+          "unit_types": [],
+          "status": "none"
+        }
+      },
+      "aoe": {
+        "center": {
+          "q": 8,
+          "r": 8
+        },
+        "spread": 0
+      },
+      "map_cannon": {
+        "directions": []
+      },
+      "effects": [
+        {
+          "_id": "ef_mig_1785830933624_pas",
+          "type": "status",
+          "polarity": "buff",
+          "target_stat": "MELEE",
+          "preset": "",
+          "value": 0,
+          "duration": 0
+        }
+      ],
+      "engine_meta": {
+        "type": "passive",
+        "label": "再动",
+        "category": "auto",
+        "description": "击杀敌军时触发，额外一回合（不连续触发）",
+        "deterministic": true,
+        "trigger": "on_kill",
+        "no_consecutive": true,
+        "target_filter": "self",
+        "aoe_radius": 0,
+        "base_damage": 0,
+        "status_effects": [],
+        "damage_kind": "kinetic",
+        "accuracy_mod": 0,
+        "evasion_mod": 0,
+        "height_bonus_per_diff": 0,
+        "action_type": "passive",
+        "attack_stat": "melee",
+        "requires_unmoved": false,
+        "requires_stealth": false,
+        "_note": {
+          "no_consecutive": "本质 cooldown:1（本回合刚触发则下回合前不可再触发），建议迁移到 cooldown 字段，非 limit_scope"
+        }
+      },
       "type": "passive",
       "label": "再动",
-      "category": "special",
-      "description": "击杀敌军时触发，额外一回合（不连续触发）",
       "deterministic": true,
-      "trigger": "on_kill",
       "no_consecutive": true,
       "target_filter": "self",
-      "cast_range": 0,
       "aoe_radius": 0,
       "base_damage": 0,
       "status_effects": [],
       "damage_kind": "kinetic",
-      "min_cast_range": 0,
       "accuracy_mod": 0,
       "evasion_mod": 0,
       "height_bonus_per_diff": 0,
       "action_type": "passive",
       "attack_stat": "melee",
       "requires_unmoved": false,
-      "requires_stealth": false
+      "requires_stealth": false,
+      "_note": {
+        "no_consecutive": "本质 cooldown:1（本回合刚触发则下回合前不可再触发），建议迁移到 cooldown 字段，非 limit_scope"
+      },
+      "schema_version": 2,
+      "tree": [
+        {
+          "phase": "WHEN",
+          "atoms": [
+            {
+              "type": "on_kill"
+            }
+          ]
+        },
+        {
+          "phase": "DO",
+          "atoms": [
+            {
+              "_id": "ef_mig_1785830933624_pas",
+              "type": "status",
+              "polarity": "buff",
+              "target_stat": "MELEE",
+              "preset": "",
+              "value": 0,
+              "duration": 0,
+              "target": "target"
+            }
+          ]
+        }
+      ],
+      "key": "reactivate",
+      "timing": {
+        "trigger": "on_kill"
+      },
+      "conditions": [],
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      }
+    },
+    "demo_skill_x": {
+      "key": "demo_skill_x",
+      "timing": {
+        "trigger": null
+      },
+      "conditions": [],
+      "target": {
+        "shape": "single",
+        "range": null,
+        "count": 1
+      },
+      "roll": {
+        "mode": "dice",
+        "generator": {
+          "method": "standard"
+        }
+      },
+      "cost": {
+        "ap": 1,
+        "charges": null,
+        "durability": null,
+        "cooldown": null,
+        "limit_scope": "MATCH"
+      },
+      "effects": []
     }
   },
   "systems": {
@@ -255,7 +1319,7 @@
       "description": "每次攻击固定33.3%暴击率，暴击倍率1.0~1.5",
       "deterministic_probability": true,
       "chance": 0.333,
-      "multiplier_min": 1.0,
+      "multiplier_min": 1,
       "multiplier_max": 1.5
     }
   },
@@ -269,11 +1333,11 @@
       "max_hp": 0,
       "destroyed_transform_to": "moon",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "plain": {
@@ -285,11 +1349,11 @@
       "max_hp": 0,
       "destroyed_transform_to": "plain",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "mountain": {
@@ -301,11 +1365,11 @@
       "max_hp": 0,
       "destroyed_transform_to": "mountain",
       "damage_kind_modifiers": {
-        "beam": 1.0,
+        "beam": 1,
         "kinetic": 0.9,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "water": {
@@ -318,7 +1382,7 @@
       "destroyed_transform_to": "water",
       "damage_kind_modifiers": {
         "beam": 0.5,
-        "kinetic": 1.0,
+        "kinetic": 1,
         "explosive": 0.8,
         "corrosive": 0.6,
         "thermal": 1.2
@@ -334,10 +1398,10 @@
       "destroyed_transform_to": "plain",
       "damage_kind_modifiers": {
         "beam": 0.9,
-        "kinetic": 1.0,
+        "kinetic": 1,
         "explosive": 1.1,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "fortress": {
@@ -349,11 +1413,11 @@
       "max_hp": 5,
       "destroyed_transform_to": "plain",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "ruins": {
@@ -365,11 +1429,11 @@
       "max_hp": 0,
       "destroyed_transform_to": "ruins",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "crystal": {
@@ -382,10 +1446,10 @@
       "destroyed_transform_to": "plain",
       "damage_kind_modifiers": {
         "beam": 1.5,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "rubble": {
@@ -397,11 +1461,11 @@
       "max_hp": 0,
       "destroyed_transform_to": "rubble",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     },
     "city_building": {
@@ -413,11 +1477,11 @@
       "max_hp": 4,
       "destroyed_transform_to": "rubble",
       "damage_kind_modifiers": {
-        "beam": 1.0,
-        "kinetic": 1.0,
-        "explosive": 1.0,
-        "corrosive": 1.0,
-        "thermal": 1.0
+        "beam": 1,
+        "kinetic": 1,
+        "explosive": 1,
+        "corrosive": 1,
+        "thermal": 1
       }
     }
   }

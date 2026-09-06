@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-07-26T10:09:51.929Z",
+  "terrains": {
+    "plain": {
+      "material_url": "/api/terrain/materials/plain.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/grassland/0.png",
+      "bytes": 21200,
+      "bound": true
+    },
+    "forest": {
+      "material_url": "/api/terrain/materials/forest.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/rainforest/0.png",
+      "bytes": 21755,
+      "bound": true
+    },
+    "mountain": {
+      "material_url": "/api/terrain/materials/mountain.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/volcano/0.png",
+      "bytes": 21879,
+      "bound": true
+    },
+    "water": {
+      "material_url": "/api/terrain/materials/water.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/ocean/0.png",
+      "bytes": 15467,
+      "bound": true
+    },
+    "crystal": {
+      "material_url": "/api/terrain/materials/crystal.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/elfland/0.png",
+      "bytes": 27912,
+      "bound": true
+    },
+    "moon": {
+      "material_url": "/api/terrain/materials/moon.png",
+      "source": "https://media.meowa.ai/public/mapeditor/isometric/snow/0.png",
+      "bytes": 16469,
+      "bound": true
+    },
+    "fortress": {
+      "skipped": true,
+      "reason": "堡垒：结构类，库无地形主题→跳过"
+    },
+    "ruins": {
+      "skipped": true,
+      "reason": "废墟：结构类，库无地形主题→跳过"
+    },
+    "rubble": {
+      "skipped": true,
+      "reason": "残骸：结构类，库无地形主题→跳过"
+    },
+    "city_building": {
+      "skipped": true,
+      "reason": "城市建筑：结构类，库无地形主题→跳过"
+    }
+  }
+}

@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { ErrorCode, UserRole } from '@mecha/shared-kernel';
 import type { AuthPayload } from '@mecha/shared-kernel';
+import { resolveRoleFeatures } from '../services/featurePermissions.js';
 
 // 扩展 Express Request 类型
 declare global {
@@ -41,7 +42,10 @@ const PUBLIC_PATHS = [
 const PUBLIC_GET_PREFIXES = [
   '/api/rooms',          // 允许游客浏览房间列表（观战入口）
   '/api/leaderboard',    // 允许游客查看天梯排行
-  '/api/map',            // Phase 29-DataMigration: 允许游客浏览公开地图
+  '/api/map/list',          // 游客浏览公开地图列表
+  '/api/map/battlefields',  // 游客浏览战场地图（含 /:id 详情）
+  // 注意：/api/map/review-queue 等管理类接口【不在】白名单，
+  // 否则 authenticate 会柔性放行导致 requireRole 误判 401（地图审核台跳登录问题）。
   // Phase 29-DataSecurity: glossary GET 路由由无中间件体系直接放行，无需白名单
 ];
 
@@ -152,4 +156,28 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     return;
   }
   next();
+}
+
+/**
+ * Phase 30-Perm — 等级-功能权限矩阵中间件。
+ * 网关内置 dominator 硬编码逃生通道：永远放行全部功能。
+ * 其余等级按 feature_permissions 矩阵查该 featureKey 是否启用，未启用 → 403。
+ * 取代原先「仅 admin 可改」的粗放控制，实现 referee 勾选 glossary.edit 即可越权编辑。
+ */
+export function requireFeature(featureKey: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.auth) {
+      res.status(401).json({ error: ErrorCode.AUTH_TOKEN_MISSING, message: '请先登录' });
+      return;
+    }
+    const role = req.auth.role as UserRole;
+    if (role === UserRole.DOMINATOR) return next(); // 逃生通道，硬编码永远放行
+    const enabled = resolveRoleFeatures(role || '');
+    // 管理员(referee)与主宰(dominator)放行全部功能；旧 admin 角色保留兼容
+    if (enabled.includes(featureKey) || role === UserRole.REFEREE || role === UserRole.ADMIN) return next();
+    res.status(403).json({
+      error: ErrorCode.ROLE_FORBIDDEN,
+      message: `权限不足：等级 ${role || 'unknown'} 未启用功能 ${featureKey}`,
+    });
+  };
 }

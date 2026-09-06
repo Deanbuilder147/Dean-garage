@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cube-stack 立方体堆叠 · 调参台</title>
+<style>
+  :root {
+    --bg:#0b0f1a; --panel:#121a2b; --panel-2:#0f1626; --line:rgba(120,140,180,0.18);
+    --accent:#36c5f0; --amber:#ffb000; --txt:#e9eef7; --muted:#8294b4;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:26px 28px 80px;
+    background: radial-gradient(1100px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    color: var(--txt); font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  .wrap { max-width: 1220px; margin: 0 auto; }
+  h1 { font-size:21px; margin:0 0 4px; letter-spacing:1px; }
+  .sub { font-size:12px; color:var(--muted); margin-bottom:20px; line-height:1.7; }
+  .sub b { color: var(--amber); }
+  .layout { display:grid; grid-template-columns: 320px 1fr; gap:22px; align-items:start; }
+  .panel { background:linear-gradient(180deg,var(--panel),var(--panel-2)); border:1px solid var(--line);
+    border-radius:14px; padding:16px; }
+  .panel h3 { font-size:12px; letter-spacing:1px; color:var(--accent); margin:4px 0 12px;
+    border-bottom:1px solid var(--line); padding-bottom:8px; }
+  .panel h3:not(:first-child) { margin-top:20px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; font-size:12.5px; }
+  .row label { color:var(--txt); display:flex; align-items:center; gap:5px; }
+  .row .val { color:var(--amber); font-variant-numeric:tabular-nums; min-width:52px; text-align:right; font-size:11.5px; }
+  input[type=range] { width:150px; accent-color:var(--accent); }
+  input[type=number] { width:60px; background:#0c1322; color:var(--txt); border:1px solid var(--line);
+    border-radius:5px; padding:3px 5px; font-size:11.5px; font-family:inherit; }
+  select { background:#0c1322; color:var(--txt); border:1px solid var(--line); border-radius:6px;
+    padding:4px 6px; font-size:12px; width:150px; }
+  input[type=color] { width:34px; height:24px; padding:0; border:1px solid var(--line);
+    border-radius:4px; background:none; cursor:pointer; }
+  .chk { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:12.5px; cursor:pointer; }
+  .chk input { width:15px; height:15px; accent-color:var(--accent); }
+  .btns { display:flex; gap:9px; margin-top:6px; flex-wrap:wrap; }
+  .btn { flex:1; min-width:88px; background:rgba(54,197,240,.1); border:1px solid rgba(54,197,240,.4);
+    color:#cdeefb; padding:7px 11px; border-radius:8px; font-size:12px; cursor:pointer; transition:.15s; }
+  .btn:hover { background:rgba(54,197,240,.22); }
+  .btn.alt { background:rgba(255,176,0,.12); border-color:rgba(255,176,0,.45); color:#ffe2a8; }
+  .btn.alt:hover { background:rgba(255,176,0,.24); }
+  .hintline { font-size:10.5px; color:var(--muted); margin:-4px 0 8px; line-height:1.5; }
+  .badge { display:inline-block; font-size:9px; padding:0 5px; border-radius:9px; margin-left:4px;
+    border:1px solid var(--line); color:var(--muted); }
+  .badge.auto { color:#34c759; border-color:rgba(52,199,89,.5); }
+  .badge.link { color:var(--amber); border-color:rgba(255,176,0,.5); }
+
+  .stage { height:420px; border-radius:14px; overflow:hidden; position:relative;
+    background: repeating-linear-gradient(45deg,#0c1322 0 12px,#0e1525 12px 24px);
+    border:1px solid rgba(120,140,180,.14);
+    display:flex; align-items:center; justify-content:center; }
+
+  /* ================= 立方体本体：全部由 CSS 变量驱动 ================= */
+  .cubes {
+    --size: 3.125em;      /* 边长（联动源） */
+    --n: 6;               /* 数量（联动源） */
+    --gap: 1;             /* 间距系数：1=紧贴，>1=分开 */
+    --dur: .6s;           /* 单次时长 */
+    --delay-step: .2s;    /* 逐格延迟步进 */
+    --scale-to: .2;       /* 缩到多小 */
+    --rx: -38deg;         /* 视角 X */
+    --ry: -46deg;         /* 视角 Y */
+    --turn-dur: 14s;      /* 自转一圈基准耗时 */
+    --spread: 0;          /* 转速差：0=同步，>0 每格转速递增变慢 */
+    --phase: 0;           /* 相位差：0=同步，>0 每格起始相位错开 */
+    --ease: cubic-bezier(.45,.03,.51,.95);
+    font-size: 8px;       /* 整体大小（改这个最省事） */
+    position: relative; transform-style: preserve-3d;
+  }
+  /* 整体视角（顺序勿改：rotateY 先执行 = 塔仍在中轴上 = 真正的中轴自转） */
+  .loop { position:relative; width:0; height:0; transform-style:preserve-3d;
+    transform: rotateX(var(--rx)) translateZ(calc(var(--size) / 2)) rotateY(var(--ry)); }
+
+  /* ===== 每个立方体的「枢轴层」=====
+     定位 + 单独轴偏移(--px/--py) + 【各自的自转】
+     ⚠ 自转必须挂在这层而非 .loop：.loop 只有一个 transform，
+       所有立方体共享它 → 必然同步；下放到每个 pivot 才能各自错开。*/
+  .pivot { position:absolute; left:0;
+    width: var(--size); height: var(--size);
+    margin-left: calc(var(--size) / -2);
+    margin-top:  calc(var(--size) / -2);
+    top: calc(((var(--n) - 1) / 2 - var(--i)) * var(--step, var(--size)) * var(--gap));
+    transform-style: preserve-3d;
+    transform-origin: 50% 50% calc(var(--size) / -2);
+    transform: rotateX(var(--px, 0deg)) rotateY(var(--py, 0deg)); }
+  .cubes.spin .pivot {
+    animation: cube-turn linear infinite;
+    animation-duration: calc(var(--turn-dur) * (1 + var(--i) * var(--spread)));  /* 转速差 */
+    animation-delay:    calc(var(--turn-dur) * var(--i) * var(--phase) * -1);    /* 相位差 */ }
+  @keyframes cube-turn {
+    from { transform: rotateX(var(--px, 0deg)) rotateY(var(--py, 0deg)); }
+    to   { transform: rotateX(var(--px, 0deg)) rotateY(calc(var(--py, 0deg) + 360deg)); } }
+  @keyframes cube-s { to { transform: scale3d(var(--scale-to), var(--scale-to), var(--scale-to)); } }
+
+  /* 立方体本体：只管缩放脉冲（旋转已交给父级 .pivot，避免 transform 互相覆盖） */
+  .item { position:relative; width:100%; height:100%;
+    transform-style: preserve-3d;
+    transform-origin: 50% 50% calc(var(--size) / -2);
+    box-shadow: 0 0 .125em currentColor;
+    background: currentColor;
+    animation: cube-s var(--dur) var(--ease) infinite alternate;
+    animation-delay: calc(var(--delay-step) * (var(--i) - var(--n)));
+  }
+  .item:before, .item:after { position:absolute; width:inherit; height:inherit;
+    transform-origin: 0 100%; box-shadow: inherit; background: currentColor; content:""; }
+  .item:before { bottom:100%; transform: rotateX(90deg); }
+  .item:after  { left:100%;   transform: rotateY(90deg); }
+
+  /* ===== 形状 B：六棱柱（六边形）=====
+     R = --size（外接半径）。侧面法线在 0/60/…/300°，故顶点在 ±30° 处
+     → 端盖在局部坐标是「平顶六边形」（宽 2R、高 1.732R），
+       rotateX(±90deg) 转水平后与 6 个侧面对齐。
+     侧面：rotateY(60deg×k) translateZ(apothem)，apothem = 0.866R */
+  .cubes.hex { --apothem: calc(var(--size) * 0.866025);
+               --cap-w:   calc(var(--size) * 2);
+               --cap-h:   calc(var(--size) * 1.732051);
+               --thick:   calc(var(--size) * var(--thick-ratio, .55));
+               --step:    var(--thick); }
+  .cubes.hex .item { position:absolute; left:50%; top:50%; width:0; height:0;
+    transform-style: preserve-3d; transform-origin: 50% 50%;
+    background:none; box-shadow:none; }
+  .cubes.hex .item:before, .cubes.hex .item:after { display:none; }
+
+  .cubes.hex .side { position:absolute; left:0; top:0;
+    width: var(--size); height: var(--thick);
+    margin-left: calc(var(--size) / -2); margin-top: calc(var(--thick) / -2);
+    transform: rotateY(calc(60deg * var(--k))) translateZ(var(--apothem));
+    background-color: currentColor;
+    background-image: linear-gradient(rgba(0,0,0,var(--dark,0)), rgba(0,0,0,var(--dark,0)));
+    box-shadow: 0 0 .125em currentColor; }
+  /* 按朝向做明暗（顶光 + 正面光），让棱柱有体积感 */
+  .cubes.hex .side:nth-child(1) { --dark: 0;   }
+  .cubes.hex .side:nth-child(2) { --dark: .16; }
+  .cubes.hex .side:nth-child(3) { --dark: .34; }
+  .cubes.hex .side:nth-child(4) { --dark: .46; }
+  .cubes.hex .side:nth-child(5) { --dark: .34; }
+  .cubes.hex .side:nth-child(6) { --dark: .16; }
+
+  .cubes.hex .cap { position:absolute; left:0; top:0;
+    width: var(--cap-w); height: var(--cap-h);
+    margin-left: calc(var(--cap-w) / -2); margin-top: calc(var(--cap-h) / -2);
+    clip-path: polygon(0% 50%, 25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%);
+    background-color: currentColor; }
+  .cubes.hex .cap.top { transform: rotateX(90deg)  translateZ(calc(var(--thick) / 2));
+    background-image: linear-gradient(rgba(255,255,255,.22), rgba(255,255,255,.22)); }
+  .cubes.hex .cap.bot { transform: rotateX(-90deg) translateZ(calc(var(--thick) / 2));
+    background-image: linear-gradient(rgba(0,0,0,.5), rgba(0,0,0,.5)); }
+
+  /* ===== 形状 C：2D 六边形（平面平铺，无透视）=====
+     纯 2D：去掉 preserve-3d，用 clip-path 尖顶六边形（与效果库统一主题一致），
+     沿垂直方向逐格堆叠，步进 = 六边形高 × 间距系数。 */
+  .cubes.flat { --step: calc(var(--size) * 1.732051); }
+  .cubes.flat .loop { transform: none; }
+  .cubes.flat .pivot { transform: none; transform-style: flat; }
+  .cubes.flat .item { position: absolute; left: 50%; top: 50%;
+    width: calc(var(--size) * 2); height: calc(var(--size) * 1.732051);
+    margin-left: calc(var(--size) * -1); margin-top: calc(var(--size) * -0.866025);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    background: currentColor; box-shadow: 0 0 .125em currentColor;
+    animation: cube-s var(--dur) var(--ease) infinite alternate;
+    animation-delay: calc(var(--delay-step) * (var(--i) - var(--n))); }
+  .cubes.flat .item:before, .cubes.flat .item:after { display: none; }
+
+  #colors { display:flex; flex-wrap:wrap; gap:5px; }
+  pre { margin:0; background:#070b14; border:1px solid var(--line); border-radius:12px; padding:14px;
+    font-size:11.5px; line-height:1.6; color:#9fd6ee; overflow:auto; max-height:330px;
+    font-family:"SF Mono",Menlo,Consolas,monospace; white-space:pre; }
+  .out-head { display:flex; align-items:center; justify-content:space-between; margin:22px 0 8px; }
+  .out-head h3 { font-size:14px; color:var(--accent); margin:0; letter-spacing:1px; }
+  .back { display:inline-block; margin-bottom:12px; color:var(--muted); font-size:12px; text-decoration:none; }
+  .back:hover { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">← 返回效果库总览</a>
+  <h1>cube-stack 立方体堆叠 · 调参台</h1>
+  <div class="sub">
+    左侧所有参数<b>实时生效</b>。带 <span class="badge">独立</span> 的改一处即可；
+    带 <span class="badge link">联动</span> 的会自动推导配套值（改边长 → 居中/景深/旋转中心全部自动跟随）；
+    带 <span class="badge auto">自动</span> 的由代码算出，你不用管。
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <h3>① 形态</h3>
+      <div class="row"><label>单体形状</label>
+        <select id="pShape">
+          <option value="cube">立方体（3 面）</option>
+          <option value="hex" selected>六棱柱 · 六边形（3D）</option>
+          <option value="flat">2D 六边形（平面平铺）</option>
+        </select></div>
+      <div class="row"><label>棱柱厚度 <span class="badge link">联动</span></label>
+        <input type="range" id="pThick" min="0.2" max="1.6" step="0.05" value="0.55" /><span class="val" id="vThick">0.55×</span></div>
+      <div class="hintline">厚度 = 边长 × 此值；六棱柱的堆叠步进也随厚度自动跟随。</div>
+
+      <div class="row"><label>整体大小 <span class="badge">独立</span></label>
+        <input type="range" id="pFont" min="3" max="22" step="0.5" value="8" /><span class="val" id="vFont">8px</span></div>
+      <div class="hintline">★ 改这个最省事：全部尺寸用 em，一处缩放整体。</div>
+
+      <div class="row"><label>立方体数量 <span class="badge link">联动</span></label>
+        <input type="range" id="pN" min="1" max="14" step="1" value="6" /><span class="val" id="vN">6</span></div>
+
+      <div class="row"><label>立方体边长 <span class="badge link">联动</span></label>
+        <input type="range" id="pSize" min="1" max="8" step="0.125" value="3.125" /><span class="val" id="vSize">3.125em</span></div>
+      <div class="hintline">联动 4 处：水平/垂直居中偏移、旋转中心景深、translateZ 景深。</div>
+
+      <div class="row"><label>堆叠间距系数 <span class="badge">独立</span></label>
+        <input type="range" id="pGap" min="0.6" max="2.5" step="0.05" value="1" /><span class="val" id="vGap">1.00</span></div>
+      <div class="hintline">1 = 紧贴堆叠（原版）；&gt;1 分开；&lt;1 相互穿插。</div>
+
+      <h3>② 动画</h3>
+      <div class="row"><label>单次时长 <span class="badge">独立</span></label>
+        <input type="range" id="pDur" min="0.15" max="3" step="0.05" value="0.6" /><span class="val" id="vDur">0.60s</span></div>
+
+      <div class="row"><label>缩到多小 <span class="badge">独立</span></label>
+        <input type="range" id="pScale" min="0.02" max="1" step="0.02" value="0.2" /><span class="val" id="vScale">0.20</span></div>
+
+      <div class="row"><label>逐格延迟步进 <span class="badge">独立</span></label>
+        <input type="range" id="pDelay" min="0" max="0.6" step="0.02" value="0.2" /><span class="val" id="vDelay">0.20s</span></div>
+      <div class="hintline">负值延迟让动画一开始就处于中段，形成波浪。</div>
+
+      <div class="row"><label>缓动曲线</label>
+        <select id="pEase">
+          <option value="cubic-bezier(.45,.03,.51,.95)" selected>原版 cubic-bezier</option>
+          <option value="easeInOutSine">easeInOutSine</option>
+          <option value="easeInOutQuad">easeInOutQuad</option>
+          <option value="easeInOutBack">easeInOutBack（回弹）</option>
+          <option value="easeOutElastic(1,.6)">easeOutElastic（弹性）</option>
+          <option value="linear">linear（匀速）</option>
+          <option value="__custom__">自定义…</option>
+        </select></div>
+      <div class="row" id="custRow" style="display:none">
+        <label>自定义贝塞尔</label>
+        <span style="display:flex;gap:4px">
+          <input type="number" id="cb1" value="0.45" step="0.01" />
+          <input type="number" id="cb2" value="0.03" step="0.01" />
+          <input type="number" id="cb3" value="0.51" step="0.01" />
+          <input type="number" id="cb4" value="0.95" step="0.01" />
+        </span>
+      </div>
+
+      <h3>③ 3D 视角</h3>
+      <div class="row"><label>rotateX 俯仰 <span class="badge">独立</span></label>
+        <input type="range" id="pRX" min="-90" max="90" step="1" value="-38" /><span class="val" id="vRX">-38°</span></div>
+      <div class="row"><label>rotateY 水平 <span class="badge">独立</span></label>
+        <input type="range" id="pRY" min="-90" max="90" step="1" value="-46" /><span class="val" id="vRY">-46°</span></div>
+      <label class="chk"><input type="checkbox" id="pSpin" /> 绕塔身中轴自转</label>
+      <div class="hintline">勾选后每个立方体各自绕中轴旋转（轴线不动，无摆动）；缩放脉冲照常。</div>
+      <div class="row"><label>基准一圈耗时</label>
+        <input type="range" id="pSpinDur" min="3" max="30" step="1" value="14" /><span class="val" id="vSpinDur">14s</span></div>
+
+      <div class="row"><label>转速差 <span class="badge">独立</span></label>
+        <input type="range" id="pSpread" min="0" max="1" step="0.02" value="0" /><span class="val" id="vSpread">0.00</span></div>
+      <div class="hintline">0 = 全同步；&gt;0 时第 i 个耗时 ×(1+i×值)，越往上越慢 → 差速错开。</div>
+
+      <div class="row"><label>相位差 <span class="badge">独立</span></label>
+        <input type="range" id="pPhase" min="0" max="1" step="0.02" value="0" /><span class="val" id="vPhase">0.00</span></div>
+      <div class="hintline">负延迟偏移：0 = 同相起转；&gt;0 时每格起始角度依次错开 → 波浪式。</div>
+
+      <div class="btns" style="margin-top:6px">
+        <button class="btn" id="btnDesync">推荐：差速 + 错相</button>
+        <button class="btn" id="btnSync">恢复同步</button>
+      </div>
+
+      <h3>④ 单独 X / Y 轴偏移</h3>
+      <div class="hintline">逐格设置各自的 rotateX / rotateY 偏移（在整体视角之上再叠加）。</div>
+      <div id="axes"></div>
+      <div class="row" style="margin-top:10px"><label>螺旋扭转 <span class="badge link">批量</span></label>
+        <input type="range" id="pTwist" min="-60" max="60" step="1" value="0" /><span class="val" id="vTwist">0°</span></div>
+      <div class="hintline">批量令第 i 个的 Y 偏移 = i × 此值 → 整座塔扭成麻花。</div>
+      <div class="btns" style="margin-top:6px">
+        <button class="btn" id="btnAxisZero">全部归零</button>
+      </div>
+
+      <h3>⑤ 配色</h3>
+      <div id="colors"></div>
+      <div class="btns" style="margin-top:8px">
+        <button class="btn" id="btnRainbow">彩虹自动生成</button>
+        <button class="btn" id="btnOrig">还原原版配色</button>
+      </div>
+
+      <h3>⑤ 操作</h3>
+      <div class="btns">
+        <button class="btn" id="btnReplay">↺ 重播</button>
+        <button class="btn alt" id="btnExport">⚙ 生成 CSS</button>
+        <button class="btn" id="btnReset">恢复默认</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="stage" id="stage"></div>
+      <div class="out-head">
+        <h3>导出 CSS（变量即调参入口，改变量值即可）</h3>
+        <button class="btn" id="btnCopy" style="flex:none;width:auto;padding:6px 14px">复制</button>
+      </div>
+      <pre id="code"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const ORIG_COLORS = ['#15cae6','#1550e6','#0c25c3','#2d1fe9','#ae0cd6','#7e0963'];
+const DEFAULTS = { font:8, n:6, size:3.125, gap:1, dur:0.6, scale:0.2, delay:0.2,
+                   ease:'cubic-bezier(.45,.03,.51,.95)', rx:-38, ry:-46, spin:false, spinDur:14,
+                   shape:'hex', thick:0.55 };
+
+let colors = ORIG_COLORS.slice();
+let axisX = [];   // 每个立方体单独的 rotateX 偏移（deg）
+let axisY = [];   // 每个立方体单独的 rotateY 偏移（deg）
+let cubes = null;
+
+function syncAxes(n) {
+  while (axisX.length < n) axisX.push(0);
+  while (axisY.length < n) axisY.push(0);
+  axisX.length = n; axisY.length = n;
+}
+
+/* 依据当前数量补齐/截断配色；新增的用 HSL 色相扫描生成 */
+function syncColors(n) {
+  while (colors.length < n) {
+    const i = colors.length;
+    colors.push(genColor(i, n));
+  }
+  colors.length = n;
+}
+function genColor(i, n) {
+  const h = 185 + (i / Math.max(n - 1, 1)) * 135;   // 185°(青) → 320°(品红)
+  return `hsl(${Math.round(h)} 82% 52%)`;
+}
+
+function buildStage() {
+  const n = +$('pN').value;
+  syncColors(n);
+  const stage = $('stage');
+  stage.innerHTML = '';
+  const shape = $('pShape').value;
+  const c = document.createElement('div');
+  c.className = 'cubes' + (shape === 'hex' ? ' hex' : (shape === 'flat' ? ' flat' : ''));
+  const loop = document.createElement('div');
+  loop.className = 'loop';
+  syncAxes(n);
+  for (let i = 0; i < n; i++) {
+    const pv = document.createElement('div');
+    pv.className = 'pivot';
+    pv.style.setProperty('--i', i);
+    pv.style.setProperty('--px', axisX[i] + 'deg');
+    pv.style.setProperty('--py', axisY[i] + 'deg');
+    const it = document.createElement('div');
+    it.className = 'item';
+    it.style.color = colors[i];
+    if (shape === 'hex') {
+      for (let k = 0; k < 6; k++) {                 // 6 个侧面
+        const s = document.createElement('div');
+        s.className = 'side';
+        s.style.setProperty('--k', k);
+        it.appendChild(s);
+      }
+      ['top', 'bot'].forEach(t => {                 // 上下六边形端盖
+        const cap = document.createElement('div');
+        cap.className = 'cap ' + t;
+        it.appendChild(cap);
+      });
+    }
+    pv.appendChild(it);
+    loop.appendChild(pv);
+  }
+  c.appendChild(loop);
+  stage.appendChild(c);
+  cubes = c;
+  applyVars();
+  buildColorInputs();
+  buildAxisInputs();
+}
+
+/* 逐格 X / Y 轴偏移输入 */
+function buildAxisInputs() {
+  const box = $('axes');
+  box.innerHTML = '';
+  axisY.forEach((_, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '6px';
+    row.innerHTML = `<label style="min-width:34px;color:var(--muted);font-size:11px">#${i + 1}</label>`;
+    [['X', axisX, 'axisX'], ['Y', axisY, 'axisY']].forEach(([lab, arr]) => {
+      const wrap = document.createElement('span');
+      wrap.style.cssText = 'display:flex;align-items:center;gap:3px;flex:1';
+      const t = document.createElement('span');
+      t.textContent = lab; t.style.cssText = 'font-size:10px;color:var(--muted)';
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.value = arr[i]; inp.step = '5';
+      inp.style.width = '54px';
+      inp.oninput = () => {
+        arr[i] = +inp.value || 0;
+        const pv = document.querySelectorAll('.pivot')[i];
+        if (pv) pv.style.setProperty('--p' + lab.toLowerCase(), arr[i] + 'deg');
+        exportCss();
+      };
+      wrap.appendChild(t); wrap.appendChild(inp);
+      row.appendChild(wrap);
+    });
+    box.appendChild(row);
+  });
+}
+
+function applyVars() {
+  if (!cubes) return;
+  const n = +$('pN').value;
+  cubes.style.fontSize = $('pFont').value + 'px';
+  cubes.style.setProperty('--size', $('pSize').value + 'em');
+  cubes.style.setProperty('--n', n);
+  cubes.style.setProperty('--gap', $('pGap').value);
+  cubes.style.setProperty('--dur', $('pDur').value + 's');
+  cubes.style.setProperty('--scale-to', $('pScale').value);
+  cubes.style.setProperty('--delay-step', $('pDelay').value + 's');
+  cubes.style.setProperty('--rx', $('pRX').value + 'deg');
+  cubes.style.setProperty('--ry', $('pRY').value + 'deg');
+  cubes.style.setProperty('--ease', currentEase());
+  cubes.style.setProperty('--thick-ratio', $('pThick').value);
+  cubes.style.setProperty('--turn-dur', $('pSpinDur').value + 's');
+  cubes.style.setProperty('--spread', $('pSpread').value);
+  cubes.style.setProperty('--phase', $('pPhase').value);
+  cubes.classList.toggle('spin', $('pSpin').checked);
+}
+
+function currentEase() {
+  if ($('pEase').value !== '__custom__') return $('pEase').value;
+  return `cubic-bezier(${$('cb1').value},${$('cb2').value},${$('cb3').value},${$('cb4').value})`;
+}
+
+function buildColorInputs() {
+  const box = $('colors');
+  box.innerHTML = '';
+  colors.forEach((c, i) => {
+    const inp = document.createElement('input');
+    inp.type = 'color';
+    inp.value = toHex(c);
+    inp.title = `第 ${i + 1} 个立方体`;
+    inp.oninput = () => { colors[i] = inp.value; document.querySelectorAll('.item')[i].style.color = inp.value; };
+    box.appendChild(inp);
+  });
+}
+/* color input 只接受 #rrggbb，把 hsl() 转一下 */
+function toHex(c) {
+  if (c.startsWith('#')) return c;
+  const d = document.createElement('div');
+  d.style.color = c; document.body.appendChild(d);
+  const rgb = getComputedStyle(d).color; document.body.removeChild(d);
+  const m = rgb.match(/\d+/g);
+  return '#' + m.slice(0, 3).map(v => (+v).toString(16).padStart(2, '0')).join('');
+}
+
+function exportCss() {
+  const n = +$('pN').value;
+  const shapeVal = $('pShape').value;
+  const isHex = shapeVal === 'hex';
+  const isFlat = shapeVal === 'flat';
+  const vars = `  --size: ${$('pSize').value}em;      /* 边长（联动源） */
+  --n: ${n};                 /* 数量 */
+  --gap: ${$('pGap').value};             /* 间距系数 1=紧贴 */
+  --dur: ${$('pDur').value}s;          /* 单次时长 */
+  --delay-step: ${$('pDelay').value}s;   /* 逐格延迟步进 */
+  --scale-to: ${$('pScale').value};      /* 缩到多小 */
+  --rx: ${$('pRX').value}deg;         /* 视角 X */
+  --ry: ${$('pRY').value}deg;         /* 视角 Y */
+  --turn-dur: ${$('pSpinDur').value}s;  /* 自转一圈基准耗时 */
+  --spread: ${$('pSpread').value};       /* 转速差 0=同步 */
+  --phase: ${$('pPhase').value};         /* 相位差 0=同相 */
+${isHex ? `  --thick-ratio: ${$('pThick').value}; /* 棱柱厚度 = 边长 × 此值 */` : ''}
+  --ease: ${currentEase()};
+  font-size: ${$('pFont').value}px;       /* 整体大小：改这个最省事 */
+${isHex ? `  /* 六棱柱派生量（勿手改，由上方 --size / --thick-ratio 推出） */
+  --apothem: calc(var(--size) * 0.866025); --cap-w: calc(var(--size) * 2);
+  --cap-h:   calc(var(--size) * 1.732051); --thick:  calc(var(--size) * var(--thick-ratio));
+  --step:    var(--thick);` : ''}`;
+
+  const css = `.cubes {
+${vars}
+  position: relative;${isFlat ? '' : ' transform-style: preserve-3d;'}
+}
+${isFlat ? `.loop { position: relative; width: 0; height: 0; }
+.pivot { position: absolute; left: 0;
+  top: calc(((var(--n) - 1) / 2 - var(--i)) * var(--step, var(--size)) * var(--gap)); }`
+: `.loop { position: relative; width: 0; height: 0; transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) translateZ(calc(var(--size) / 2)) rotateY(var(--ry)); }
+/* 枢轴层：定位 + 单独轴偏移(--px/--py) + 各自自转（不同步全靠这层） */
+.pivot { position: absolute; left: 0;
+  width: var(--size); height: var(--size);
+  margin-left: calc(var(--size) / -2); margin-top: calc(var(--size) / -2);
+  top: calc(((var(--n) - 1) / 2 - var(--i)) * var(--size) * var(--gap));
+  transform-style: preserve-3d;
+  transform-origin: 50% 50% calc(var(--size) / -2);
+  transform: rotateX(var(--px, 0deg)) rotateY(var(--py, 0deg)); }`}
+${$('pSpin').checked ? `.cubes.spin .pivot {
+  animation: cube-turn linear infinite;
+  animation-duration: calc(var(--turn-dur) * (1 + var(--i) * var(--spread)));
+  animation-delay:    calc(var(--turn-dur) * var(--i) * var(--phase) * -1); }
+@keyframes cube-turn {
+  from { transform: rotateX(var(--px, 0deg)) rotateY(var(--py, 0deg)); }
+  to   { transform: rotateX(var(--px, 0deg)) rotateY(calc(var(--py, 0deg) + 360deg)); } }` : ''}
+@keyframes cube-s { to { transform: scale3d(var(--scale-to), var(--scale-to), var(--scale-to)); } }
+${isHex ? `/* ---- 六棱柱：6 侧面 + 上下六边形端盖 ---- */
+.item { position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+  transform-style: preserve-3d; transform-origin: 50% 50%;
+  animation: cube-s var(--dur) var(--ease) infinite alternate;
+  animation-delay: calc(var(--delay-step) * (var(--i) - var(--n))); }
+.side { position: absolute; left: 0; top: 0;
+  width: var(--size); height: var(--thick);
+  margin-left: calc(var(--size) / -2); margin-top: calc(var(--thick) / -2);
+  transform: rotateY(calc(60deg * var(--k))) translateZ(var(--apothem));
+  background-color: currentColor;
+  background-image: linear-gradient(rgba(0,0,0,var(--dark,0)), rgba(0,0,0,var(--dark,0)));
+  box-shadow: 0 0 .125em currentColor; }
+.side:nth-child(1) { --dark: 0;   }  .side:nth-child(2) { --dark: .16; }
+.side:nth-child(3) { --dark: .34; }  .side:nth-child(4) { --dark: .46; }
+.side:nth-child(5) { --dark: .34; }  .side:nth-child(6) { --dark: .16; }
+.cap { position: absolute; left: 0; top: 0; width: var(--cap-w); height: var(--cap-h);
+  margin-left: calc(var(--cap-w) / -2); margin-top: calc(var(--cap-h) / -2);
+  clip-path: polygon(0% 50%, 25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%);
+  background-color: currentColor; }
+.cap.top { transform: rotateX(90deg)  translateZ(calc(var(--thick) / 2));
+  background-image: linear-gradient(rgba(255,255,255,.22), rgba(255,255,255,.22)); }
+.cap.bot { transform: rotateX(-90deg) translateZ(calc(var(--thick) / 2));
+  background-image: linear-gradient(rgba(0,0,0,.5), rgba(0,0,0,.5)); }` : isFlat ? `/* ---- 2D 六边形（平面平铺，无透视）---- */
+.item { position: absolute; left: 50%; top: 50%;
+  width: calc(var(--size) * 2); height: calc(var(--size) * 1.732051);
+  margin-left: calc(var(--size) * -1); margin-top: calc(var(--size) * -0.866025);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background: currentColor; box-shadow: 0 0 .125em currentColor;
+  animation: cube-s var(--dur) var(--ease) infinite alternate;
+  animation-delay: calc(var(--delay-step) * (var(--i) - var(--n))); }` : `/* ---- 立方体：正面 + 顶面 + 右面（伪元素折出） ---- */
+.item { position: relative; width: 100%; height: 100%;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50% calc(var(--size) / -2);
+  box-shadow: 0 0 .125em currentColor; background: currentColor;
+  animation: cube-s var(--dur) var(--ease) infinite alternate;
+  animation-delay: calc(var(--delay-step) * (var(--i) - var(--n))); }
+.item:before, .item:after { position: absolute; width: inherit; height: inherit;
+  transform-origin: 0 100%; box-shadow: inherit; background: currentColor; content: ""; }
+.item:before { bottom: 100%; transform: rotateX(90deg); }
+.item:after  { left: 100%;   transform: rotateY(90deg); }`}
+${colors.map((c, i) => `.pivot:nth-child(${i + 1}) { --i: ${i}; --px: ${axisX[i]}deg; --py: ${axisY[i]}deg; }
+.pivot:nth-child(${i + 1}) .item { color: ${c}; }`).join('\n')}
+/* HTML 结构（.pivot 包裹层，逐级带 --i 与 --k）：
+<div class="cubes ${isHex ? 'hex' : ''}${$('pSpin').checked ? ' spin' : ''}"><div class="loop">
+${Array.from({ length: n }, (_, i) => isHex
+  ? `  <div class="pivot" style="--i:${i}"><div class="item">`
+    + `<div class="side" style="--k:0"></div>...<div class="side" style="--k:5"></div>`
+    + `<div class="cap top"></div><div class="cap bot"></div></div></div>`
+  : `  <div class="pivot" style="--i:${i}"><div class="item"></div></div>`).join('\n')}
+</div></div> */`;
+  $('code').textContent = css;
+  $('code').scrollTop = 0;
+}
+
+/* ---------- 绑定 ---------- */
+const sliders = [
+  ['pFont','vFont', v => v + 'px'],
+  ['pN','vN', v => v],
+  ['pSize','vSize', v => v + 'em'],
+  ['pGap','vGap', v => (+v).toFixed(2)],
+  ['pDur','vDur', v => (+v).toFixed(2) + 's'],
+  ['pScale','vScale', v => (+v).toFixed(2)],
+  ['pDelay','vDelay', v => (+v).toFixed(2) + 's'],
+  ['pRX','vRX', v => v + '°'],
+  ['pRY','vRY', v => v + '°'],
+  ['pSpinDur','vSpinDur', v => v + 's'],
+  ['pSpread','vSpread', v => (+v).toFixed(2)],
+  ['pPhase','vPhase', v => (+v).toFixed(2)],
+];
+sliders.forEach(([id, vid, fmt]) => {
+  $(id).addEventListener('input', () => {
+    $(vid).textContent = fmt($(id).value);
+    if (id === 'pN') buildStage(); else applyVars();
+    exportCss();
+  });
+});
+/* 形状切换需重建 DOM（面数不同）；厚度只改变量即可 */
+$('pShape').addEventListener('change', () => { buildStage(); exportCss(); });
+$('pThick').addEventListener('input', () => {
+  $('vThick').textContent = (+$('pThick').value).toFixed(2) + '×';
+  applyVars(); exportCss();
+});
+
+$('pEase').addEventListener('change', () => {
+  $('custRow').style.display = $('pEase').value === '__custom__' ? 'flex' : 'none';
+  applyVars(); exportCss();
+});
+['cb1','cb2','cb3','cb4'].forEach(id => $(id).addEventListener('input', () => { applyVars(); exportCss(); }));
+$('pSpin').addEventListener('change', () => { applyVars(); exportCss(); });
+
+function setSync(spread, phase) {
+  $('pSpread').value = spread; $('vSpread').textContent = (+spread).toFixed(2);
+  $('pPhase').value  = phase;  $('vPhase').textContent  = (+phase).toFixed(2);
+  applyVars(); exportCss();
+}
+$('btnDesync').addEventListener('click', () => setSync(0.18, 0.35));  // 推荐差速+错相
+$('btnSync').addEventListener('click',   () => setSync(0, 0));
+
+/* 螺旋扭转：第 i 个的 Y 偏移 = i × twist */
+$('pTwist').addEventListener('input', () => {
+  const tw = +$('pTwist').value;
+  $('vTwist').textContent = tw + '°';
+  axisY = axisY.map((_, i) => i * tw);
+  document.querySelectorAll('.pivot').forEach((pv, i) => pv.style.setProperty('--py', axisY[i] + 'deg'));
+  buildAxisInputs(); exportCss();
+});
+$('btnAxisZero').addEventListener('click', () => {
+  axisX = axisX.map(() => 0); axisY = axisY.map(() => 0);
+  $('pTwist').value = 0; $('vTwist').textContent = '0°';
+  document.querySelectorAll('.pivot').forEach(pv => {
+    pv.style.setProperty('--px', '0deg'); pv.style.setProperty('--py', '0deg');
+  });
+  buildAxisInputs(); exportCss();
+});
+
+$('btnRainbow').addEventListener('click', () => {
+  const n = +$('pN').value;
+  colors = Array.from({ length: n }, (_, i) => genColor(i, n));
+  buildStage(); exportCss();
+});
+$('btnOrig').addEventListener('click', () => {
+  colors = ORIG_COLORS.slice(); syncColors(+$('pN').value);
+  // 数量 >6 时，前 6 个用原版色，其余自动生成
+  const n = +$('pN').value;
+  colors = Array.from({ length: n }, (_, i) => ORIG_COLORS[i] || genColor(i, n));
+  buildStage(); exportCss();
+});
+$('btnReplay').addEventListener('click', buildStage);
+$('btnExport').addEventListener('click', exportCss);
+$('btnReset').addEventListener('click', () => {
+  $('pFont').value = DEFAULTS.font; $('vFont').textContent = DEFAULTS.font + 'px';
+  $('pN').value = DEFAULTS.n;       $('vN').textContent = DEFAULTS.n;
+  $('pSize').value = DEFAULTS.size; $('vSize').textContent = DEFAULTS.size + 'em';
+  $('pGap').value = DEFAULTS.gap;   $('vGap').textContent = DEFAULTS.gap.toFixed(2);
+  $('pDur').value = DEFAULTS.dur;   $('vDur').textContent = DEFAULTS.dur.toFixed(2) + 's';
+  $('pScale').value = DEFAULTS.scale; $('vScale').textContent = DEFAULTS.scale.toFixed(2);
+  $('pDelay').value = DEFAULTS.delay; $('vDelay').textContent = DEFAULTS.delay.toFixed(2) + 's';
+  $('pRX').value = DEFAULTS.rx;     $('vRX').textContent = DEFAULTS.rx + '°';
+  $('pRY').value = DEFAULTS.ry;     $('vRY').textContent = DEFAULTS.ry + '°';
+  $('pEase').value = DEFAULTS.ease; $('custRow').style.display = 'none';
+  $('pSpin').checked = false; $('pSpinDur').value = DEFAULTS.spinDur;
+  $('vSpinDur').textContent = DEFAULTS.spinDur + 's';
+  $('pSpread').value = 0; $('vSpread').textContent = '0.00';
+  $('pPhase').value = 0;  $('vPhase').textContent  = '0.00';
+  $('pTwist').value = 0;  $('vTwist').textContent  = '0°';
+  $('pShape').value = DEFAULTS.shape;
+  $('pThick').value = DEFAULTS.thick; $('vThick').textContent = DEFAULTS.thick.toFixed(2) + '×';
+  colors = ORIG_COLORS.slice();
+  axisX = []; axisY = [];
+  buildStage(); exportCss();
+});
+$('btnCopy').addEventListener('click', () => {
+  navigator.clipboard.writeText($('code').textContent).then(() => {
+    const b = $('btnCopy'), t = b.textContent; b.textContent = '已复制';
+    setTimeout(() => b.textContent = t, 1200);
+  });
+});
+
+buildStage();
+exportCss();
+</script>
+</body>
+</html>

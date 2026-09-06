@@ -179,6 +179,8 @@ export enum BattlePhase {
   DEPLOYMENT = 'DEPLOYMENT',
   INITIATIVE = 'INITIATIVE',
   MOVEMENT = 'MOVEMENT',
+  // ★ P-3+：部署→战斗三段式门控中间态（先关门后验货）。deploy-unit 在此态一律 409 DEPLOY_LOCKED。
+  BATTLE_LOADING = 'BATTLE_LOADING',
   COMBAT = 'COMBAT',
   RESOLUTION = 'RESOLUTION',
   CLEANUP = 'CLEANUP',

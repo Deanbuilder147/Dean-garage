@@ -1,0 +1,144 @@
+# ============================================================
+# Phase 29-X 最高图腾令 — 大一统规则母体引擎
+# Mecha Universe Monorepo Docker Compose
+#
+# 服务拓扑：
+#   mecha-gateway (3006) — 大一统后端网关 (SQLite 执政)
+#   mecha-comm    (3005) — 纯净观战缓冲 (Socket.io)
+#   mecha-frontend (80)  — Vue.js SPA + Nginx 反代
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ========================================
+  # Phase 29-DataSecurity: PostgreSQL 双源桥接 (旧库复活)
+  # 端口 5432，存储老账号与资产数据
+  # ========================================
+  mecha-battle-db:
+    image: postgres:14-alpine
+    container_name: mecha-battle-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:-mecha_battle}
+      POSTGRES_USER: ${PG_USER:-mecha_user}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-mecha_user_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - mecha-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mecha_user -d mecha_battle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========================================
+  # 大一统后端网关 (端口 3006)
+  # 统一承载：认证、房间 (SQLite)、战斗
+  # ========================================
+  mecha-gateway:
+    build:
+      context: .
+      dockerfile: backend-gateway/Dockerfile
+    container_name: mecha-gateway
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=production
+      - PORT=3006
+      - JWT_SECRET=${JWT_SECRET:-mecha-universe-jwt-secret-change-in-production}
+      - JWT_EXPIRES_IN=7d
+      - BCRYPT_ROUNDS=10
+      - DB_PATH=/data/mecha-universe.db
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://106.54.197.69:8081,http://localhost:8081,http://localhost:5173}
+      # 全局限流额度（/health 外所有 /api 计入）。本地 vite 预览直连公网 IP 会共用服务器 IP 桶，
+      # 故放宽到 2000/窗口，避免前端多请求场景被误伤。登录另有语义限流，可按需再收紧。
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-2000}
+      # Phase 29-DataSecurity: PostgreSQL 双源桥接
+      - PG_HOST=mecha-battle-db
+      - PG_PORT=5432
+      - PG_DATABASE=${PG_DATABASE:-mecha_battle}
+      - PG_USER=${PG_USER:-mecha_user}
+      - PG_PASSWORD=${PG_PASSWORD:-mecha_user_password}
+      # Meowa AI 素材生成密钥（在服务器 .env 中配置 MEOWART_API_KEY=ma_live_xxx）
+      - MEOWART_API_KEY=${MEOWART_API_KEY:-}
+      - MEOWA_API_BASE=${MEOWA_API_BASE:-https://api.meowa.ai}
+    depends_on:
+      mecha-battle-db:
+        condition: service_healthy
+    volumes:
+      - gateway_data:/data
+    networks:
+      - mecha-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================================
+  # 纯净观战缓冲服务 (端口 3005)
+  # 职责：WebSocket + FIFO 观战缓冲队列
+  # 房间数据主权已移交 3006
+  # ========================================
+  mecha-comm:
+    build:
+      context: ./services/comm-service
+      dockerfile: Dockerfile
+    container_name: mecha-comm
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+    networks:
+      - mecha-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3005/api/comm/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================================
+  # 前端 (端口 80 → 外部 8081)
+  # Vue.js SPA + Nginx 反向代理
+  # CSP + HSTS + 安全头由 Nginx 层统一注入
+  # ========================================
+  mecha-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mecha-frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      mecha-gateway:
+        condition: service_healthy
+      mecha-comm:
+        condition: service_healthy
+    networks:
+      - mecha-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# ===========================================
+# 网络与卷
+# ===========================================
+networks:
+  mecha-net:
+    driver: bridge
+
+volumes:
+  gateway_data:
+    driver: local
+  pg_data:
+    driver: local

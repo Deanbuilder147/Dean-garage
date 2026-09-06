@@ -21,7 +21,7 @@
 
 // DiceEngine.cjs 已于 Phase 4 废除，直接使用 Math.random()
 
-const { BuffManager } = require('./buffManager.cjs');
+const BuffManager = require('./buffManager.cjs');
 const DiceService = require('./diceService.cjs');
 
 // ============================================================
@@ -118,9 +118,18 @@ class DamagePipe {
         const mobilityBuffVal = _mobilityBuff.reduce((s, b) => s + (Number(b.value) || 0), 0);
 
         // ---- 阶段 1: 基础攻击力（近战=格斗 / 远程=射击） ----
-        const baseAttack = attackType === 'melee'
-            ? (attacker.melee || attacker.attack || 10)
-            : (attacker.ranged || attacker.attack || 10);
+        // ★ 阶段二 C：baseDamage 覆盖入口。当调用方显式传入 config.baseDamage（如 Segment 模型
+        //   的 flat_value 固定伤害）时，直接用它做基础攻击力，跳过 attacker.attack 读取。
+        //   其余减伤/暴击阶段照常，实现「Segment 伤害接入主伤害管线」的汇流语义。
+        let baseAttack;
+        if (config.baseDamage != null && Number.isFinite(Number(config.baseDamage))) {
+            baseAttack = Number(config.baseDamage);
+            result.stages.base_attack_override = true;
+        } else {
+            baseAttack = attackType === 'melee'
+                ? (attacker.melee || attacker.attack || 10)
+                : (attacker.ranged || attacker.attack || 10);
+        }
         result.stages.base_attack = baseAttack;
 
         // ---- 阶段 2: 双方机动值差（阶段二：支持上下文有效机动注入） ----
@@ -177,7 +186,17 @@ class DamagePipe {
         result.stages.manual_roll = manualRollResult;
 
         // ---- 阶段 12: 最终伤害计算 ----
-        let finalDamage = Math.max(0, attackAfterExtras - defense.total)
+        // ★ 批次2后半程 D6 护甲穿透（读 defender._meta.armor_pierce，handler 侧已 clamp<=0.8）：
+        //   按穿透比例削减防御总值（保留至少 20% 护甲价值，护栏防全穿透失衡）。
+        const pierceRatio = (defender && defender._meta && Number(defender._meta.armor_pierce) > 0)
+          ? Math.max(0, Math.min(0.8, Number(defender._meta.armor_pierce)))
+          : 0;
+        const defenseAfterPierce = pierceRatio > 0
+          ? defense.total * (1 - pierceRatio)
+          : defense.total;
+        if (pierceRatio > 0) result.stages.armor_pierce = { ratio: pierceRatio, reduced_from: defense.total, reduced_to: Math.round(defenseAfterPierce) };
+
+        let finalDamage = Math.max(0, attackAfterExtras - defenseAfterPierce)
             + heightBonus.bonus
             + weaponPenalty
             - armorReduction
@@ -190,7 +209,9 @@ class DamagePipe {
         result.stages.final_damage_pre_crit = finalDamage;
 
         // ---- 阶段 13: 暴击判定（伤害计算完成后） ----
-        const isCrit = this.checkCrit();
+        // ★ 阶段二 C：suppressCrit 标志（由 Segment 固定伤害场景传入）禁用随机暴击，
+        //   保证「固定伤害 = 确定值」语义；仅当词条显式 allow_crit 时才允许暴击介入。
+        const isCrit = config.suppressCrit === true ? false : this.checkCrit();
         result.is_crit = isCrit;
         result.stages.is_crit = isCrit;
 
@@ -303,6 +324,8 @@ class DamagePipe {
             : (defender.armor || 0);
         const baseDefense = (defender.defense ?? 0) + armorValue;
         const shieldValue = defender.shield || 0;
+        // 守护值（守护类技能/状态提供），缺省 0（修复悬空引用 guardVal）
+        const guardVal = defender.guard || 0;
         const defenseBuffs = this._sumBuffs(defender.buffs || [], 'defense') + guardVal;
 
         // 泛化地形防御
@@ -506,6 +529,62 @@ class DamagePipe {
             Math.abs(ax.q + ax.r - bx.q - bx.r)
         );
     }
+
+    /**
+     * Phase D：13 阶段具名常量（唯一真相源，供 pipeline_hook 与编辑器对齐）。
+     * 顺序即管道执行顺序。
+     */
+    static get DAMAGE_STAGES() {
+        return [
+            'base_attack', 'mobility_diff', 'temp_attack', 'extras',
+            'attack_after_extras', 'height_bonus', 'terrain_kind_modifiers',
+            'defense', 'weapon_penalty', 'armor_reduction',
+            'manual_roll', 'final_damage', 'crit',
+        ];
+    }
+
+    /**
+     * Phase D：带 hook 的管道执行（加法式，不改动既有 13 阶段内联逻辑）。
+     * 在 calculate 完成后，按 hooks 声明的阶段键串行应用钩子（后处理式介入），
+     * 钩子可读取/改写 result.stages 与 result.final_damage。
+     * @param {Object} config 同 calculate
+     * @param {Object} [options] { hooks: { [stageName]: (ctx) => void }, meta: Object }
+     *   - hooks 的 key 必须是 DAMAGE_STAGES 之一；非阶段键忽略。
+     *   - hook 抛错不影响主链路（catch 后跳过）。
+     * @returns 同 calculate 的 result，附加 result.applied_hooks 数组。
+     */
+    static runDamagePipeline(config, options) {
+        const opts = options || {};
+        const hooks = opts.hooks || {};
+        const result = this.calculate(config);
+        result.applied_hooks = [];
+        const stages = this.DAMAGE_STAGES;
+        for (const stage of stages) {
+            const fn = hooks[stage];
+            if (typeof fn !== 'function') continue;
+            try {
+                fn({ stage, result, config, meta: opts.meta || {} });
+                result.applied_hooks.push(stage);
+            } catch (e) {
+                console.error(`[damagePipe] hook@${stage} 异常已跳过:`, e.message);
+            }
+        }
+        return result;
+    }
+}
+
+// ★ 阶段一 E：伤害均摊工具（供阶段二谓语路径与 Segment 通用调用）。
+//   将 totalDamage 在 n 个目标间均分（floor 取整，余数累加到首个目标），返回每份伤害数组。
+function splitDamageAmongTargets(totalDamage, targetCount) {
+  const n = Math.max(1, targetCount);
+  if (n === 1) return [Math.max(0, Math.round(totalDamage))];
+  const base = Math.floor(Math.max(0, totalDamage) / n);
+  const remainder = Math.max(0, totalDamage) - base * n;
+  const out = new Array(n).fill(base);
+  out[0] += remainder; // 余数给首个目标
+  return out;
 }
 
 module.exports = DamagePipe;
+module.exports.DAMAGE_STAGES = DamagePipe.DAMAGE_STAGES;
+module.exports.splitDamageAmongTargets = splitDamageAmongTargets;

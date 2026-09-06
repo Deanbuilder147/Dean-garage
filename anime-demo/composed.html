@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>组合效果 · 弧形轮播 + 悬停 + 点击放大</title>
+<style>
+  :root {
+    --bg:#0b0f1a; --panel:#121a2b; --line:rgba(120,140,180,.18);
+    --accent:#36c5f0; --accent-2:#ffb000; --txt:#e9eef7; --muted:#8294b4;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; color:var(--txt);
+    background:radial-gradient(1200px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:30px 24px 60px; }
+  .back { color:var(--muted); text-decoration:none; font-size:13px; }
+  .back:hover { color:var(--accent); }
+  h1 { font-size:22px; letter-spacing:1px; margin:14px 0 6px; }
+  .hint { font-size:13px; color:var(--muted); line-height:1.8; margin-bottom:8px; }
+  .hint b { color:var(--accent-2); }
+  .scene { position:relative; height:440px; margin:24px auto 8px; max-width:900px;
+    perspective:1100px; display:flex; align-items:center; justify-content:center; }
+  .card-slot { position:absolute; left:50%; top:50%; width:96px; height:128px;
+    margin:-64px 0 0 -48px; transform-style:preserve-3d; will-change:transform; cursor:pointer; }
+  .card-inner { width:100%; height:100%; border-radius:12px; transform-style:preserve-3d;
+    background:linear-gradient(135deg,#36c5f0,#3a7bd5); box-shadow:0 10px 26px rgba(0,0,0,.4);
+    display:flex; align-items:center; justify-content:center; font-weight:700;
+    color:#06203a; font-size:22px; will-change:transform; }
+  .card-inner.b { background:linear-gradient(135deg,#ffb000,#ff5d73); }
+  .card-inner.c { background:linear-gradient(135deg,#ff5d8f,#a64dff); }
+  .card-slot.selected { z-index:50; }
+  .controls { text-align:center; margin-top:10px; }
+  .btn { background:rgba(54,197,240,.1); border:1px solid rgba(54,197,240,.4); color:#cdeefb;
+    padding:9px 20px; border-radius:9px; font-size:14px; cursor:pointer; display:none; }
+  .btn:hover { background:rgba(54,197,240,.22); }
+  .stage-tag { position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    font-size:12px; color:var(--muted); letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">← 返回效果库</a>
+  <h1>组合效果演示</h1>
+  <div class="hint">
+    <b>①</b> 卡片以「弧形轮播」展开 &nbsp;→&nbsp; <b>②</b> 悬停任意卡片体验「悬停交互」（3D 倾斜）&nbsp;→&nbsp;
+    <b>③</b> 点击一张：该卡「组合变换」移动并放大 <b>5 倍</b>，其余卡片「逆弧形轮播」归拢到角落成堆（不遮挡放大的卡）。<br/>
+    <b>④</b> 点击归拢的卡堆：放大的卡与全部卡片回到原本的弧形队列（也可点「↺ 重置」）。
+  </div>
+  <div class="scene" id="scene"><div class="stage-tag" id="tag">弧形展开中…</div></div>
+  <div class="controls"><button class="btn" id="reset">↺ 重置</button></div>
+</div>
+
+<script src="anime.min.js"></script>
+<script>
+const n = 7;
+const scene = document.getElementById('scene');
+const tag = document.getElementById('tag');
+const resetBtn = document.getElementById('reset');
+const slots = [], inners = [];
+let selected = null;
+
+// 弧形轮播位置（含轻微景深 translateZ）
+function arcPos(i) {
+  const a = (i / (n - 1) - .5) * 96 * Math.PI / 180;
+  return {
+    x: Math.sin(a) * 185,
+    y: -Math.cos(a) * 185 * .55,
+    z: -(1 - Math.cos(a)) * 45,
+    rot: a * 180 / Math.PI
+  };
+}
+
+for (let i = 0; i < n; i++) {
+  const slot = document.createElement('div'); slot.className = 'card-slot';
+  const inner = document.createElement('div'); inner.className = 'card-inner' + (['', ' b', ' c'][i % 3]); inner.textContent = i + 1;
+  slot.appendChild(inner); scene.appendChild(slot); slots.push(slot); inners.push(inner);
+
+  // ② 悬停交互：3D 倾斜（仅在未选中时生效）
+  slot.addEventListener('mousemove', e => {
+    if (selected !== null) return;
+    const r = inner.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - .5;
+    const py = (e.clientY - r.top) / r.height - .5;
+    inner.style.transform = 'rotateY(' + (px * 22) + 'deg) rotateX(' + (-py * 22) + 'deg)';
+  });
+  slot.addEventListener('mouseleave', () => { if (selected === null) inner.style.transform = ''; });
+  slot.addEventListener('click', () => {
+    if (selected === null) select(i);
+    else expand();        // 选中状态下点击归拢堆 → 放大卡回到原队列
+  });
+}
+
+// ① 弧形轮播：从中心展开成弧
+function expand() {
+  selected = null;
+  resetBtn.style.display = 'none';
+  tag.textContent = '弧形展开中…';
+  slots.forEach((slot, i) => {
+    const p = arcPos(i);
+    slot.classList.remove('selected');
+    innerReset(i);
+    anime({ targets: slot, translateX: p.x, translateY: p.y, translateZ: p.z, rotate: p.rot, duration: 800, delay: i * 60, easing: 'easeOutBack' });
+  });
+  setTimeout(() => { if (selected === null) tag.textContent = '悬停查看 · 点击选择一张'; }, 800 + n * 60);
+}
+
+function innerReset(i) { inners[i].style.transform = ''; anime.set(inners[i], { scale: 1 }); }
+
+// ③ 点击：组合变换（移动 + 放大5倍）+ 其余逆弧形收回
+function select(i) {
+  if (selected !== null) return;
+  selected = i;
+  tag.textContent = '已选中 #' + (i + 1) + ' · 放大 5 倍';
+  slots[i].classList.add('selected');
+  inners[i].style.transform = '';
+
+  // 点击的卡片：组合变换 —— 移到中心 + 缩放 5 倍
+  anime({ targets: slots[i], translateX: 0, translateY: 0, translateZ: 0, rotate: 0, duration: 700, easing: 'easeInOutQuad' });
+  anime({ targets: inners[i], scale: [1, 5], duration: 700, easing: 'easeInOutQuad' });
+
+  // 其余卡片：逆弧形轮播，归拢到放大卡不遮挡的角落成堆
+  const PILE = { x: -340, y: 150 };   // 相对舞台中心，左下角，避开 5 倍卡
+  let k = 0;
+  slots.forEach((slot, j) => {
+    if (j === i) return;
+    anime({ targets: slot, translateX: PILE.x + k * 4, translateY: PILE.y - k * 4, translateZ: 0, rotate: k * 4, duration: 600, delay: k * 45, easing: 'easeInOutQuad' });
+    anime({ targets: inners[j], scale: [1, 0.7], duration: 500, delay: k * 45 });
+    inners[j].style.transform = '';
+    k++;
+  });
+
+  resetBtn.style.display = 'inline-block';
+}
+
+resetBtn.addEventListener('click', expand);
+expand();
+</script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>彩虹多色渐变框线 · 技法对照</title>
+
+<!-- @property：让自定义属性「可动画」（旋转锥形渐变的必要条件），必须顶层声明 -->
+<style>
+@property --ang { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+</style>
+
+<style>
+  :root {
+    --bg: #0b0f1a; --panel: #121a2b; --line: rgba(120,140,180,0.18);
+    --txt: #e9eef7; --muted: #8294b4; --accent: #36c5f0;
+    /* 彩虹色带：首尾同色 → 循环无缝 */
+    --rainbow: linear-gradient(90deg,
+      #ff2d55, #ff9500, #ffcc00, #34c759, #00c7be, #0a84ff, #5e5ce6, #bf5af2, #ff2d55);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 28px 80px;
+    background: radial-gradient(1100px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    color: var(--txt); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: 1px; }
+  .sub { font-size: 12px; color: var(--muted); margin-bottom: 26px; line-height: 1.7; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+  .card { background: linear-gradient(180deg, var(--panel), #0f1626); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; }
+  .card h3 { font-size: 13px; color: var(--accent); margin: 0 0 4px; letter-spacing: .5px; }
+  .card .tag { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 20px;
+    margin-bottom: 12px; border: 1px solid var(--line); color: var(--muted); }
+  .card .tag.good { color: #34c759; border-color: rgba(52,199,89,.45); background: rgba(52,199,89,.08); }
+  .card .tag.warn { color: #ff9500; border-color: rgba(255,149,0,.45); background: rgba(255,149,0,.08); }
+  .card p { font-size: 11.5px; color: var(--muted); line-height: 1.7; margin: 12px 0 0; }
+  .card code { background: rgba(0,0,0,.4); padding: 1px 5px; border-radius: 3px;
+    font-size: 10.5px; color: #9fd6ee; font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .stage { height: 190px; display: flex; align-items: center; justify-content: center; }
+
+  /* ========== ① 矩形 · mask 法（支持圆角，最通用）========== */
+  .box-mask { position: relative; width: 190px; height: 108px; border-radius: 14px; background: #0a1628; }
+  .box-mask::before {
+    content: ''; position: absolute; inset: 0; padding: 3px; border-radius: 14px;
+    background: var(--rainbow); background-size: 300% 100%;
+    /* 关键：content-box 遮罩 与 全盒遮罩 做 exclude → 只剩 padding 那一圈 */
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: flow 6s linear infinite;
+    pointer-events: none;
+  }
+
+  /* ========== ② 矩形 · border-image 法（最少代码，但不支持圆角）========== */
+  .box-bimg { width: 190px; height: 108px; background: #0a1628;
+    border: 3px solid transparent;
+    border-image: linear-gradient(90deg, #ff2d55, #ff9500, #ffcc00, #34c759, #00c7be, #0a84ff, #bf5af2) 1; }
+
+  /* ========== ③ 六边形 · clip-path 双层法 ★ 你的词条框改动最小 ==========
+     原理：外层 = 彩虹渐变 + 六边形裁切；内层 ::after = 底色 + 六边形裁切（inset 内缩）
+     → 露出的那圈就是「渐变边框」。任意 clip-path 形状通用。 */
+  .hex-ring { position: relative; width: 150px; height: 173px;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    background: var(--rainbow); background-size: 300% 100%;
+    animation: flow 6s linear infinite; }
+  .hex-ring::after {
+    content: ''; position: absolute; inset: 4px;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    background: #0a1628; }
+  /* 内层再放一个金色宝石，直观对照「词条框」效果 */
+  .hex-ring .gem { position: absolute; inset: 12px; z-index: 2;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    background: linear-gradient(150deg, #ffb000, #8a5e00); }
+
+  /* ========== ④ 六边形 · SVG stroke 渐变（最精细，可做锥形/旋转）========== */
+  .hex-svg { width: 150px; height: 173px; overflow: visible; }
+
+  /* ========== ⑤ 旋转锥形彩虹（@property + conic-gradient）========== */
+  .box-conic { position: relative; width: 190px; height: 108px; border-radius: 14px; background: #0a1628; }
+  .box-conic::before {
+    content: ''; position: absolute; inset: 0; padding: 3px; border-radius: 14px;
+    background: conic-gradient(from var(--ang),
+      #ff2d55, #ff9500, #ffcc00, #34c759, #00c7be, #0a84ff, #5e5ce6, #bf5af2, #ff2d55);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: spin 4s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes spin { to { --ang: 360deg; } }
+
+  /* ========== ⑥ 渐变文字（bonus）========== */
+  .grad-text { font-size: 30px; font-weight: 900; letter-spacing: 2px;
+    background: var(--rainbow); background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+    animation: flow 6s linear infinite; }
+
+  /* 流光：拉长渐变 + 平移 background-position（兼容性最好的动画方案，无需 @property） */
+  @keyframes flow { to { background-position: 300% 0; } }
+
+  .cmp { margin-top: 26px; }
+  .cmp table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .cmp th, .cmp td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .cmp th { color: var(--accent); font-weight: 600; }
+  .cmp td { color: var(--muted); }
+  .cmp td b { color: var(--txt); }
+  @media (prefers-reduced-motion: reduce) {
+    .box-mask::before, .hex-ring, .box-conic::before, .grad-text { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a href="index.html" style="color:var(--muted);font-size:12px;text-decoration:none">← 返回效果库总览</a>
+  <h1>彩虹多色渐变框线 · 技法对照</h1>
+  <div class="sub">
+    统一色带 <code>--rainbow</code>（首尾同色保证循环无缝）。<b style="color:#ffb000">重点看 ③④</b>——六边形/异形框不能靠 border，
+    而你现有的 <code>.hex-outer</code> 只要把纯色换成渐变，<b style="color:#ffb000">一行就能上彩虹</b>。
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>① 矩形 · mask 法</h3>
+      <span class="tag good">支持圆角 · 最通用</span>
+      <div class="stage"><div class="box-mask"></div></div>
+      <p><code>::before</code> 铺渐变 + <code>padding:3px</code>，两层遮罩做 <code>mask-composite:exclude</code>
+      只保留 padding 那一圈。<b>圆角矩形首选</b>。</p>
+    </div>
+
+    <div class="card">
+      <h3>② 矩形 · border-image 法</h3>
+      <span class="tag warn">不支持圆角</span>
+      <div class="stage"><div class="box-bimg"></div></div>
+      <p>代码最少：<code>border:3px solid transparent; border-image:渐变 1;</code>
+      但 <b>border-radius 会被忽略</b>。只适合直角框。</p>
+    </div>
+
+    <div class="card">
+      <h3>③ 六边形 · clip-path 双层法 ★</h3>
+      <span class="tag good">任意形状 · 改动最小</span>
+      <div class="stage"><div class="hex-ring"><div class="gem"></div></div></div>
+      <p>外层彩虹渐变 + 六边形 <code>clip-path</code>，内层 <code>::after{inset:4px}</code> 同形状盖底色 → 露出的圈即渐变边。
+      <b>你的词条框把 <code>.hex-outer</code> 背景换成渐变即可，无需改结构。</b></p>
+    </div>
+
+    <div class="card">
+      <h3>④ 六边形 · SVG stroke 渐变</h3>
+      <span class="tag good">最精细 · 可旋转</span>
+      <div class="stage">
+        <svg class="hex-svg" viewBox="0 0 100 115">
+          <defs>
+            <linearGradient id="rg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="115">
+              <!-- 旋转渐变：让色带绕中心转 -->
+              <animateTransform attributeName="gradientTransform" type="rotate"
+                from="0 50 57.5" to="360 50 57.5" dur="6s" repeatCount="indefinite"/>
+              <stop offset="0%"   stop-color="#ff2d55"/>
+              <stop offset="16%"  stop-color="#ff9500"/>
+              <stop offset="32%"  stop-color="#ffcc00"/>
+              <stop offset="48%"  stop-color="#34c759"/>
+              <stop offset="64%"  stop-color="#00c7be"/>
+              <stop offset="80%"  stop-color="#0a84ff"/>
+              <stop offset="100%" stop-color="#bf5af2"/>
+            </linearGradient>
+          </defs>
+          <polygon points="50,2 98,28.75 98,86.25 50,113 2,86.25 2,28.75"
+                   fill="none" stroke="url(#rg)" stroke-width="3"
+                   stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <p><code>&lt;polygon stroke="url(#渐变)"&gt;</code>。描边宽度/圆角/虚线/发光都能精确控制，
+      还能对渐变本身做 <code>animateTransform</code>。<b>要发光/呼吸/虚线流动就选它。</b></p>
+    </div>
+
+    <div class="card">
+      <h3>⑤ 旋转锥形彩虹</h3>
+      <span class="tag">@property · 光环效果</span>
+      <div class="stage"><div class="box-conic"></div></div>
+      <p><code>@property --ang</code> 声明角度后可动画，配 <code>conic-gradient(from var(--ang))</code>
+      + mask 做圈。<b>「扫描光环」类效果首选</b>。需 Chrome/Safari 16.4+/Firefox 128+。</p>
+    </div>
+
+    <div class="card">
+      <h3>⑥ 渐变文字（bonus）</h3>
+      <span class="tag">background-clip</span>
+      <div class="stage"><div class="grad-text">词条编辑</div></div>
+      <p><code>background-clip:text</code> + <code>text-fill-color:transparent</code>。
+      标题/Logo 用，和彩虹框线配成一套。</p>
+    </div>
+  </div>
+
+  <div class="card cmp">
+    <h3 style="margin-bottom:10px">选型对照</h3>
+    <table>
+      <tr><th>场景</th><th>推荐技法</th><th>原因</th></tr>
+      <tr><td><b>六边形词条框</b></td><td>③ clip-path 双层</td><td>复用现有 <code>.hex-outer</code>，把纯色换渐变即可，零结构改动</td></tr>
+      <tr><td><b>六边形框 + 发光/虚线</b></td><td>④ SVG stroke</td><td>描边属性最全，且可对渐变做动画</td></tr>
+      <tr><td><b>圆角面板/卡片</b></td><td>① mask 法</td><td>唯一同时支持渐变 + border-radius 的方案</td></tr>
+      <tr><td><b>直角分隔线/直线框</b></td><td>② border-image</td><td>代码最少</td></tr>
+      <tr><td><b>扫描光环 / 加载</b></td><td>⑤ @property + conic</td><td>锥形渐变天然环绕</td></tr>
+      <tr><td><b>流光动画（通用）</b></td><td>background-position 滑动</td><td>兼容性最好，<b>不依赖 @property</b>，③④① 都能直接用</td></tr>
+    </table>
+  </div>
+</div>
+</body>
+</html>

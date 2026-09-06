@@ -11,5 +11,19 @@
   "license": "ISC",
   "dependencies": {
     "docx": "^9.7.1"
-  }
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deanbuilder147/Dean-garage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deanbuilder147/Dean-garage/issues"
+  },
+  "homepage": "https://github.com/Deanbuilder147/Dean-garage#readme"
 }

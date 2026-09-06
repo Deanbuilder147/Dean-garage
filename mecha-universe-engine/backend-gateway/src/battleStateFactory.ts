@@ -134,6 +134,10 @@ export interface CreateBattleUnitParams {
   range?: number;
   /** 单位体型（体积）：s / m / l / xl，影响 HP/机动/渲染缩放/战斗尺寸修正 */
   size?: string;
+  /** 机体基础属性（编辑器原始值），供前端单位卡片展示：射击值/格斗值/机动值 */
+  main_射击?: number;
+  main_格斗?: number;
+  main_机动?: number;
 }
 
 /**
@@ -217,6 +221,10 @@ export function createBattleUnit(params: CreateBattleUnitParams): BattleUnit {
     viewUrls: params.viewUrls,
     // 单位体型（体积）：归一化后透传，缺省 m
     size: params.size ? normSize(params.size) : 'm',
+    // 机体基础属性（编辑器原始值）：射击/格斗/机动，供前端单位卡片展示
+    main_射击: params.main_射击,
+    main_格斗: params.main_格斗,
+    main_机动: params.main_机动,
     // 阶段二：从部件构建装备状态；移动范围与基准机动取自 stats
     equipState: buildEquipmentFromParts(params.parts),
     // 系统性修复（2026-07-24 链路级修正）：moveRange 与 mobility 同源唯一，均由 computeMobility 产出。
@@ -338,6 +346,11 @@ export interface InitBattleStateParams {
   factionTurnOrder?: string[];
   /** faction 键 → 角色键 映射（准备室设定）。缺省时按 unit.faction 推导默认角色。 */
   factionRoles?: Record<string, string>;
+  /**
+   * Phase 6：AI 控制的角色键集合。缺省时按约定「factionTurnOrder 中除第一个角色外的全部」标记 AI。
+   * 第一个角色（通常 attack/玩家先手）视为人类操控。传 [] 可关闭全部 AI。
+   */
+  aiRoles?: string[];
 }
 
 /**
@@ -395,6 +408,12 @@ export function createBattleState(params: InitBattleStateParams): BattleState {
   };
   // 将当前行动角色定位到首个有存活棋子的角色（跳过空角色）
   setFirstActiveRole(battle);
+  // Phase 6：AI 角色默认 = 行动顺序中除「第一个角色（通常玩家先手 attack）」外的全部。
+  const aiRoles = Array.isArray(params.aiRoles)
+    ? [...params.aiRoles]
+    : (order.length > 1 ? order.slice(1) : []);
+  battle.aiRoles = aiRoles;
+  battle.aiActions = [];
   return battle;
 }
 

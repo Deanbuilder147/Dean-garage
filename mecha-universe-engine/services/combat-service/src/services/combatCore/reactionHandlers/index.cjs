@@ -29,6 +29,14 @@ const path = require('path');
 
 const handlers = Object.create(null);
 
+// Phase B：网关点火清单（由 combat.ts 启动时注入），用于启动自检。
+// 任何 register 的 trigger 若不在该清单内 → 启动告警（防止再出现死代码旁路）。
+let _gatewayKnownTriggers = null;
+
+function setGatewayTriggers(known) {
+    if (Array.isArray(known)) _gatewayKnownTriggers = new Set(known);
+}
+
 function register(trigger, fn) {
     handlers[trigger] = fn;
 }
@@ -36,7 +44,13 @@ function register(trigger, fn) {
 /** 派发：找不到 handler 返回 null；handler 抛错不污染主链路 */
 function fire(trigger, ctx) {
     const fn = handlers[trigger];
-    if (typeof fn !== 'function') return null;
+    if (typeof fn !== 'function') {
+        // Phase B：可观测——即使无 handler 也输出可观测日志（靶场验收用）
+        if (process.env.COMBAT_REACTION_DEBUG === '1') {
+            console.log(`[reactionHandlers] fire ${trigger} (no handler registered)`);
+        }
+        return null;
+    }
     try {
         return fn(ctx) || null;
     } catch (e) {
@@ -49,8 +63,21 @@ function listTriggers() {
     return Object.keys(handlers);
 }
 
+/** Phase B：启动自检——注册表内的 trigger 若不在网关点火清单，输出告警 */
+function selfCheck() {
+    if (!_gatewayKnownTriggers) return; // 未注入则不校验
+    const unknown = listTriggers().filter((t) => !_gatewayKnownTriggers.has(t));
+    if (unknown.length) {
+        console.warn(`[reactionHandlers] 自检告警：以下已注册触发器不在网关点火清单内（疑似死代码旁路）: ${unknown.join(', ')}`);
+    }
+    const missing = Array.from(_gatewayKnownTriggers).filter((t) => !handlers[t]);
+    if (missing.length) {
+        console.warn(`[reactionHandlers] 自检提示：以下网关点火点尚无 handler 注册（待实装）: ${missing.join(', ')}`);
+    }
+}
+
 // 必须先导出，再加载子文件（规避循环依赖下 register 为 undefined）
-module.exports = { register, fire, listTriggers };
+module.exports = { register, fire, listTriggers, setGatewayTriggers, selfCheck };
 
 // 自动加载同目录所有 .cjs（除 index 自身），各自 require('./index') 后 register
 for (const f of fs.readdirSync(__dirname)) {
@@ -61,3 +88,6 @@ for (const f of fs.readdirSync(__dirname)) {
         console.error(`[reactionHandlers] 加载 ${f} 失败:`, e.message);
     }
 }
+
+// 子文件全部加载完毕后执行启动自检
+selfCheck();

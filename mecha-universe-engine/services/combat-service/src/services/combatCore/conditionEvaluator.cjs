@@ -1,3 +1,7 @@
+// ★ 2026-08-09 修复：hexDistance 为 (q1,r1,q2,r2) 四参签名，本文件以坐标对象调用，
+//   原写法 hexDistance(a,b) 恒返回 NaN（距离条件静默失效）。改用对象签名版 hexDistanceCoord。
+const { hexDistanceCoord } = require('./hexKey.cjs');
+
 /**
  * ConditionEvaluator - 条件评估器 (Phase 14 复合条件链激活)
  * 
@@ -233,6 +237,64 @@ class ConditionEvaluator {
    * @param {object} context - 执行上下文
    * @returns {boolean}
    */
+  /**
+   * ★ Phase 4A: 评估词条 trigger.condition（主动/被动共用）
+   * 支持 hp_below_pct / distance_less_than / distance_greater_than。
+   * 主体(subject): 默认取被作用单位 refs.target；无则取 refs.unit。
+   *   - 主动技能: { unit: 施法者, target: 被作用单位 } → 以目标为主体（契合"攻击X%血量目标"语义）
+   *   - 被动技能: { unit, target: unit } → 以自身为主体
+   * @param {object} condition
+   * @param {object} refs - { unit, target, nearestEnemyDist? }
+   * @returns {boolean} true=条件满足(放行)
+   */
+  /**
+   * B.7 条件门控 + OR/AND 路由。
+   * - 支持嵌套子条件数组 `condition.conditions`（每项仍是 condition 对象），按
+   *   `condition.match_mode`('all'=AND 默认 / 'any'=OR) 聚合。
+   * - 扁平字段（hp_below_pct / distance_*）按 match_mode 聚合（默认 AND，向后兼容存量）。
+   * - 单勾选菜单多条件 + OR 框 → match_mode:'any' = 任一符合即触发。
+   */
+  evaluateTriggerCondition(condition, refs = {}) {
+    if (!condition || typeof condition !== 'object' || !Object.keys(condition).length) return true;
+    const matchMode = condition.match_mode === 'any' ? 'any' : 'all';
+
+    // 嵌套子条件数组
+    if (Array.isArray(condition.conditions) && condition.conditions.length) {
+      const sub = condition.conditions.map((c) => this.evaluateTriggerCondition(c, refs));
+      return matchMode === 'any' ? sub.some(Boolean) : sub.every(Boolean);
+    }
+
+    const { unit, target, nearestEnemyDist } = refs;
+    const subject = (target && (target.hp != null || target.current_hp != null || (target.currentStats && target.currentStats.hp != null))) ? target : unit;
+    const checks = [];
+
+    if (typeof condition.hp_below_pct === 'number') {
+      if (!subject) return false;
+      const maxHp = subject.maxHp || (subject.currentStats && subject.currentStats.maxHp) || subject.max_hp || 100;
+      const hp = subject.hp != null ? subject.hp
+        : (subject.currentStats && subject.currentStats.hp != null ? subject.currentStats.hp
+          : (subject.current_hp != null ? subject.current_hp : null));
+      if (hp == null) return false;
+      const pct = maxHp > 0 ? (hp / maxHp) * 100 : 100;
+      checks.push(pct < condition.hp_below_pct);
+    }
+
+    if (typeof condition.distance_less_than === 'number' || typeof condition.distance_greater_than === 'number') {
+      const d = (typeof nearestEnemyDist === 'number') ? nearestEnemyDist : this._hexDist(unit, target);
+      if (d == null) return false;
+      if (typeof condition.distance_less_than === 'number') checks.push(d <= condition.distance_less_than);
+      if (typeof condition.distance_greater_than === 'number') checks.push(d >= condition.distance_greater_than);
+    }
+
+    if (!checks.length) return true; // 无具体字段 → 放行（与存量行为一致）
+    return matchMode === 'any' ? checks.some(Boolean) : checks.every(Boolean);
+  }
+
+  _hexDist(a, b) {
+    if (!a || !b || a.q == null || b.q == null) return null;
+    try { return hexDistanceCoord(a, b); } catch (e) { return null; }
+  }
+
   evaluateFlat(conditions, context) {
     // 遍历所有条件键
     for (const [key, value] of Object.entries(conditions)) {

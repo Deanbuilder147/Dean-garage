@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>anime.js 动态效果演示 · 分类总览</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #121a2b;
+    --panel-2: #0f1626;
+    --line: rgba(120,140,180,0.18);
+    --accent: #36c5f0;
+    --accent-2: #ffb000;
+    --txt: #e9eef7;
+    --muted: #8294b4;
+    /* 六边形主题：平顶右旋 30° = 尖顶（pointy-top），与项目战棋视觉语言一致 */
+    --hex-pointy: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    color: var(--txt);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .layout { display: flex; min-height: 100vh; }
+  /* 侧栏 */
+  .nav {
+    width: 240px; flex: none; background: var(--panel);
+    border-right: 1px solid var(--line); padding: 22px 14px;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  .nav h1 { font-size: 16px; letter-spacing: 1px; margin: 0 0 4px; }
+  .nav .sub { font-size: 11px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 9px; color: var(--muted); text-decoration: none;
+    font-size: 14px; margin-bottom: 4px; transition: .2s;
+  }
+  .nav a:hover { background: rgba(54,197,240,0.08); color: var(--txt); }
+  .nav a.active { background: rgba(54,197,240,0.16); color: #fff; }
+  .nav a .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+  /* 主区 */
+  .main { flex: 1; padding: 30px 40px 80px; max-width: 1100px; }
+  .cat { margin-bottom: 56px; scroll-margin-top: 20px; }
+  .cat-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 22px; }
+  .cat-head h2 { font-size: 22px; margin: 0; letter-spacing: 1px; }
+  .cat-head .en { font-size: 12px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 20px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .card .title { font-size: 15px; font-weight: 600; padding: 14px 16px 0; }
+  .card .desc { font-size: 12px; color: var(--muted); padding: 4px 16px 0; line-height: 1.5; }
+  .stage {
+    height: 160px; margin: 14px 16px; border-radius: 10px;
+    background: repeating-linear-gradient(45deg, #0c1322 0 10px, #0e1525 10px 20px);
+    border: 1px solid rgba(120,140,180,0.12); position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card .actions { padding: 0 16px 10px; }
+  .btn {
+    background: rgba(54,197,240,0.1); border: 1px solid rgba(54,197,240,0.4);
+    color: #cdeefb; padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    transition: .15s;
+  }
+  .btn:hover { background: rgba(54,197,240,0.22); }
+  .card pre {
+    margin: 0; background: #070b14; border-top: 1px solid var(--line);
+    padding: 12px 14px; font-size: 11.5px; line-height: 1.55; color: #9fd6ee;
+    overflow: auto; max-height: 190px; font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  /* demo 元素 */
+  .box { width: 42px; height: 48px; border-radius: 0; clip-path: var(--hex-pointy); background: linear-gradient(135deg,#36c5f0,#3a7bd5); flex: none; }
+  .box.alt { background: linear-gradient(135deg,#ffb000,#ff5d73); }
+  .box.pk  { background: linear-gradient(135deg,#ff5d8f,#a64dff); }
+  .grid5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: 150px; }
+  .cell { width: 21px; height: 24px; border-radius: 0; clip-path: var(--hex-pointy); background: var(--accent); }
+  .bar { width: 16px; height: 120px; background: linear-gradient(180deg,#36c5f0,#3a7bd5); border-radius: 0; clip-path: var(--hex-pointy); transform-origin: bottom; }
+  .num { font-size: 38px; font-weight: 700; color: #fff; }
+  .chip { font-size: 12px; color: var(--muted); }
+  svg.svg { width: 200px; height: 100px; }
+  .progress { width: 100px; height: 100px; transform: rotate(-90deg); }
+  .progress circle { fill: none; stroke-width: 9; }
+  .log { position: absolute; bottom: 6px; left: 8px; font-size: 10px; color: var(--accent-2); }
+  .topnote { font-size: 12px; color: var(--muted); margin-bottom: 26px; line-height: 1.6; }
+  /* ---- Amicro 微交互移植（anime.js 实现） ---- */
+  .mt-stage { perspective: 760px; }
+
+  /* ===== cube-stack 立方体堆叠（纯 CSS 3D，非 anime.js）=====
+     ⚠ 全部尺寸用 em → 改 .cubes 的 font-size 即可整体无脑缩放
+     ⚠ .item 用 position:absolute + top 定位：原 margin-top 在正常文档流下
+       会因「外边距折叠」导致间距不均，改用 top 可保证 6 个立方体连续堆叠
+       （数值与原来完全一致：6.25 / 3.125 / 0 / -3.125 / -6.25 / -9.375） */
+  .cube-stage { perspective: 820px; }
+  .cubes { position: relative; font-size: 8px; transform-style: preserve-3d; }
+  .loop { position: relative; width: 0; height: 0; transform-style: preserve-3d;
+    transform: rotateX(-38deg) rotateY(-46deg) translateZ(1.5625em); }
+  @keyframes cube-s { to { transform: scale3d(0.2, 0.2, 0.2); } }
+  .item { position: absolute; left: 0; width: 3.125em; height: 3.125em;
+    margin-left: -1.5625em; margin-top: -1.5625em;
+    transform-origin: 50% 50% -1.5625em;
+    box-shadow: 0 0 0.125em currentColor; background: currentColor;
+    animation: cube-s 0.6s cubic-bezier(0.45, 0.03, 0.51, 0.95) infinite alternate; }
+  .item:before, .item:after { position: absolute; width: inherit; height: inherit;
+    transform-origin: 0 100%; box-shadow: inherit; background: currentColor; content: ""; }
+  .item:before { bottom: 100%; transform: rotateX(90deg); }
+  .item:after  { left: 100%;   transform: rotateY(90deg); }
+  .item:nth-child(1) { top:  6.25em;  color: #15cae6; animation-delay: -1.2s; }
+  .item:nth-child(2) { top:  3.125em; color: #1550e6; animation-delay: -1s; }
+  .item:nth-child(3) { top:  0em;     color: #0c25c3; animation-delay: -0.8s; }
+  .item:nth-child(4) { top: -3.125em; color: #2d1fe9; animation-delay: -0.6s; }
+  .item:nth-child(5) { top: -6.25em;  color: #ae0cd6; animation-delay: -0.4s; }
+  .item:nth-child(6) { top: -9.375em; color: #7e0963; animation-delay: -0.2s; }
+
+  /* ===== galaxy-btn 星云按钮（纯 CSS，非 anime.js）=====
+     ⚠ 全 em 单位：只改 --btn-font-size 即整体等比缩放（padding/radius/gap 全跟着变）
+     ⚠ 三层 z-index 不可乱：::before(0) 锥形渐变旋转 → ::after(1) 同色遮罩留边 → __content(2) 内容
+     ⚠ overflow:hidden 会裁掉 ::before 的 blur(8px) 光晕；若要外溢光晕须去掉 overflow
+       并在外层 wrapper 用 drop-shadow 补光（详见 galaxy-btn.html） */
+  .galaxy-btn { --btn-bg:#0c0c14; --btn-text:#fff; --btn-primary:#8553f4; --btn-secondary:#3b82f6;
+    --btn-accent:#f43f5e; --btn-font-size:16px;
+    font-family: system-ui, -apple-system, sans-serif; font-size: var(--btn-font-size);
+    padding: .9em 2em; border-radius: .75em; border: none; background: var(--btn-bg);
+    position: relative; cursor: pointer; overflow: hidden; z-index: 1;
+    transition: transform .2s cubic-bezier(.25,.46,.45,.94);
+    box-shadow: 0 .5em 1.5em -.5em rgba(133,83,244,.4); }
+  .galaxy-btn:focus-visible { outline: 2px solid var(--btn-primary); outline-offset: 4px; }
+  .galaxy-btn:active { transform: scale(.96); }
+  .galaxy-btn__content { display: flex; align-items: center; gap: .75em; position: relative; z-index: 2;
+    color: var(--btn-text); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+  .galaxy-btn__icon { width: 1.25em; height: 1.25em; fill: var(--btn-text); transition: transform .3s ease; }
+  .galaxy-btn:hover .galaxy-btn__icon { transform: translateX(.25em) rotate(-10deg); }
+  .galaxy-btn::before { content: ''; position: absolute; inset: -4px; z-index: 0; border-radius: .75em;
+    background: conic-gradient(from 0deg, var(--btn-bg) 0deg, var(--btn-primary) 60deg,
+      var(--btn-secondary) 120deg, var(--btn-bg) 180deg, var(--btn-accent) 240deg,
+      var(--btn-primary) 300deg, var(--btn-bg) 360deg);
+    animation: rotate-nebula 4s linear infinite; filter: blur(8px); opacity: .7;
+    transition: opacity .3s ease; }
+  .galaxy-btn:hover::before { opacity: 1; animation-duration: 2s; }
+  .galaxy-btn::after { content: ''; position: absolute; inset: 2px; z-index: 1;
+    background: var(--btn-bg); border-radius: .6em; }
+  .galaxy-btn__stars { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .3;
+    background-image: radial-gradient(circle at 20% 30%, #fff 1px, transparent 1.5px),
+      radial-gradient(circle at 80% 70%, #fff 1px, transparent 1.5px),
+      radial-gradient(circle at 40% 80%, #fff .5px, transparent 1px);
+    background-size: 120% 120%; transition: opacity .3s ease; }
+  .galaxy-btn:hover .galaxy-btn__stars { opacity: .8; animation: star-drift 5s linear infinite alternate; }
+  @keyframes rotate-nebula { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes star-drift { 0% { transform: scale(1); } 100% { transform: scale(1.1) translate(-2%,-2%); } }
+  .mt-card {
+    position: absolute; left: 50%; top: 50%; width: 54px; height: 72px; margin: -36px 0 0 -27px;
+    border-radius: 0; clip-path: var(--hex-pointy); background: linear-gradient(135deg,#36c5f0,#3a7bd5);
+    box-shadow: 0 8px 20px rgba(0,0,0,.35); will-change: transform;
+  }
+  .mt-card.b { background: linear-gradient(135deg,#ffb000,#ff5d73); }
+  .mt-card.c { background: linear-gradient(135deg,#ff5d8f,#a64dff); }
+  .tilt-card {
+    width: 92px; height: 116px; border-radius: 0; clip-path: var(--hex-pointy);
+    background: linear-gradient(135deg,#36c5f0,#3a7bd5); transform-style: preserve-3d;
+    box-shadow: 0 14px 32px rgba(0,0,0,.45);
+  }
+  .tilt-card .face { transform: translateZ(28px); font-size: 13px; color: #06203a; font-weight: 700; text-align: center; padding-top: 46px; }
+  .mag-btn {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    padding: 16px 30px; border: none; border-radius: 0; clip-path: var(--hex-pointy); cursor: pointer; font-weight: 700; font-size: 14px;
+    background: linear-gradient(135deg,#ffb000,#ff5d73); color: #1a1020; will-change: transform;
+  }
+  .reveal-txt { font-size: 25px; font-weight: 700; color: #fff; letter-spacing: 2px; }
+  .reveal-txt span { display: inline-block; opacity: 0; will-change: transform, opacity; }
+  .dl-btn {
+    position: relative; padding: 16px 34px; border: none; border-radius: 0; clip-path: var(--hex-pointy); cursor: pointer; overflow: hidden;
+    background: linear-gradient(135deg,#36c5f0,#3a7bd5); color: #07223a; font-weight: 700; font-size: 14px;
+  }
+  .dl-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: rgba(255,255,255,.35); }
+  .dl-label { position: relative; z-index: 1; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="nav">
+    <h1>anime.js 效果库</h1>
+    <div class="sub">anime.js v3.2.1 + Amicro 微交互移植<br/>共 12 大类 · 点击「▶ 播放」查看</div>
+    <div id="navList"></div>
+    <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
+      <a href="builder.html" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;color:var(--accent-2);text-decoration:none;font-size:14px;background:rgba(255,176,0,0.1);border:1px solid rgba(255,176,0,0.4)"><span class="dot" style="background:var(--accent-2)"></span>组合构建器<span id="selCount" style="margin-left:8px;font-size:12px;opacity:.85"></span></a>
+    </div>
+  </nav>
+  <main class="main">
+    <div class="topnote">
+      本演示在 anime.js 核心动效（7 类）基础上，新增从 <b>Amicro（React/Motion 微交互库）</b> 移植的微交互效果（入场过渡 / 悬停交互 / 卡片布局 / 3D 轮播 / 按钮），统一用 anime.js 实现，可直接用于 Vue / 原生项目。所有示例均为独立可运行动画，源码片段见卡片底部。
+    </div>
+    <div class="topnote" style="margin-top:-12px"><a href="composed.html" style="color:var(--accent)">▶ 组合效果演示：弧形轮播展开 + 悬停 3D 倾斜 + 点击放大 5 倍并逆弧形收回</a></div>
+    <div class="topnote" style="margin-top:-12px"><a href="builder.html" style="color:var(--accent-2)">组合构建器：勾选效果 + 调参，实时预览，一键导出可复用工厂函数 createDeck()</a></div>
+    <div class="topnote" style="margin-top:-12px"><a href="battlefield-deploy.html" style="color:var(--accent)">战场部署过场：六边形蜂巢从司令部向外逐格旋转拼合（可作战场开始全屏过场）</a></div>
+    <div id="content"></div>
+  </main>
+</div>
+
+<script src="anime.min.js"></script>
+<script>
+/* ---------- 工具 ---------- */
+function el(tag, cls, parent) { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; }
+function mkBox(parent, cls) { return el('div', 'box' + (cls ? ' ' + cls : ''), parent); }
+
+/* 微交互：通用卡片布局（按 calc(i,n) 返回 {x,y,rot,scale} 排布） */
+function fanCards(s, n, calc) {
+  s.innerHTML = ''; s.classList.add('mt-stage');
+  const cards = [];
+  for (let i = 0; i < n; i++) cards.push(el('div', 'mt-card' + (['', ' b', ' c'][i % 3]), s));
+  const pos = [];
+  for (let i = 0; i < n; i++) pos.push(calc(i, n));
+  anime({
+    targets: cards,
+    translateX: (e, i) => pos[i].x,
+    translateY: (e, i) => pos[i].y,
+    rotate: (e, i) => pos[i].rot || 0,
+    scale: (e, i) => pos[i].scale || 1,
+    delay: anime.stagger(60),
+    duration: 900,
+    easing: 'easeOutBack'
+  });
+}
+
+/* ---------- 分类与示例定义 ---------- */
+const CATEGORIES = [
+  {
+    id: 'transform', name: '基础变换', en: 'Transforms',
+    demos: [
+      {
+        title: '平移 + 往返', desc: 'translateX 在两点间往返运动',
+        code: `anime({\n  targets: '.box',\n  translateX: [0, 120],\n  duration: 1100,\n  easing: 'easeInOutSine',\n  direction: 'alternate',\n  loop: true\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); anime({ targets: b, translateX: [0, 120], duration: 1100, easing: 'easeInOutSine', direction: 'alternate', loop: true }); }
+      },
+      {
+        title: '旋转 360°', desc: 'rotate 持续旋转',
+        code: `anime({\n  targets: '.box',\n  rotate: '1turn',\n  duration: 1400,\n  easing: 'linear',\n  loop: true\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'alt'); anime({ targets: b, rotate: '1turn', duration: 1400, easing: 'linear', loop: true }); }
+      },
+      {
+        title: '缩放脉冲', desc: 'scale 从 0 弹到 1 再回弹',
+        code: `anime({\n  targets: '.box',\n  scale: [0, 1],\n  duration: 900,\n  easing: 'easeOutBack'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'pk'); anime({ targets: b, scale: [0, 1], duration: 900, easing: 'easeOutBack' }); }
+      },
+      {
+        title: '组合变换', desc: '位移 + 旋转 + 缩放同时发生',
+        code: `anime({\n  targets: '.box',\n  translateX: 100,\n  rotate: 180,\n  scale: [0.5, 1.2],\n  duration: 1200,\n  easing: 'easeInOutQuad'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); anime({ targets: b, translateX: 100, rotate: 180, scale: [0.5, 1.2], duration: 1200, easing: 'easeInOutQuad' }); }
+      },
+    ]
+  },
+  {
+    id: 'easing', name: '缓动函数', en: 'Easing',
+    demos: [
+      {
+        title: 'linear vs easeInOutQuad', desc: '两种缓动下的运动对比',
+        code: `anime({ targets:'.a', translateX:160, easing:'linear', duration:1400 });\nanime({ targets:'.b', translateX:160, easing:'easeInOutQuad', duration:1400 });`,
+        run(s) { s.innerHTML = '<div style="display:flex;flex-direction:column;gap:18px;align-items:center"><div class="box a"></div><div class="box alt b"></div></div>'; anime({ targets: s.querySelector('.a'), translateX: 160, easing: 'linear', duration: 1400 }); anime({ targets: s.querySelector('.b'), translateX: 160, easing: 'easeInOutQuad', duration: 1400 }); }
+      },
+      {
+        title: 'easeOutElastic 弹性', desc: '超调后回弹至目标',
+        code: `anime({\n  targets:'.box',\n  translateX:120,\n  duration:1500,\n  easing:'easeOutElastic(1,.5)'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'alt'); anime({ targets: b, translateX: 120, duration: 1500, easing: 'easeOutElastic(1,.5)' }); }
+      },
+      {
+        title: 'Spring 物理', desc: '基于物理的弹簧曲线',
+        code: `anime({\n  targets:'.box',\n  translateX:120,\n  duration:1600,\n  easing:'spring(1,80,10,0)'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'pk'); anime({ targets: b, translateX: 120, duration: 1600, easing: 'spring(1,80,10,0)' }); }
+      },
+      {
+        title: '自定义 cubicBezier', desc: '贝塞尔曲线自由控制',
+        code: `anime({\n  targets:'.box',\n  translateX:120,\n  duration:1400,\n  easing:'cubicBezier(.68,-0.55,.27,1.55)'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); anime({ targets: b, translateX: 120, duration: 1400, easing: 'cubicBezier(.68,-0.55,.27,1.55)' }); }
+      },
+    ]
+  },
+  {
+    id: 'stagger', name: '错开动画', en: 'Stagger',
+    demos: [
+      {
+        title: '列表依次进入', desc: 'stagger 让元素逐个延迟',
+        code: `anime({\n  targets:'.cell',\n  scale:[0,1],\n  delay:anime.stagger(80),\n  easing:'easeOutBack',\n  duration:600\n});`,
+        run(s) { s.innerHTML = '<div class="grid5"></div>'; const g = s.querySelector('.grid5'); for (let i=0;i<10;i++) el('div','cell',g); anime({ targets: g.children, scale: [0,1], delay: anime.stagger(80), easing: 'easeOutBack', duration: 600 }); }
+      },
+      {
+        title: '网格从中心扩散', desc: 'grid 模式 + from:center',
+        code: `anime({\n  targets:'.cell',\n  scale:[0,1],\n  delay:anime.stagger(60,{grid:[5,5],from:'center'}),\n  easing:'easeOutBack'\n});`,
+        run(s) { s.innerHTML = '<div class="grid5"></div>'; const g = s.querySelector('.grid5'); for (let i=0;i<25;i++) el('div','cell',g); anime({ targets: g.children, scale: [0,1], delay: anime.stagger(60,{grid:[5,5],from:'center'}), easing: 'easeOutBack', duration: 600 }); }
+      },
+      {
+        title: '从右向左', desc: 'stagger from:"first" 反向',
+        code: `anime({\n  targets:'.cell',\n  translateY:[40,0], opacity:[0,1],\n  delay:anime.stagger(70,{from:'last'}),\n  easing:'easeOutQuad'\n});`,
+        run(s) { s.innerHTML = '<div class="grid5"></div>'; const g = s.querySelector('.grid5'); for (let i=0;i<10;i++) el('div','cell',g); anime({ targets: g.children, translateY: [40,0], opacity: [0,1], delay: anime.stagger(70,{from:'last'}), easing: 'easeOutQuad', duration: 700 }); }
+      },
+    ]
+  },
+  {
+    id: 'timeline', name: '时间线', en: 'Timeline',
+    demos: [
+      {
+        title: '顺序时间线', desc: '移动 → 变色 → 旋转 依次执行',
+        code: `const tl = anime.timeline({easing:'easeInOutSine'});\ntl.add({targets:'.box', translateX:120, duration:700})\n  .add({targets:'.box', backgroundColor:'#ffb000', duration:600})\n  .add({targets:'.box', rotate:360, duration:700});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); const tl = anime.timeline({ easing: 'easeInOutSine' }); tl.add({ targets: b, translateX: 120, duration: 700 }).add({ targets: b, backgroundColor: '#ffb000', duration: 600 }).add({ targets: b, rotate: 360, duration: 700 }); }
+      },
+      {
+        title: '带偏移的时间线', desc: 'offset 让动画并行/重叠',
+        code: `const tl = anime.timeline();\ntl.add({targets:'.b1', translateX:120, duration:800})\n  .add({targets:'.b2', translateY:80, duration:800}, '-=400');`,
+        run(s) { s.innerHTML = '<div style="display:flex;gap:24px"><div class="box b1"></div><div class="box alt b2"></div></div>'; const tl = anime.timeline(); tl.add({ targets: s.querySelector('.b1'), translateX: 120, duration: 800 }).add({ targets: s.querySelector('.b2'), translateY: 80, duration: 800 }, '-=400'); }
+      },
+    ]
+  },
+  {
+    id: 'svg', name: 'SVG 动画', en: 'SVG',
+    demos: [
+      {
+        title: '线条绘制', desc: 'stroke-dashoffset 模拟手绘',
+        code: `const len = path.getTotalLength();\npath.style.strokeDasharray = len;\npath.style.strokeDashoffset = len;\nanime({ targets:path, strokeDashoffset:[len,0], duration:1500, easing:'easeInOutSine' });`,
+        run(s) { s.innerHTML = '<svg class="svg" viewBox="0 0 200 100"><path fill="none" stroke="#36c5f0" stroke-width="3" d="M10,80 C40,10 70,90 100,40 S160,10 190,80"/></svg>'; const p = s.querySelector('path'); const len = p.getTotalLength(); p.style.strokeDasharray = len; p.style.strokeDashoffset = len; anime({ targets: p, strokeDashoffset: [len,0], duration: 1500, easing: 'easeInOutSine' }); }
+      },
+      {
+        title: '环形进度', desc: 'SVG 圆描边作进度环',
+        code: `const c = 2*Math.PI*40;\ncirc.style.strokeDasharray = c;\nanime({ targets:circ, strokeDashoffset:[c, c*0.25], duration:1600, easing:'easeInOutQuart' });`,
+        run(s) { s.innerHTML = '<svg class="progress" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke="#1c2740"/><circle cx="50" cy="50" r="40" stroke="#36c5f0" stroke-linecap="round"/></svg>'; const circ = s.querySelectorAll('circle')[1]; const c = 2*Math.PI*40; circ.style.strokeDasharray = c; anime({ targets: circ, strokeDashoffset: [c, c*0.25], duration: 1600, easing: 'easeInOutQuart' }); }
+      },
+      {
+        title: '柱状生长', desc: 'SVG/HTML 高度属性动画',
+        code: `anime({ targets:'.bar', scaleY:[0,1], delay:anime.stagger(120), easing:'easeOutElastic(1,.6)' });`,
+        run(s) { s.innerHTML = '<div style="display:flex;align-items:flex-end;gap:12px;height:120px"><div class="bar"></div><div class="bar alt"></div><div class="bar pk"></div><div class="bar"></div></div>'; anime({ targets: s.querySelectorAll('.bar'), scaleY: [0,1], delay: anime.stagger(120), easing: 'easeOutElastic(1,.6)', duration: 1000 }); }
+      },
+    ]
+  },
+  {
+    id: 'values', name: '数值与属性', en: 'Values',
+    demos: [
+      {
+        title: '数字滚动', desc: 'innerHTML 数值补间（round）',
+        code: `anime({\n  targets:'.num',\n  innerHTML:[0,2026],\n  round:1,\n  duration:2000,\n  easing:'easeInOutExpo'\n});`,
+        run(s) { s.innerHTML = '<div class="num">0</div>'; anime({ targets: s.querySelector('.num'), innerHTML: [0,2026], round: 1, duration: 2000, easing: 'easeInOutExpo' }); }
+      },
+      {
+        title: '颜色过渡', desc: 'backgroundColor 颜色补间',
+        code: `anime({\n  targets:'.box',\n  backgroundColor:['#2b3a55','#ff5d73'],\n  duration:1500,\n  easing:'linear',\n  direction:'alternate',\n  loop:true\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); anime({ targets: b, backgroundColor: ['#2b3a55','#ff5d73'], duration: 1500, easing: 'linear', direction: 'alternate', loop: true }); }
+      },
+      {
+        title: '多属性同步', desc: '数值、宽度、文本同时变化',
+        code: `anime({\n  targets:'.bar',\n  height:[20,120],\n  backgroundColor:['#3a7bd5','#ffb000'],\n  duration:1400,\n  easing:'easeOutCubic'\n});`,
+        run(s) { s.innerHTML = '<div class="bar" style="height:20px"></div>'; anime({ targets: s.querySelector('.bar'), height: [20,120], backgroundColor: ['#3a7bd5','#ffb000'], duration: 1400, easing: 'easeOutCubic' }); }
+      },
+    ]
+  },
+  {
+    id: 'callback', name: '回调与循环', en: 'Callbacks',
+    demos: [
+      {
+        title: '循环 alternate', desc: '方向往返 + 无限循环',
+        code: `anime({\n  targets:'.box',\n  translateX:[0,120],\n  duration:1000,\n  easing:'easeInOutSine',\n  direction:'alternate',\n  loop:true\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'alt'); anime({ targets: b, translateX: [0,120], duration: 1000, easing: 'easeInOutSine', direction: 'alternate', loop: true }); }
+      },
+      {
+        title: 'begin / complete 回调', desc: '生命周期钩子触发日志',
+        code: `const log = el => {/* 更新文本 */};\nanime({\n  targets:'.box',\n  translateX:120, rotate:360,\n  duration:1200,\n  begin:()=>log('▶ 开始'),\n  complete:()=>log('✔ 完成')\n});`,
+        run(s) { s.innerHTML = '<div style="position:relative"><div class="box"></div><div class="log"></div></div>'; const b = s.querySelector('.box'); const lg = s.querySelector('.log'); anime({ targets: b, translateX: 120, rotate: 360, duration: 1200, begin: () => lg.textContent = '▶ 开始', complete: () => lg.textContent = '✔ 完成' }); }
+      },
+      {
+        title: 'update 实时回调', desc: '每帧更新进度文本',
+        code: `let p = {v:0};\nanime({\n  targets:p, v:100,\n  duration:1500, easing:'linear',\n  update:()=> log.textContent = p.v.toFixed(0)+'%'\n});`,
+        run(s) { s.innerHTML = '<div style="position:relative"><div class="chip" style="font-size:30px;color:#fff">0%</div><div class="log"></div></div>'; const t = s.querySelector('.chip'); const prog = { v: 0 }; anime({ targets: prog, v: 100, duration: 1500, easing: 'linear', update: () => t.textContent = prog.v.toFixed(0) + '%' }); }
+      },
+    ]
+  },
+  ,
+  {
+    id: 'entrance', name: '入场过渡', en: 'Entrance',
+    demos: [
+      {
+        title: 'fade-in 淡入', desc: 'opacity 0→1 平滑出现',
+        code: `anime({\n  targets: '.box',\n  opacity: [0, 1],\n  duration: 1000,\n  easing: 'easeOutQuad'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s); anime({ targets: b, opacity: [0, 1], duration: 1000, easing: 'easeOutQuad' }); }
+      },
+      {
+        title: 'fade-up 上滑淡入', desc: '位移 + 透明度同时进入',
+        code: `anime({\n  targets: '.box',\n  opacity: [0, 1],\n  translateY: [24, 0],\n  duration: 1000,\n  easing: 'easeOutQuad'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'alt'); anime({ targets: b, opacity: [0, 1], translateY: [24, 0], duration: 1000, easing: 'easeOutQuad' }); }
+      },
+      {
+        title: 'zoom-in 缩放进场', desc: 'scale + opacity 弹性进入',
+        code: `anime({\n  targets: '.box',\n  opacity: [0, 1],\n  scale: [0.8, 1],\n  duration: 900,\n  easing: 'easeOutBack'\n});`,
+        run(s) { s.innerHTML = ''; const b = mkBox(s, 'pk'); anime({ targets: b, opacity: [0, 1], scale: [0.8, 1], duration: 900, easing: 'easeOutBack' }); }
+      },
+    ]
+  },
+  {
+    id: 'hover', name: '悬停交互', en: 'Hover & Text',
+    demos: [
+      {
+        title: 'tilt-card 3D 倾斜', desc: '鼠标在卡片上移动时随光标 3D 倾斜',
+        code: `stage.addEventListener('mousemove', e => {\n  const r = stage.getBoundingClientRect();\n  const px = (e.clientX - r.left) / r.width - .5;\n  const py = (e.clientY - r.top) / r.height - .5;\n  card.style.transform =\n    'rotateY(' + (px*24) + 'deg) rotateX(' + (-py*24) + 'deg)';\n});`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const c = el('div', 'tilt-card', s); el('div', 'face', c).textContent = 'HOVER'; s.onmousemove = e => { const r = s.getBoundingClientRect(); const px = (e.clientX - r.left) / r.width - .5; const py = (e.clientY - r.top) / r.height - .5; c.style.transform = 'rotateY(' + (px * 24) + 'deg) rotateX(' + (-py * 24) + 'deg)'; }; s.onmouseleave = () => { c.style.transform = 'rotateY(0) rotateX(0)'; }; }
+      },
+      {
+        title: 'magnetic-button 磁性按钮', desc: '按钮被光标吸附跟随移动',
+        code: `stage.addEventListener('mousemove', e => {\n  const r = stage.getBoundingClientRect();\n  const dx = e.clientX - (r.left + r.width/2);\n  const dy = e.clientY - (r.top + r.height/2);\n  btn.style.transform =\n    'translate(-50%,-50%) translate(' + (dx*.35) + 'px,' + (dy*.35) + 'px)';\n});`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const b = el('button', 'mag-btn', s); b.textContent = '磁性按钮'; s.onmousemove = e => { const r = s.getBoundingClientRect(); const dx = e.clientX - (r.left + r.width / 2); const dy = e.clientY - (r.top + r.height / 2); b.style.transform = 'translate(-50%,-50%) translate(' + (dx * .35) + 'px,' + (dy * .35) + 'px)'; }; s.onmouseleave = () => { b.style.transform = 'translate(-50%,-50%)'; }; }
+      },
+      {
+        title: 'text-reveal 文本揭示', desc: '逐字 stagger 揭示动画',
+        code: `anime({\n  targets: '.reveal-txt span',\n  opacity: [0, 1], translateY: [14, 0],\n  delay: anime.stagger(45), duration: 600,\n  easing: 'easeOutQuad'\n});`,
+        run(s) { s.innerHTML = ''; const t = el('div', 'reveal-txt', s); '微交互之美'.split('').forEach(ch => { const sp = el('span', '', t); sp.textContent = ch; }); anime({ targets: t.querySelectorAll('span'), opacity: [0, 1], translateY: [14, 0], delay: anime.stagger(45), duration: 600, easing: 'easeOutQuad' }); }
+      },
+    ]
+  },
+  ,
+  {
+    id: 'cards', name: '卡片布局', en: 'Card Layouts',
+    demos: [
+      {
+        title: 'card-arc-5 五卡弧', desc: '5 张卡片沿弧线排布成曲线',
+        code: `fanCards(s, 5, (i, n) => {\n  const a = (i/(n-1) - .5) * 60 * Math.PI/180;\n  return { x: Math.sin(a)*150, y: -Math.cos(a)*150*.55,\n           rot: a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 5, (i, n) => { const a = (i / (n - 1) - .5) * 60 * Math.PI / 180; return { x: Math.sin(a) * 150, y: -Math.cos(a) * 150 * .55, rot: a * 180 / Math.PI }; }); }
+      },
+      {
+        title: 'card-arc-7 七卡弧', desc: '扩展弧形，容纳 7 项',
+        code: `fanCards(s, 7, (i, n) => {\n  const a = (i/(n-1) - .5) * 96 * Math.PI/180;\n  return { x: Math.sin(a)*160, y: -Math.cos(a)*160*.55,\n           rot: a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 7, (i, n) => { const a = (i / (n - 1) - .5) * 96 * Math.PI / 180; return { x: Math.sin(a) * 160, y: -Math.cos(a) * 160 * .55, rot: a * 180 / Math.PI }; }); }
+      },
+      {
+        title: 'card-long-arc-5 长弧', desc: '宽幅扫掠弧，横向延展',
+        code: `fanCards(s, 5, (i, n) => {\n  const a = (i/(n-1) - .5) * 84 * Math.PI/180;\n  return { x: Math.sin(a)*200, y: -Math.cos(a)*200*.55,\n           rot: a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 5, (i, n) => { const a = (i / (n - 1) - .5) * 84 * Math.PI / 180; return { x: Math.sin(a) * 200, y: -Math.cos(a) * 200 * .55, rot: a * 180 / Math.PI }; }); }
+      },
+      {
+        title: 'card-linear-spread 线性展开', desc: '水平横排，无旋转',
+        code: `fanCards(s, 6, (i, n) => ({\n  x: (i - (n-1)/2) * 64, y: 0, rot: 0\n}));`,
+        run(s) { fanCards(s, 6, (i, n) => ({ x: (i - (n - 1) / 2) * 64, y: 0, rot: 0 })); }
+      },
+      {
+        title: 'card-corner-fan 角落扇形', desc: '以左下角为原点径向扇出',
+        code: `fanCards(s, 6, (i, n) => {\n  const a = i/(n-1) * 72 * Math.PI/180, R = 120;\n  return { x: Math.cos(a)*R - 80, y: 80 - Math.sin(a)*R,\n           rot: -a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 6, (i, n) => { const a = i / (n - 1) * 72 * Math.PI / 180, R = 120; return { x: Math.cos(a) * R - 80, y: 80 - Math.sin(a) * R, rot: -a * 180 / Math.PI }; }); }
+      },
+      {
+        title: 'card-stamp-arc 邮票弧', desc: '带下垂弧度的曲线排布',
+        code: `fanCards(s, 6, (i, n) => {\n  const a = (i/(n-1) - .5) * 100 * Math.PI/180;\n  return { x: Math.sin(a)*150, y: Math.cos(a)*150*.8,\n           rot: a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 6, (i, n) => { const a = (i / (n - 1) - .5) * 100 * Math.PI / 180; return { x: Math.sin(a) * 150, y: Math.cos(a) * 150 * .8, rot: a * 180 / Math.PI }; }); }
+      },
+      {
+        title: 'card-cascade-stagger 级联', desc: '对角方向错落级联',
+        code: `fanCards(s, 6, (i, n) => ({\n  x: (i-(n-1)/2)*44, y: (i-(n-1)/2)*26, rot: i*3\n}));`,
+        run(s) { fanCards(s, 6, (i, n) => ({ x: (i - (n - 1) / 2) * 44, y: (i - (n - 1) / 2) * 26, rot: i * 3 })); }
+      },
+      {
+        title: 'card-scatter-spread 散开', desc: '从散乱位置收拢成排',
+        code: `// 先随机散开，再弹性归位成横排\nanime({ targets: cards, translateX: rnd, translateY: rnd,\n  rotate: rnd, duration: 1,\n  complete(){ anime({ targets: cards,\n    translateX: i=>(i-2.5)*64, rotate:0,\n    easing:'easeOutElastic(1,.6)' }); } });`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const n = 6; const cards = []; for (let i = 0; i < n; i++) cards.push(el('div', 'mt-card' + (['', ' b', ' c'][i % 3]), s)); anime({ targets: cards, translateX: () => (Math.random() * 2 - 1) * 90, translateY: () => (Math.random() * 2 - 1) * 55, rotate: () => (Math.random() * 2 - 1) * 45, duration: 1, easing: 'linear', complete() { anime({ targets: cards, translateX: (e, i) => (i - (n - 1) / 2) * 64, translateY: 0, rotate: 0, scale: 1, duration: 1000, delay: anime.stagger(50), easing: 'easeOutElastic(1,.6)' }); } }); }
+      },
+      {
+        title: 'card-wheel-fan 轮辐扇形', desc: '绕中心半圆径向扇开',
+        code: `fanCards(s, 7, (i, n) => {\n  const a = Math.PI * i/(n-1), R = 120;\n  return { x: Math.sin(a)*R, y: -Math.cos(a)*R,\n           rot: a*180/Math.PI };\n});`,
+        run(s) { fanCards(s, 7, (i, n) => { const a = Math.PI * i / (n - 1), R = 120; return { x: Math.sin(a) * R, y: -Math.cos(a) * R, rot: a * 180 / Math.PI }; }); }
+      },
+    ]
+  },
+  ,
+  {
+    id: 'threed', name: '3D 轮播（近似）', en: '3D Carousel',
+    demos: [
+      {
+        title: 'card-cover-flow 封面流', desc: 'anime.js 近似：中心突出、两侧 3D 翻转',
+        code: `anime({\n  targets: cards,\n  translateX: i => off(i)*70,\n  translateZ: i => -Math.abs(off(i))*70,\n  rotateY: i => off(i)*-30,\n  scale: i => off(i)===0 ? 1.2 : 0.82,\n  delay: anime.stagger(70), easing: 'easeOutQuad'\n});`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const n = 5; const cards = []; for (let i = 0; i < n; i++) cards.push(el('div', 'mt-card' + (['', ' b', ' c', ' b', ' c'][i]), s)); const L = i => { const o = i - (n - 1) / 2; return { x: o * 70, z: -Math.abs(o) * 70, ry: o * -30, sc: o === 0 ? 1.2 : 0.82 }; }; anime({ targets: cards, translateX: (e, i) => L(i).x, translateZ: (e, i) => L(i).z, rotateY: (e, i) => L(i).ry, scale: (e, i) => L(i).sc, delay: anime.stagger(70), duration: 900, easing: 'easeOutQuad' }); }
+      },
+      {
+        title: 'card-carousel 弧形轮播', desc: 'anime.js 近似：绕中心 3D 弧形排布',
+        code: `anime({\n  targets: cards,\n  translateX: i => Math.sin(a(i))*R,\n  translateZ: i => -(1-Math.cos(a(i)))*50,\n  rotateY: i => -a(i)*0.6,\n  scale: i => 0.9+Math.cos(a(i))*0.12,\n  delay: anime.stagger(60)\n});`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const n = 7; const cards = []; for (let i = 0; i < n; i++) cards.push(el('div', 'mt-card' + (['', ' b', ' c'][i % 3]), s)); const L = i => { const a = Math.PI * i / (n - 1), R = 120; return { x: Math.sin(a) * R, y: -Math.cos(a) * R, z: -(1 - Math.cos(a)) * 50, ry: -a * 180 / Math.PI * 0.6, sc: 0.9 + Math.cos(a) * 0.12 }; }; anime({ targets: cards, translateX: (e, i) => L(i).x, translateY: (e, i) => L(i).y, translateZ: (e, i) => L(i).z, rotateY: (e, i) => L(i).ry, scale: (e, i) => L(i).sc, delay: anime.stagger(60), duration: 1000, easing: 'easeOutQuad' }); }
+      },
+      {
+        title: 'card-time-machine 时间机器', desc: 'anime.js 近似：透视深度卡片堆叠',
+        code: `anime({\n  targets: cards,\n  translateZ: i => -Math.abs(off(i))*46,\n  translateY: i => off(i)*12,\n  rotate: i => off(i)*5,\n  scale: i => 1-Math.abs(off(i))*0.1,\n  delay: anime.stagger(70)\n});`,
+        run(s) { s.innerHTML = ''; s.classList.add('mt-stage'); const n = 5; const cards = []; for (let i = 0; i < n; i++) cards.push(el('div', 'mt-card' + (['', ' b', ' c', ' b', ' c'][i]), s)); const L = i => { const o = i - (n - 1) / 2; return { y: o * 12, z: -Math.abs(o) * 46, rot: o * 5, sc: 1 - Math.abs(o) * 0.1 }; }; anime({ targets: cards, translateY: (e, i) => L(i).y, translateZ: (e, i) => L(i).z, rotate: (e, i) => L(i).rot, scale: (e, i) => L(i).sc, delay: anime.stagger(70), duration: 900, easing: 'easeOutBack' }); }
+      },
+      {
+        title: 'cube-stack 立方体堆叠', desc: '纯 CSS 3D（非 anime.js）：6 个立方体逐个 pulse 缩放',
+        code: `/* 立方体 = 本体 + :before(顶面) + :after(右面)，三面折成六面体 */\n.item { width: 3.125em; height: 3.125em;\n  transform-origin: 50% 50% -1.5625em;  /* 旋转中心后移半个边长 */\n  background: currentColor;             /* 颜色只改 color 一处 */\n  animation: s .6s cubic-bezier(.45,.03,.51,.95) infinite alternate; }\n.item:before { bottom:100%; transform: rotateX(90deg); }  /* 顶面上折 */\n.item:after  { left:100%;   transform: rotateY(90deg); }  /* 右面右折 */\n@keyframes s { to { transform: scale3d(.2,.2,.2); } }     /* 缩到 20% */`,
+        run(s) { s.innerHTML = ''; s.classList.add('cube-stage'); const c = el('div', 'cubes', s); const l = el('div', 'loop', c); for (let i = 0; i < 6; i++) el('div', 'item', l); }
+      },
+    ]
+  },
+  {
+    id: 'buttons', name: '按钮', en: 'Buttons',
+    demos: [
+      {
+        title: 'download-button 下载按钮', desc: '进度填充 + 完成对勾',
+        code: `anime({\n  targets: '.dl-fill',\n  width: ['0%', '100%'],\n  duration: 1400, easing: 'easeInOutQuart',\n  complete() { label.textContent = '✔ 完成'; }\n});`,
+        run(s) { s.innerHTML = ''; const b = el('button', 'dl-btn', s); const f = el('div', 'dl-fill', b); const l = el('div', 'dl-label', b); l.textContent = '下载'; anime({ targets: f, width: ['0%', '100%'], duration: 1400, easing: 'easeInOutQuart', complete() { l.textContent = '✔ 完成'; } }); }
+      },
+      {
+        title: 'galaxy-btn 星云按钮', desc: '纯 CSS（非 anime.js）：conic-gradient 旋转描边 + 星点漂移（悬停提速）',
+        code: `/* 三层 z-index：::before(0) 锥形渐变旋转 → ::after(1) 同色遮罩留边 → __content(2) */\n.galaxy-btn { font-size: var(--btn-font-size); padding: .9em 2em;\n  border-radius: .75em; background: var(--btn-bg); overflow: hidden; position: relative; }\n\n.galaxy-btn::before { content: ''; position: absolute; inset: -4px; z-index: 0;\n  background: conic-gradient(from 0deg,\n    var(--btn-bg) 0deg,        var(--btn-primary) 60deg,\n    var(--btn-secondary) 120deg, var(--btn-bg) 180deg,\n    var(--btn-accent) 240deg,   var(--btn-primary) 300deg,\n    var(--btn-bg) 360deg);\n  filter: blur(8px); animation: rotate-nebula 4s linear infinite; }\n.galaxy-btn:hover::before { opacity: 1; animation-duration: 2s; }  /* 悬停提速一倍 */\n\n.galaxy-btn::after { content: ''; position: absolute; inset: 2px; z-index: 1;\n  background: var(--btn-bg); border-radius: .6em; }   /* 遮罩 → 形成描边 */\n\n@keyframes rotate-nebula { to { transform: rotate(360deg); } }`,
+        run(s) { s.innerHTML = ''; s.style.background = 'radial-gradient(320px 200px at 50% 50%, #10182b 0%, #080b13 70%)'; const b = el('button', 'galaxy-btn', s); el('span', 'galaxy-btn__stars', b); const c = el('span', 'galaxy-btn__content', b); c.innerHTML = '<svg class="galaxy-btn__icon" viewBox="0 0 24 24"><path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/></svg>启动引擎'; }
+      },
+    ]
+  },
+];
+
+/* ---------- 渲染 ---------- */
+const navList = document.getElementById('navList');
+const content = document.getElementById('content');
+
+/* 组合构建器：效果库勾选（localStorage 持久化） */
+const SEL_KEY = 'deckSel';
+function getSel() { try { return JSON.parse(localStorage.getItem(SEL_KEY)) || []; } catch (e) { return []; } }
+function setSel(a) { localStorage.setItem(SEL_KEY, JSON.stringify(a)); }
+function selHas(id) { return getSel().some(x => x.id === id); }
+function selToggle(item) {
+  const a = getSel(); const i = a.findIndex(x => x.id === item.id);
+  if (i >= 0) a.splice(i, 1); else a.push(item);
+  setSel(a); updateSelCount();
+}
+function updateSelCount() {
+  const n = getSel().length; const b = document.getElementById('selCount');
+  if (b) b.textContent = n ? ('（已选 ' + n + '）') : '';
+}
+
+CATEGORIES.forEach((cat, idx) => {
+  const a = el('a', '', navList);
+  a.href = '#' + cat.id;
+  a.innerHTML = '<span class="dot"></span>' + cat.name;
+  if (idx === 0) a.classList.add('active');
+
+  const sec = el('section', 'cat', content);
+  sec.id = cat.id;
+  const head = el('div', 'cat-head', sec);
+  head.innerHTML = '<h2>' + cat.name + '</h2><span class="en">' + cat.en + '</span>';
+  const grid = el('div', 'grid2', sec);
+
+  cat.demos.forEach((d, di) => {
+    const card = el('div', 'card', grid);
+    el('div', 'title', card).textContent = d.title;
+    el('div', 'desc', card).textContent = d.desc;
+    const stage = el('div', 'stage', card);
+    const actions = el('div', 'actions', card);
+    const btn = el('button', 'btn', actions);
+    btn.textContent = '▶ 播放';
+    btn.onclick = () => d.run(stage);
+    const did = cat.id + ':' + di;
+    const addBtn = el('button', 'btn', actions);
+    addBtn.style.marginLeft = '6px';
+    addBtn.textContent = selHas(did) ? '已加入组合' : '＋ 组合';
+    addBtn.onclick = () => {
+      selToggle({ id: did, title: d.title, cat: cat.id });
+      addBtn.textContent = selHas(did) ? '已加入组合' : '＋ 组合';
+      addBtn.blur();
+    };
+    const pre = el('pre', '', card);
+    pre.textContent = d.code;
+    // 首屏自动播放第一个示例
+    if (idx === 0) d.run(stage);
+  });
+});
+
+updateSelCount();
+
+/* ---------- 导航高亮 ---------- */
+const links = navList.querySelectorAll('a');
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id));
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+document.querySelectorAll('.cat').forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>词条编辑 · 六边形切面 3D 轴翻转</title>
+<style>
+  /* 翻开后的放大倍数：原尺寸三角形(173×150)塞不下编辑框，最大内接矩形仅约 86×75 */
+  :root { --flip-scale: 1.6; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    padding: 30px 40px 60px;
+    background: #0a1628;
+    color: #cfe6ff;
+    font-family: 'Fira Code', 'Space Grotesk', monospace;
+    min-height: 100vh;
+  }
+  h1 { color: #fff; font-size: 19px; }
+  .sub { color: #5ad0ff; font-size: 12px; margin: 4px 0 6px; }
+  .hint { color: #7fa8c8; font-size: 11px; margin-bottom: 10px; line-height: 1.65; }
+
+  .stage {
+    position: relative;
+    min-height: 800px;
+    display: flex; align-items: center; justify-content: center;
+    overflow: visible;
+  }
+
+  /* ===== 主六边形 ===== */
+  .hex-main {
+    position: relative;
+    width: 300px; height: 346px;   /* 300 × (88.51/76.66) ≈ 346，尖顶正六边形 */
+    flex-shrink: 0;
+  }
+  .hex-outer {
+    position: absolute; inset: -6px;
+    background: #ffb000;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  }
+  .hex-inner {
+    position: absolute; inset: 0;
+    background: #0a1628;
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  }
+
+  /* ==================================================================
+     flip-card 结构
+       .sector       ≈ .flip-card        → perspective
+       .sector-inner ≈ .flip-card-inner  → preserve-3d + 绕轴旋转
+       .sector-front ≈ .flip-card-front  → 正面（金色切面）
+       .sector-back  ≈ .flip-card-back   → 背面（灰色容器 + 编辑框）
+
+     ⚠ 命中处理：6 个 .sector 都是 inset:0 的完整矩形且互相重叠，
+       若各自接收点击，DOM 最后一个会吞掉全部点击（表现为「永远只翻左上角那片」）。
+       clip-path 不能移到 .sector 上（会把 3D 旋转中的切片按 2D 平面裁掉）。
+       → 改为：.sector 一律 pointer-events:none，由 .hex-main 统一做几何命中测试。
+     ================================================================== */
+  .sector {
+    position: absolute; inset: 0;
+    perspective: 1400px;
+    pointer-events: none;          /* ← 关键：不自己接点击，交给容器做角度判定 */
+  }
+  .sector-inner {
+    position: relative;
+    width: 100%; height: 100%;
+    transform-style: preserve-3d;
+    transform-origin: 50% 50%;
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sector.open .sector-inner {
+    transform: rotate3d(var(--ax), var(--ay), 0, 180deg) scale(var(--flip-scale));
+  }
+
+  .sector-face {
+    position: absolute; inset: 0;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  }
+
+  /* 正面：金色多面切割切面 */
+  .sector-front { background: var(--gold); transition: filter 0.2s; }
+  .sector.hovered .sector-front { filter: brightness(1.16); }
+
+  /* 背面：绕「高线轴」预转 180°（等腰三角形绕对称轴转 180° 映射回自身 → 与正面重合） */
+  .sector-back {
+    background: rgba(180, 195, 210, 0.30);
+    transform-origin: 50% 50%;
+    transform: rotate3d(var(--bx), var(--by), 0, 180deg);
+  }
+  /* 翻开后的切片本体可点（点空白处收回）；编辑框单独可交互 */
+  .sector.open .sector-back { pointer-events: auto; cursor: pointer; }
+
+  /* ==================================================================
+     各片参数
+       --ax/--ay : 翻转轴 = 外边方向（顺时针环绕，统一正向 → 六片朝同一侧掀起）
+       --bx/--by : 背面轴 = 高线方向（外边 → 中心，垂直于外边）
+       transform-origin = 外边中点
+       clip-path 顺序：中心 → 起点顶点 → 终点顶点
+     ================================================================== */
+  .sector[data-i="0"] { --ax: 0.866;  --ay: 0.5;  --bx: -0.5; --by: 0.866;  --gold: #ffb000; }  /* 上→右上 WHEN  */
+  .sector[data-i="1"] { --ax: 0;      --ay: 1;    --bx: -1;   --by: 0;      --gold: #e89a00; }  /* 右上→右下 IF   */
+  .sector[data-i="2"] { --ax: -0.866; --ay: 0.5;  --bx: -0.5; --by: -0.866; --gold: #c48400; }  /* 右下→下  ROLL  */
+  .sector[data-i="3"] { --ax: -0.866; --ay: -0.5; --bx: 0.5;  --by: -0.866; --gold: #a06d00; }  /* 下→左下  DO    */
+  .sector[data-i="4"] { --ax: 0;      --ay: -1;   --bx: 1;    --by: 0;      --gold: #8a5e00; }  /* 左下→左上 AFTER */
+  .sector[data-i="5"] { --ax: 0.866;  --ay: -0.5; --bx: 0.5;  --by: 0.866;  --gold: #d49100; }  /* 左上→上  COST  */
+
+  .sector[data-i="0"] .sector-inner,
+  .sector[data-i="0"] .sector-back { transform-origin: 75% 12.5%; }
+  .sector[data-i="1"] .sector-inner,
+  .sector[data-i="1"] .sector-back { transform-origin: 100% 50%; }
+  .sector[data-i="2"] .sector-inner,
+  .sector[data-i="2"] .sector-back { transform-origin: 75% 87.5%; }
+  .sector[data-i="3"] .sector-inner,
+  .sector[data-i="3"] .sector-back { transform-origin: 25% 87.5%; }
+  .sector[data-i="4"] .sector-inner,
+  .sector[data-i="4"] .sector-back { transform-origin: 0% 50%; }
+  .sector[data-i="5"] .sector-inner,
+  .sector[data-i="5"] .sector-back { transform-origin: 25% 12.5%; }
+
+  .sector[data-i="0"] .sector-face { clip-path: polygon(50% 50%, 50% 0%, 100% 25%); }
+  .sector[data-i="1"] .sector-face { clip-path: polygon(50% 50%, 100% 25%, 100% 75%); }
+  .sector[data-i="2"] .sector-face { clip-path: polygon(50% 50%, 100% 75%, 50% 100%); }
+  .sector[data-i="3"] .sector-face { clip-path: polygon(50% 50%, 50% 100%, 0% 75%); }
+  .sector[data-i="4"] .sector-face { clip-path: polygon(50% 50%, 0% 75%, 0% 25%); }
+  .sector[data-i="5"] .sector-face { clip-path: polygon(50% 50%, 0% 25%, 50% 0%); }
+
+  /* ===== 正面标签（锚于该片质心）===== */
+  .sector-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    font-size: 10px; font-weight: 700;
+    color: #14243c; letter-spacing: 0.5px;
+    pointer-events: none; white-space: nowrap;
+  }
+  .sector[data-i="0"] .sector-label { left: 66.67%; top: 25%; }
+  .sector[data-i="1"] .sector-label { left: 83.33%; top: 50%; }
+  .sector[data-i="2"] .sector-label { left: 66.67%; top: 75%; }
+  .sector[data-i="3"] .sector-label { left: 33.33%; top: 75%; }
+  .sector[data-i="4"] .sector-label { left: 16.67%; top: 50%; }
+  .sector[data-i="5"] .sector-label { left: 33.33%; top: 25%; }
+
+  /* ===== 背面编辑框 =====
+     A∘B = 绕 Z 轴转 180°（内容面内倒转）+ 放大 s
+     → rotate(180deg) 抵消倒转、scale(1/s) 抵消放大 → 正立 + 原尺寸 */
+  .sector-content {
+    position: absolute;
+    width: 152px; height: 92px;
+    margin: -46px 0 0 -76px;
+    transform-origin: center;
+    transform: rotate(180deg) scale(calc(1 / var(--flip-scale)));
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 5px 7px;
+    background: rgba(10, 22, 40, 0.85);
+    border: 1px solid rgba(90, 200, 255, 0.45);
+    border-radius: 4px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.45);
+    pointer-events: none;
+  }
+  .sector.open .sector-content { pointer-events: auto; }
+
+  .sector[data-i="0"] .sector-content { left: 66.67%; top: 25%; }
+  .sector[data-i="1"] .sector-content { left: 83.33%; top: 50%; }
+  .sector[data-i="2"] .sector-content { left: 66.67%; top: 75%; }
+  .sector[data-i="3"] .sector-content { left: 33.33%; top: 75%; }
+  .sector[data-i="4"] .sector-content { left: 16.67%; top: 50%; }
+  .sector[data-i="5"] .sector-content { left: 33.33%; top: 25%; }
+
+  .sector-content .sf-title {
+    font-size: 9.5px; font-weight: 700; color: #ffb000;
+    letter-spacing: 0.5px; text-align: center;
+  }
+  .sector-content select,
+  .sector-content input {
+    width: 100%; padding: 2px 4px;
+    background: rgba(6, 16, 32, 0.9);
+    border: 1px solid rgba(90, 200, 255, 0.3);
+    color: #cfe6ff; font-family: inherit; font-size: 9px;
+    border-radius: 2px;
+    cursor: auto;
+  }
+  .sector-content select:focus,
+  .sector-content input:focus { outline: none; border-color: #ffb000; }
+  .sector-content button {
+    background: #ffb000; color: #0a1628;
+    border: none; padding: 3px 6px;
+    font-size: 9px; font-weight: 700;
+    border-radius: 2px; cursor: pointer; font-family: inherit;
+    transition: filter 0.15s;
+  }
+  .sector-content button:hover { filter: brightness(1.18); }
+
+  /* ===== 中心热区（点中心=六片全开）===== */
+  .hex-center {
+    position: absolute; left: 50%; top: 50%;
+    width: 54px; height: 54px;
+    transform: translate(-50%, -50%);
+    cursor: pointer; z-index: 30;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #ffb000; font-size: 20px;
+    background: radial-gradient(circle, rgba(255,176,0,0.18), transparent 70%);
+    transition: background 0.2s, transform 0.2s;
+  }
+  .hex-center:hover {
+    background: radial-gradient(circle, rgba(255,176,0,0.4), transparent 70%);
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+
+  /* ===== 控制条 ===== */
+  .bar { display: flex; align-items: center; gap: 14px; margin-top: 4px; flex-wrap: wrap; }
+  .bar label { font-size: 11px; color: #5ad0ff; display: flex; align-items: center; gap: 6px; }
+  .bar input[type=range] { width: 130px; accent-color: #ffb000; }
+  .bar .val { color: #ffb000; font-weight: 700; min-width: 28px; }
+  .bar button {
+    background: rgba(90,200,255,0.12);
+    border: 1px solid rgba(90,200,255,0.35);
+    color: #cfe6ff; border-radius: 5px;
+    padding: 4px 12px; cursor: pointer; font-size: 11px; font-family: inherit;
+  }
+  .bar button:hover { background: rgba(90,200,255,0.25); }
+  .status {
+    position: fixed; bottom: 16px; left: 16px;
+    color: #5ad0ff; font-size: 11px; padding: 6px 11px;
+    background: rgba(10,22,40,0.75);
+    border: 1px solid rgba(90,200,255,0.22); border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+  <h1>⚙ 词条编辑 · 六边形切面 3D 轴翻转</h1>
+  <p class="sub"><b style="color:#ffb000">词条编辑</b> · 点中心 ⊕ = 六片全开 · 点单片 = 只开那片 · 编辑框在切片<b>背面</b>（翻开后露出）</p>
+  <p class="hint">
+    命中方式：6 个切片容器互相重叠，故由六边形容器统一按<b>点击角度</b>判定属于哪一片（正六边形切面 = 6 个 60° 扇区），避免上层容器吞掉点击。<br />
+    关闭方式：再点该片原位 / 点已翻开的切片空白处 / 点其他片切换 / 「全部复位」。
+  </p>
+
+  <div class="bar">
+    <label>翻开放大倍数
+      <input type="range" id="scaleRange" min="1" max="2.4" step="0.1" value="1.6" />
+      <b class="val" id="scaleVal">1.6</b>
+    </label>
+    <button id="btnReset">全部复位</button>
+    <span style="font-size:11px;color:#7fa8c8;">（1.0 = 不放大，但原尺寸三角形放不下编辑框）</span>
+  </div>
+
+  <div class="stage">
+    <div class="hex-main" id="hexMain">
+      <div class="hex-outer"></div>
+      <div class="hex-inner"></div>
+
+      <div class="sector" data-i="0" data-name="WHEN">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">WHEN</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">WHEN · 触发时机</div>
+              <select><option>B_ENTRY · 触发条目</option><option>B_TARGET · 解析目标</option><option>B_CLEANUP · 移除buff</option></select>
+              <input type="text" placeholder="原子名称" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sector" data-i="1" data-name="IF">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">IF</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">IF · 条件判断</div>
+              <select><option>B_TARGET · 解析目标</option><option>B_ENTRY · 触发条目</option><option>A_APPLY_VALUE · 改数值</option></select>
+              <input type="text" placeholder="条件表达式" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sector" data-i="2" data-name="ROLL">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">ROLL</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">ROLL · 骰子结算</div>
+              <select><option>ROLL_MODE · 骰子模式</option><option>B_TARGET · 解析目标</option></select>
+              <input type="text" placeholder="骰子公式 如 2d6+3" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sector" data-i="3" data-name="DO">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">DO</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">DO · 效果执行</div>
+              <select><option>B_DISPLACE · 击退位移</option><option>B_SPAWN · 生成单位</option><option>A_APPLY_VALUE · 改数值</option></select>
+              <input type="text" placeholder="效果参数" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sector" data-i="4" data-name="AFTER">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">AFTER</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">AFTER · 后置效果</div>
+              <select><option>B_CLEANUP · 移除buff</option><option>B_ENTRY · 触发条目</option></select>
+              <input type="text" placeholder="后置参数" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sector" data-i="5" data-name="COST">
+        <div class="sector-inner">
+          <div class="sector-face sector-front"><div class="sector-label">COST</div></div>
+          <div class="sector-face sector-back">
+            <div class="sector-content">
+              <div class="sf-title">COST · 消耗</div>
+              <select><option>A_APPLY_VALUE · 改数值</option><option>MODIFY_STAT · 改属性</option></select>
+              <input type="text" placeholder="消耗值 如 AP-1" />
+              <button type="button">保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hex-center" data-action="all" title="点中心 · 六片全开">⊕</div>
+    </div>
+  </div>
+
+  <div class="status" id="status">提示：点击中心 ⊕ 或任一单片切面</div>
+
+  <script>
+    const hexMain  = document.getElementById('hexMain');
+    const sectors  = document.querySelectorAll('.sector');
+    const center   = document.querySelector('.hex-center');
+    const status   = document.getElementById('status');
+    const scaleR   = document.getElementById('scaleRange');
+    const scaleV   = document.getElementById('scaleVal');
+    const btnReset = document.getElementById('btnReset');
+
+    scaleR.addEventListener('input', () => {
+      const v = parseFloat(scaleR.value);
+      document.documentElement.style.setProperty('--flip-scale', v);
+      scaleV.textContent = v.toFixed(1);
+    });
+
+    const closeAll = () => sectors.forEach(s => s.classList.remove('open'));
+
+    /* ---- 几何命中：正六边形的 6 个切面 = 绕中心的 6 个 60° 扇区 ----
+       顶点方向角：上=270° 右上=330° 右下=30° 下=90° 左下=150° 左上=210°
+       第 i 片扇区起点 = (270 + i*60) % 360                                */
+    function sectorIndexAt(clientX, clientY) {
+      const r  = hexMain.getBoundingClientRect();
+      const dx = (clientX - r.left) - r.width  / 2;
+      const dy = (clientY - r.top)  - r.height / 2;
+
+      // 六边形包含判定（尖顶正六边形，外接半径 R=173，边心距 a≈149.9）
+      const R = r.height / 2, a = R * Math.sqrt(3) / 2;
+      const inHex =
+        Math.abs(dx) <= a + 1 &&
+        Math.abs(dx * 0.5 + dy * -0.866) <= a + 1 &&
+        Math.abs(dx * 0.5 + dy *  0.866) <= a + 1;
+      if (!inHex) return -1;
+
+      let ang = Math.atan2(dy, dx) * 180 / Math.PI;   // -180..180
+      if (ang < 0) ang += 360;                        // 0..360
+      for (let i = 0; i < 6; i++) {
+        const start = (270 + i * 60) % 360;
+        if ((ang - start + 360) % 360 < 60) return i;
+      }
+      return -1;
+    }
+
+    /* ---- 统一点击处理（挂在六边形容器上）---- */
+    hexMain.addEventListener('click', (e) => {
+      // ① 编辑框内部：交给表单自己处理，不参与开合
+      if (e.target.closest('.sector-content')) return;
+
+      // ② 点到「已翻开的切片」本体（背面空白处）→ 收回该片
+      const back = e.target.closest('.sector-back');
+      if (back) {
+        const s = back.closest('.sector');
+        if (s.classList.contains('open')) {
+          s.classList.remove('open');
+          status.textContent = `已收回：${s.dataset.name} 段`;
+        }
+        return;
+      }
+
+      // ③ 中心 ⊕ 有自己的 handler 并已 stopPropagation，这里兜底跳过
+      if (e.target.closest('.hex-center')) return;
+
+      // ④ 按角度判定点到哪一片
+      const idx = sectorIndexAt(e.clientX, e.clientY);
+      if (idx < 0) return;
+
+      const s = sectors[idx];
+      const wasOpen = s.classList.contains('open');
+      closeAll();
+      if (wasOpen) {
+        status.textContent = '已关闭';
+      } else {
+        s.classList.add('open');
+        status.textContent = `已翻开：${s.dataset.name} 段（编辑框在切片背面）· 点其他片可切换`;
+      }
+    });
+
+    /* ---- 悬停高亮：用角度判定给对应切片加 hovered ---- */
+    hexMain.addEventListener('mousemove', (e) => {
+      const idx = sectorIndexAt(e.clientX, e.clientY);
+      sectors.forEach((s, i) => s.classList.toggle('hovered', i === idx && !s.classList.contains('open')));
+    });
+    hexMain.addEventListener('mouseleave', () => {
+      sectors.forEach(s => s.classList.remove('hovered'));
+    });
+
+    /* ---- 中心 ⊕ ：六片全开 / 全收 ---- */
+    center.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const allOpen = [...sectors].every(s => s.classList.contains('open'));
+      sectors.forEach(s => s.classList.toggle('open', !allOpen));
+      status.textContent = allOpen ? '已全部复位' : '六片全部翻开 · 每片背面各有一个编辑框';
+    });
+
+    btnReset.addEventListener('click', () => {
+      closeAll();
+      status.textContent = '已全部复位';
+    });
+
+    document.querySelectorAll('.sector-content button').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const seg = b.closest('.sector').dataset.name;
+        status.textContent = `[演示] 已保存 ${seg} 段的原子（此处接真实保存逻辑）`;
+      });
+    });
+  </script>
+</body>
+</html>

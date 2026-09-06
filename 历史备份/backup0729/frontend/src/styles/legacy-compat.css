@@ -1,0 +1,351 @@
+/* ==========================================
+   CSS变量别名映射 - 兼容旧代码
+   ==========================================
+   
+   这个文件为旧的CSS变量创建别名，指向新的DESIGN.md变量。
+   导入此文件后，所有使用旧变量的页面会自动使用新样式。
+   
+   旧变量 → 新变量映射：
+   - var(--surface-base) → var(--surface)
+   - var(--primary-panel) → var(--surface-container)
+   - var(--data-inlay) → var(--surface-container-low)
+   - var(--border-*) → 色调层级（通过CSS选择器）
+   - var(--accent-*) → var(--primary)/var(--secondary)/var(--tertiary)
+*/
+
+/* ==========================================
+   CSS变量映射
+   ========================================== */
+
+/* 表面层级映射 */
+:root {
+  --surface-base: var(--surface);
+  --primary-panel: var(--surface-container);
+  --data-inlay: var(--surface-container-low);
+}
+
+/* 文字颜色映射 */
+:root {
+  --text-primary: var(--on-surface);
+  --text-muted: var(--on-surface-variant);
+  --text-secondary: var(--on-surface-variant);
+}
+
+/* 边框颜色映射（全部改为透明，使用色调层级） */
+:root {
+  --border-weak: transparent;
+  --border-medium: transparent;
+  --border-subtle: transparent;
+  --border-strong: transparent;
+}
+
+/* 强调色映射 */
+:root {
+  --accent-blue: var(--primary);
+  --accent-blue-hover: var(--primary-dim);
+  --accent-green: var(--primary);
+  --accent-green-hover: var(--primary-dim);
+  --accent-red: var(--error);
+  --accent-red-hover: var(--error-dim);
+  --accent-orange: var(--tertiary);
+  --accent-orange-hover: var(--tertiary-dim);
+  --accent-purple: var(--secondary);
+}
+
+/* 字体映射 */
+:root {
+  --font-space: var(--font-headline);
+  --font-mono: var(--font-mono);
+  --font-medium: 400;
+  --font-bold: 700;
+  --font-semibold: 600;
+}
+
+/* 字体大小映射 */
+:root {
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+}
+
+/* 间距映射 */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+}
+
+/* 字母间距映射 */
+:root {
+  --tracking-tighter: 0.05em;
+  --tracking-tight: 0.1em;
+  --tracking-normal: 0.15em;
+  --tracking-wide: 0.2em;
+  --tracking-wider: 0.3em;
+}
+
+/* 过渡映射（全部使用steps(4)） */
+:root {
+  --transition-fast: 0.1s steps(4);
+  --transition-normal: 0.2s steps(4);
+  --transition-slow: 0.3s steps(4);
+}
+
+/* 阴影映射（全部改为none） */
+:root {
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+}
+
+/* 圆角映射（全部改为0px） */
+:root {
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 9999px;
+}
+
+/* Z-index映射 */
+:root {
+  --z-modal: 1000;
+}
+
+/* ==========================================
+   全局样式覆盖 - 强制使用色调层级
+   ========================================== */
+
+/* 覆盖所有边框，改为色调层级 */
+* {
+  border: none !important;
+}
+
+/* 强制0px圆角 */
+*, *::before, *::after {
+  border-radius: 0px !important;
+}
+
+/* 保留圆角的例外（圆形进度条等） */
+.round-full,
+.circle,
+.o-full,
+.bg-circle {
+  border-radius: 9999px !important;
+}
+
+/* ==========================================
+   全局字体强制使用Space Grotesk
+   ========================================== */
+
+h1, h2, h3, h4, h5, h6,
+.title, .heading, .header,
+.font-space,
+.modal h3,
+.unit-info h3,
+.unit-info p,
+.form-row label,
+.stepper button,
+.hp-display,
+.hint,
+.error-box strong,
+.skill-card h4,
+.skill-card p,
+.skill-item-name,
+.skill-item-type,
+.skill-item-detail,
+.battle-header h3,
+.phase-panel h3,
+.combat-log h3,
+.status-badge {
+  font-family: var(--font-headline) !important;
+}
+
+button, .btn, .button,
+label, .tag, .tactical-label,
+.faction-tag,
+.form-row label,
+.stepper button,
+.hp-display,
+.hint,
+.error-box strong,
+.skill-item-name,
+.skill-tag,
+.unit-meta {
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+}
+
+/* ==========================================
+   全局过渡动画强制使用steps()
+   ========================================== */
+
+*, *::before, *::after {
+  transition-property: background-color, color, border-color, box-shadow, transform, opacity;
+  transition-duration: 0.2s;
+  transition-timing-function: steps(4);
+}
+
+/* ==========================================
+   全局hover效果强制使用色调层级
+   ========================================== */
+
+/* 覆盖hover时的transform */
+*:hover:not(button):not(a):not(.card):not(.menu-card) {
+  transform: none !important;
+}
+
+/* ==========================================
+   组件特定样式覆盖
+   ========================================== */
+
+/* 卡片组件 */
+.card, .tactical-card,
+.menu-card, .battle-card,
+.unit-card,
+.form-section,
+.modal,
+.current-battlefield,
+.terrain-item,
+.battlefield-item {
+  background: var(--surface-container) !important;
+  border-radius: 0px !important;
+  border: none !important;
+  position: relative;
+}
+
+/* 卡片色调层级边框 */
+.card::before, .tactical-card::before,
+.menu-card::before, .battle-card::before,
+.unit-card::before,
+.form-section::before,
+.modal::before,
+.current-battlefield::before,
+.terrain-item::before,
+.battlefield-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--surface-container-high) 20%,
+    var(--surface-container-highest) 50%,
+    var(--surface-container-high) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+.card::after, .tactical-card::after,
+.menu-card::after, .battle-card::after,
+.unit-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--surface-container-high) 20%,
+    var(--surface-container-highest) 50%,
+    var(--surface-container-high) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* 按钮组件 */
+button, .btn, .button, .tactical-btn,
+.btn-small, .btn-zoom, .btn-primary, .btn-secondary,
+.btn-battle, .btn-edit, .btn-delete, .btn-full {
+  border-radius: 0px !important;
+  transition: all 0.1s steps(4) !important;
+  border: none !important;
+}
+
+button:hover, .btn:hover, .button:hover, .tactical-btn:hover {
+  transform: translateY(2px) !important;
+}
+
+button:active, .btn:active, .button:active, .tactical-btn:active {
+  transform: translateY(4px) !important;
+}
+
+/* 输入框组件 */
+input, select, textarea,
+.tactical-input, .tactical-select,
+.coord-input input,
+.form-row input,
+.form-row select {
+  border-radius: 0px !important;
+  border: 1px solid var(--surface-container-high) !important;
+  background: var(--surface-container-lowest) !important;
+  font-family: var(--font-body) !important;
+}
+
+input:focus, select:focus, textarea:focus,
+.tactical-input:focus, .tactical-select:focus,
+.coord-input input:focus,
+.form-row input:focus,
+.form-row select:focus {
+  outline: none !important;
+  border-color: var(--primary) !important;
+  box-shadow: none !important;
+}
+
+/* 标签组件 */
+.tag, .tactical-label,
+.faction-tag,
+.points-badge {
+  border-radius: 0px !important;
+  border: none !important;
+  font-family: var(--font-mono) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.25em !important;
+  font-size: 10px !important;
+}
+
+/* ==========================================
+   实用类
+   ========================================== */
+
+.text-muted {
+  color: var(--on-surface-variant) !important;
+}
+
+.uppercase {
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+}
+
+.font-space {
+  font-family: var(--font-headline) !important;
+}
+
+/* ==========================================
+   响应式调整
+   ========================================== */
+
+@media (max-width: 768px) {
+  .menu-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .home-main, .battle-main {
+    padding: 16px !important;
+  }
+}

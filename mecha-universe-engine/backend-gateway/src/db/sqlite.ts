@@ -193,6 +193,23 @@ function createTables(): void {
       logo_url TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS bug_reports (
+      id TEXT PRIMARY KEY,
+      reporter_id TEXT,
+      reporter_name TEXT DEFAULT '',
+      contact TEXT DEFAULT '',
+      module TEXT DEFAULT '其他',
+      severity TEXT DEFAULT '一般',
+      status TEXT DEFAULT '待处理',
+      title TEXT DEFAULT '',
+      description TEXT NOT NULL,
+      env TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_bug_status ON bug_reports(status);
+    CREATE INDEX IF NOT EXISTS idx_bug_created ON bug_reports(created_at);
   `);
 
   // Phase 29-P1: 存量数据库迁移 — 为旧版 users/units 表追加新列
@@ -229,6 +246,11 @@ function migrateTables(): void {
     if (!bcols.includes('snapshot_at')) {
       db.run("ALTER TABLE battles ADD COLUMN snapshot_at TEXT");
       logger.info({ msg: `[DB] 迁移：battles 增加 snapshot_at 列` });
+    }
+    // ★ A-5：CAS 乐观锁版本列（迁移兼容旧表）
+    if (!bcols.includes('version')) {
+      db.run('ALTER TABLE battles ADD COLUMN version INTEGER DEFAULT 0');
+      logger.info({ msg: `[DB] 迁移：battles 增加 version 列` });
     }
   } catch (e: any) {
     logger.error({ msg: `[DB] 迁移 battles 快照列失败: ${ e?.message || e }` });
@@ -270,6 +292,12 @@ function migrateTables(): void {
       db.run('CREATE TABLE IF NOT EXISTS feature_permissions (role TEXT PRIMARY KEY, enabled TEXT NOT NULL DEFAULT \'[]\')');
     } catch (e: any) {
       logger.error({ msg: `[DB] 迁移 feature_permissions 失败: ${ e?.message || e }` });
+    }
+    // 简单 KV 表：存储全局默认设置（如 dominator 地图视图设置），所有 dominator 共享一份
+    try {
+      db.run('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    } catch (e: any) {
+      logger.error({ msg: `[DB] 迁移 kv 表失败: ${ e?.message || e }` });
     }
     const ucols = all('PRAGMA table_info(users)').map((c: any) => c.name);
     if (!ucols.includes('last_room_id')) {

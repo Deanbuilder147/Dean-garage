@@ -110,6 +110,99 @@ export function getHexKey(q: number, r: number): string {
 }
 
 // ============================================================
+// 战场模拟 AOE 命中格推导（2026-08-11 /glossary-studio 重构 Phase 1-1）
+// 解决 #2「选取点受射程限、作用范围可超射程」：
+//   以 targetCoord 为原点展开作用范围，半径独立于 maxRange（不受射程约束）。
+// 复用 hexDistance / getHexesInRange / getHexKey，纯函数、零副作用。
+// ============================================================
+
+/**
+ * AOE 形状描述（相对原点 targetCoord 的表达，或地图炮六向补全）。
+ * - handDrawn : 用户在 AOE 视图手绘的阴影，cells 为相对 targetCoord 的偏移 {dq,dr} 列表
+ * - radius    : 以 targetCoord 为原点、半径 radius 的六边形全覆盖（半径独立 maxRange）
+ * - mapcannon : 地图炮六向补全，baseShadowEast 为正右基准阴影偏移列表，
+ *               dir 为顺时针旋转步数（0=正右，每步 60°，与 DIRECTIONS/computeDirection 对齐）
+ */
+export type AoeShape =
+  | { kind: 'handDrawn'; cells: Array<{ dq: number; dr: number }> }
+  | { kind: 'radius'; radius: number }
+  | { kind: 'mapcannon'; baseShadowEast: Array<{ dq: number; dr: number }>; dir: number };
+
+/**
+ * 计算 AOE 最终命中的六角格集合（绝对坐标）。
+ * @param casterCoord 施法者坐标（用于校验目标点是否在射程内，由调用方决定，本函数不强制）
+ * @param targetCoord AOE 原点（玩家在射程环带内点的目标格）
+ * @param aoeShape    AOE 形状（见 AoeShape）
+ * @returns 命中格绝对坐标数组（已去重）
+ */
+export function computeAOECells(
+  casterCoord: HexCoord,
+  targetCoord: HexCoord,
+  aoeShape: AoeShape,
+): HexCoord[] {
+  const tQ = targetCoord.q;
+  const tR = targetCoord.r;
+  let rel: Array<{ dq: number; dr: number }> = [];
+
+  if (aoeShape.kind === 'radius') {
+    // 等价于以 targetCoord 为圆心的六边形范围（半径独立于 maxRange）
+    return getHexesInRange(tQ, tR, aoeShape.radius);
+  } else if (aoeShape.kind === 'handDrawn') {
+    rel = aoeShape.cells || [];
+  } else {
+    // mapcannon：以正右基准阴影 rotate(dir * 60°) 顺时针补全
+    rel = rotateShadowEast(aoeShape.baseShadowEast || [], aoeShape.dir || 0);
+  }
+
+  const seen = new Set<string>();
+  const out: HexCoord[] = [];
+  for (const off of rel) {
+    const q = tQ + (off.dq || 0);
+    const r = tR + (off.dr || 0);
+    const key = getHexKey(q, r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ q, r });
+  }
+  return out;
+}
+
+/**
+ * 地图炮阴影旋转：以正右(dir=0)基准阴影，顺时针按 60°×dir 步长旋转。
+ * 在 Even-R offset 坐标系中，顺时针旋转等价于对偏移做旋转矩阵变换。
+ * 简化实现：以 targetCoord 为中心，把每个相对偏移 (dq,dr) 绕原点旋转 60°×dir。
+ * 采用 axial 旋转（旋转 60° 的 cube 坐标循环变换），再转回 offset。
+ */
+export function rotateShadowEast(
+  baseShadowEast: Array<{ dq: number; dr: number }>,
+  dir: number,
+): Array<{ dq: number; dr: number }> {
+  const steps = ((dir % 6) + 6) % 6;
+  return baseShadowEast.map(({ dq, dr }) => {
+    // offset → axial
+    const ax = dq - (dr + (dr & 1)) / 2;
+    const ar = dr;
+    // cube
+    let cq = ax;
+    let cr = ar;
+    let cs = -ax - ar;
+    // 每步 60° 顺时针旋转：(q,r,s) → (-s,-q,-r) 是逆时针；顺时针用 (r,s,q)
+    for (let i = 0; i < steps; i++) {
+      const nq = -cs;
+      const nr = -cq;
+      const ns = -cr;
+      cq = nq;
+      cr = nr;
+      cs = ns;
+    }
+    // cube → axial → offset
+    const offQ = cq + (cr + (cr & 1)) / 2;
+    const offR = cr;
+    return { dq: offQ, dr: offR };
+  });
+}
+
+// ============================================================
 // Phase 31-RangeNormalize：射程校验纯函数（三端共用真相源）
 // ============================================================
 // 历史问题：前端 getSkillRange+validTargets、网关 /skill 跳过校验、
@@ -234,39 +327,132 @@ export function resolveSkillCategory(skill: {
 
 /**
  * ★ 由技能对象推导归一化射程字段（唯一真相源，三端共用）。
- * 优先级：rawMax = cast_range ?? max_range ?? range_max ?? range（首个非空）；
- * rawMin = min_cast_range ?? min_range ?? range_min。
- * 均未配置时按分类经 DEFAULT_RANGE_BY_CATEGORY / DEFAULT_MIN_RANGE_BY_CATEGORY 兜底。
- * 数据源若未填（undefined）会正确落到分类兜底；若数据源写死错误值则会被采用——
- * 故数据源必须遵循"不写死"原则（见上）。
+ * 最大射程 = BASE_RANGE_BY_CATEGORY[category] + (Number(bonus_range)||0)
+ * 最小射程 = 配置了 min_range 则优先使用，否则 DEFAULT_MIN_RANGE_BY_CATEGORY[category]
+ * ★ 裁定 6.1 红线：严禁读取 cast_range / range / max_range / range_max / rangeLabel 等绝对射程字段。
+ *   min_range 与 bonus_range 是合法的相对射程字段（最小/最大加成），予以保留。
  */
-export function getSkillRangeFields(skill: {
-  category?: string;
-  type?: string;
-  typeLabel?: string;
-  attack_type?: string | string[];
-  action_type?: string | string[];
-  bonus_range?: number | string;
-  extra_range?: number | string;
-} | null | undefined): SkillRangeFields {
+export function getSkillRangeFields(
+  skill: {
+    category?: string;
+    type?: string;
+    typeLabel?: string;
+    attack_type?: string | string[];
+    action_type?: string | string[];
+    bonus_range?: number | string;
+    extra_range?: number | string;
+    min_range?: number | string;
+  } | null | undefined,
+  // ★ 隐患 7.3 预留：施法者状态/环境对射程的动态叠加（如被动+1、迷雾-1）。当前传 null 即可。
+  casterContext?: { passiveBonusRange?: number; envModifier?: number } | null,
+): SkillRangeFields {
   const cat = resolveSkillCategory(skill);
   const baseRange = DEFAULT_RANGE_BY_CATEGORY[cat];
   const baseMin = DEFAULT_MIN_RANGE_BY_CATEGORY[cat];
   if (!skill) return { minRange: baseMin, maxRange: baseRange };
   // ============================================================
-  // ★ 射程计算模型（2026-08-03 用户裁定 · 严格收敛版）：
-  //   range = 类型基准射程(DEFAULT_RANGE_BY_CATEGORY)  +  bonusRange
+  // ★ 射程加法模型（裁定 6.1）：
+  //   maxRange = 类型基准射程(DEFAULT_RANGE_BY_CATEGORY) + bonusRange
   //   1) 类型基准：近战=1 / 远程=3 / 自动化=0。
   //   2) bonusRange = Number(skill.bonus_range || skill.extra_range) || 0。
-  //   ★★★ 彻底切断历史绝对射程字段：cast_range / range / max_range / range_max /
-  //       rangeLabel / min_cast_range / min_range / range_min 一律【不再读取】。
-  //       旧数据里 range:2 到底是"绝对 2 格"还是"加成 +2 格"存在语义歧义，
-  //       继续兼容只会让远程(基准3)误算成 3+2=5，破坏算法；故彻底断开。
-  //   3) 最小射程固定为类型基准(近战/远程=1, 自动化=0)；不再读任何历史 min 字段。
+  //   ★ 彻底切断历史绝对射程字段：cast_range / range / max_range / range_max / rangeLabel，一律不读取。
+  //   3) 最小射程：配置了 min_range 则优先采用，否则用分类基准 baseMin（近战/远程=1, auto=0）。
+  //      min_range 是合法相对字段（表达 3~6 格狙击等盲区），非被废除的绝对字段。
+  //   4) 动态叠加（隐患 7.3 预留）：casterContext.passiveBonusRange / envModifier 加进 maxRange。
   // ============================================================
   const bonusRaw = (skill as any).bonus_range ?? (skill as any).extra_range;
-  const bonusRange = Number(bonusRaw) || 0;
+  let bonusRange = Number(bonusRaw) || 0;
+  const ctx = casterContext || (skill as any).__casterContext;
+  if (ctx) {
+    bonusRange += (Number((ctx as any).passiveBonusRange) || 0) + (Number((ctx as any).envModifier) || 0);
+  }
   const maxRange = baseRange + bonusRange;
-  const minRange = baseMin;
+  const minRaw = (skill as any).min_range;
+  const minRange = (minRaw != null) ? (Number(minRaw) || 0) : baseMin;
   return { minRange, maxRange };
+}
+
+// ============================================================
+// ★ I-6：视线阻挡（LoS）几何真相源（服务端权威）
+// 消费 TerrainCellContract.elevation / blocks_sight（注意非 height）。
+// ============================================================
+
+/** cube round：把小数 cube 坐标四舍五入到最近整数格（保证 q+r+s===0） */
+function cubeRound(x: number, y: number, z: number): { q: number; r: number; s: number } {
+  let rx = Math.round(x);
+  let ry = Math.round(y);
+  let rz = Math.round(z);
+  const dx = Math.abs(rx - x);
+  const dy = Math.abs(ry - y);
+  const dz = Math.abs(rz - z);
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dy > dz) ry = -rx - rz;
+  else rz = -rx - ry;
+  return { q: rx, r: ry, s: rz };
+}
+
+/** axial → offset（Even-R）反变换 */
+function axialToOffset(q: number, r: number): { q: number; r: number } {
+  return { q: q + (r + (r & 1)) / 2, r };
+}
+
+/**
+ * 六角格直线插值（cube lerp + cube round）。
+ * 返回从 from 到 to（含两端）的直线经过的所有格的 offset 坐标序列。
+ * 与前端 frontend/src/utils/hexUtils.js 的 hexLineDraw 必须逐字节一致。
+ */
+export function hexLineDraw(
+  fromQ: number, fromR: number,
+  toQ: number, toR: number,
+): { q: number; r: number }[] {
+  const a = offsetToAxial(fromQ, fromR);
+  const b = offsetToAxial(toQ, toR);
+  const aCube = { q: a.q, r: a.r, s: -a.q - a.r };
+  const bCube = { q: b.q, r: b.r, s: -b.q - b.r };
+  const n = hexDistance(fromQ, fromR, toQ, toR);
+  if (n === 0) return [{ q: fromQ, r: fromR }];
+  const result: { q: number; r: number }[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const c = cubeRound(
+      aCube.q + (bCube.q - aCube.q) * t,
+      aCube.r + (bCube.r - aCube.r) * t,
+      aCube.s + (bCube.s - aCube.s) * t,
+    );
+    const off = axialToOffset(c.q, c.r);
+    result.push(off);
+  }
+  return result;
+}
+
+/** LoS 容差：中间格高程低于观察者视线高程多少以内仍视为不阻挡（俯瞰裕度） */
+export const LOS_TOLERANCE = 1;
+
+/**
+ * 服务端权威视线判定。
+ * @param fromQ/fromR 观察者坐标；toQ/toR 目标坐标
+ * @param grid Map<getHexKey, { elevation:number, blocks_sight:boolean }>
+ * @param opts.sightRange 观察者 sightRange（单位属性），超出即不可见
+ * @param opts.viewerEye 观察者所在格高程（默认取 grid 中该格 elevation）
+ * @returns true=视线可达（可见），false=被阻挡（不可见）
+ */
+export function computeLoS(
+  fromQ: number, fromR: number,
+  toQ: number, toR: number,
+  grid: Map<string, { elevation: number; blocks_sight: boolean }>,
+  opts: { sightRange?: number; viewerEye?: number } = {},
+): boolean {
+  const dist = hexDistance(fromQ, fromR, toQ, toR);
+  if (opts.sightRange != null && dist > opts.sightRange) return false;
+  const line = hexLineDraw(fromQ, fromR, toQ, toR);
+  const viewerEye = opts.viewerEye ?? grid.get(getHexKey(fromQ, fromR))?.elevation ?? 0;
+  // 逐格检查（跳过起点与终点本身）
+  for (let i = 1; i < line.length - 1; i++) {
+    const cell = grid.get(getHexKey(line[i].q, line[i].r));
+    if (!cell) continue;
+    if (cell.blocks_sight) return false;
+    // 高程阻挡：中间格明显高出观察者视线（超过容差）则遮断俯瞰
+    if (cell.elevation - viewerEye > LOS_TOLERANCE) return false;
+  }
+  return true;
 }

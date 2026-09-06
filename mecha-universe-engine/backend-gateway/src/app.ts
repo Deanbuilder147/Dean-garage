@@ -21,6 +21,7 @@ import mapRoutes from './routes/maps.js';
 import glossaryRoutes from './routes/glossary.js'
 import terrainRoutes from './routes/terrain.js';
 import assetGenRoutes from './routes/assetGen.js';
+import bugReportRoutes from './routes/bugReport.js';
 import { authenticate } from './middleware/auth.js';
 import { applySizeConfigOverride } from './unitSize.js';
 import { createRequire } from 'module';
@@ -125,6 +126,9 @@ export function createApp(): express.Application {
 
   // Phase AssetGen: AI 素材生成网关（玩家上传参考图 → Meowa → 落盘服务器）
   app.use('/api/asset-gen', assetGenRoutes);
+
+  // Phase 33: Bug 问题收集（提交免登录，管理汇总限 dominator）
+  app.use(bugReportRoutes);
 
   // Phase 29-P1: 试玩战役端点（游客可访问，无需 Token）
   app.get('/api/campaign/trial', (_req, res) => {

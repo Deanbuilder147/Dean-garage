@@ -23,12 +23,13 @@
  */
 
 // ───────────────────────── 枚举常量 ─────────────────────────
-const SKILL_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
+// 类型真相仅三种：melee（近战）/ ranged（远程）/ auto（自动化，含辅助/随动）。
+// automation/support 为 auto 的录入别名，special 已废除（爆炸/范围伤害由词条设定）。
+const SKILL_CATEGORIES = ['melee', 'ranged', 'auto'];
 const CATEGORY_LABELS = {
   melee: '近战',
   ranged: '远程',
-  automation: '自动化',
-  support: '辅助'
+  auto: '自动化'
 };
 
 const TARGET_SCOPES = ['enemy', 'ally', 'enemy_equipment', 'ally_equipment'];
@@ -209,8 +210,27 @@ function normalizeSkill(raw = {}) {
   let category = src.category;
   if (!SKILL_CATEGORIES.includes(category)) category = 'melee';
 
+  // 目标维度：优先新契约 src.target.type（前端编辑器输出 {type, filter}），
+  // 回退旧的 src.target_scope / src.target_filter，最后回退 enemy。
+  const TT_TO_SCOPE = {
+    SELF: { target_scope: 'self', target_filter: 'self' },
+    SINGLE_ENEMY: { target_scope: 'enemy', target_filter: 'enemy' },
+    AREA_ENEMY: { target_scope: 'enemy', target_filter: 'enemy' },
+    SINGLE_ALLY: { target_scope: 'ally', target_filter: 'ally' },
+    AREA_ALLY: { target_scope: 'ally', target_filter: 'ally' },
+    ALL_UNITS: { target_scope: 'all', target_filter: 'all' }
+  };
   let target_scope = src.target_scope;
   let target_filter = src.target_filter;
+  if (src.target && src.target.type) {
+    const mapped = TT_TO_SCOPE[src.target.type];
+    if (mapped) {
+      target_scope = mapped.target_scope;
+      target_filter = mapped.target_filter;
+    }
+    // 若旧式 filter 存在则保留其约束（unit_types/status）
+    if (src.target.filter) target_filter = target_filter; // 已与 scope 对齐，约束信息在 src.target.filter 透传
+  }
   if (!TARGET_SCOPES.includes(target_scope)) {
     target_scope = LEGACY_FILTER_TO_SCOPE[target_filter] || 'enemy';
   }
@@ -248,6 +268,11 @@ function normalizeSkill(raw = {}) {
     range_type,
     damage_kind: normalizeDamageKind(src.damage_kind),
     base_damage: num(src.base_damage, 0),
+    // 打击范围：从前端编辑器 obj.aoe {center, spread} 派生引擎消费的 aoe_radius / aoe_center
+    aoe_radius: num(src.aoe && src.aoe.spread, 0),
+    aoe_center: (src.aoe && src.aoe.center) || null,
+    // 地图炮六向图层（前端 obj.map_cannon.directions）透传，供引擎未来命中判定使用
+    map_cannon: src.map_cannon || null,
     status_effects: Array.isArray(src.status_effects) ? src.status_effects : [],
     action_type: src.action_type || 'attack',
     attack_stat: src.attack_stat || 'melee',
@@ -268,6 +293,26 @@ function normalizeSkill(raw = {}) {
     out.dice_type = dice.dice_type;
     out.dice_branches = dice.dice_branches;
   }
+
+  // 效果级作用对象：将每个 effect 的 target_type 规整为 (target_scope, target_filter)，
+  // 与词条级语义对齐，使 skillExecutor 谓语处理器可用 ef.target_scope 覆盖词条级落点。
+  if (Array.isArray(src.effects)) {
+    out.effects = src.effects.map((e) => {
+      const ef = Object.assign({}, e);
+      const tt = ef.target_type || (out.target_scope ? null : null);
+      const mapped = TT_TO_SCOPE[tt];
+      if (mapped) {
+        ef.target_scope = mapped.target_scope;
+        ef.target_filter = mapped.target_filter;
+      } else {
+        // 未配置效果级作用对象时回退词条级
+        ef.target_scope = ef.target_scope || out.target_scope;
+        ef.target_filter = ef.target_filter || out.target_filter;
+      }
+      return ef;
+    });
+  }
+
   return out;
 }
 

@@ -20,6 +20,12 @@ const {
   getNeighbors,
   getHexesInRange,
   getHexKey,
+  isTargetInRange,
+  isTargetInRangeCoord,
+  DEFAULT_RANGE_BY_CATEGORY,
+  DEFAULT_MIN_RANGE_BY_CATEGORY,
+  resolveSkillCategory,
+  getSkillRangeFields,
 } = require('@mecha/shared-kernel/hexMath');
 
 module.exports = {
@@ -28,4 +34,11 @@ module.exports = {
   hexDistanceCoord,
   getNeighbors,
   getHexesInRange,
+  isTargetInRange,
+  isTargetInRangeCoord,
+  // ★ Phase 31 治本：射程真相源统一经 shared-kernel，combat-core 禁止本地副本（陷阱2）
+  DEFAULT_RANGE_BY_CATEGORY,
+  DEFAULT_MIN_RANGE_BY_CATEGORY,
+  resolveSkillCategory,
+  getSkillRangeFields,
 };

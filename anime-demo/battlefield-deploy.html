@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>战场部署 · 真实坐标重合演示</title>
+<style>
+  :root { --bg:#0b0f1a; --accent:#36c5f0; --accent-2:#ffb000; --txt:#e9eef7; --muted:#8294b4; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg);
+    color:var(--txt); font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+
+  /* ===== 第 1 层：真实战场（尖顶六边形，pointyTopCenter 坐标，与引擎一致） ===== */
+  #battlefield { position:relative; height:100vh; overflow:hidden; padding:24px;
+    background:
+      radial-gradient(900px 600px at 80% 0%, #14233d 0%, transparent 60%),
+      var(--bg); }
+  .bf-bar { display:flex; align-items:center; justify-content:space-between; }
+  .bf-bar h2 { margin:0; font-size:16px; letter-spacing:2px; color:var(--muted); font-weight:600; }
+  .bf-tag { font-size:12px; color:var(--accent-2); border:1px solid rgba(255,176,0,.4);
+    padding:4px 10px; border-radius:7px; }
+  /* 与部署层用完全相同的容器尺寸与居中 → 像素级重合 */
+  #bfGrid { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+
+  /* ===== 第 2 层：部署幕布（同坐标蓝格） ===== */
+  #deploy-overlay { position:fixed; inset:0; z-index:50;
+    background:radial-gradient(1200px 700px at 50% -10%, #16233d 0%, var(--bg) 55%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; }
+  #deploy-overlay.hidden { pointer-events:none; display:none; }
+  .ov-title { font-size:18px; letter-spacing:2px; color:var(--muted); font-weight:600; margin:0; }
+  .stage { position:relative; }
+  #grid { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+
+  /* 所有格子共用：64×72 尖顶六边形，clip-path 与引擎 R=36 一致 */
+  .hex { position:absolute; width:64px; height:72px; opacity:0; will-change:transform,opacity;
+    clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); }
+  /* 部署层：不再用纯蓝填充，改用地形色（由地形类提供背景），
+     仅保留蓝色发光描边表示「部署中」状态 */
+  .hex.deploy { box-shadow:inset 0 0 0 2px rgba(54,197,240,.55), 0 0 12px rgba(54,197,240,.25); }
+  /* 真实地形格（颜色取自 UNIVERSAL_TERRAIN_MAP） */
+  .hex.plain    { background:#7a9b4f; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  .hex.mountain { background:#9f8e78; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  .hex.water    { background:#03a9f4; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  .hex.forest   { background:#2e7d32; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  .hex.spawn    { background:linear-gradient(135deg,#ffb000,#ff5d73);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.4); }
+  .unit { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:15px; box-shadow:0 3px 8px rgba(0,0,0,.5); }
+  .unit.blue { background:radial-gradient(circle at 35% 30%, #6fe0ff, #1f8fc0); }
+  .unit.red  { background:radial-gradient(circle at 35% 30%, #ff8a9b, #c0334a); }
+
+  .center-label { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    font-size:14px; font-weight:700; color:#fff; opacity:0; pointer-events:none; text-align:center; }
+  .panel { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+  .btn { background:rgba(54,197,240,.1); border:1px solid rgba(54,197,240,.4); color:#cdeefb;
+    padding:9px 16px; border-radius:9px; font-size:13px; cursor:pointer; }
+  .btn:hover { background:rgba(54,197,240,.22); }
+  .btn.alt { background:rgba(255,176,0,.12); border-color:rgba(255,176,0,.45); color:#ffe2a8; }
+  .btn.chk { background:rgba(120,255,180,.1); border-color:rgba(120,255,180,.45); color:#bdfce0; }
+  .hint { font-size:12px; color:var(--muted); max-width:600px; text-align:center; line-height:1.7; }
+  .back { color:var(--muted); font-size:12px; text-decoration:none; }
+  .back:hover { color:var(--accent); }
+</style>
+</head>
+<body>
+
+  <!-- ① 真实战场：尖顶六边形地形（pointyTopCenter 坐标，与 HexGridCanvasEngine 同公式） -->
+  <div id="battlefield">
+    <div class="bf-bar">
+      <h2>真实战场 · 尖顶六边形地图</h2>
+      <span class="bf-tag">坐标 = hexUtils.pointyTopCenter（R=36, spacing=1）</span>
+    </div>
+    <div id="bfGrid"></div>
+  </div>
+
+  <!-- ② 部署幕布：同坐标蓝格，盖在地形之上 -->
+  <div id="deploy-overlay">
+    <a class="back" href="index.html" style="position:fixed;left:20px;top:18px">← 效果库</a>
+    <h1 class="ov-title">战场部署中…</h1>
+    <div class="stage" id="stage">
+      <div id="grid"></div>
+      <div class="center-label" id="label">部署完毕<br/>点击「开始战斗」</div>
+    </div>
+    <div class="panel">
+      <button class="btn" id="replay">↺ 重新部署</button>
+      <button class="btn chk" id="align">对齐检查（半透明）</button>
+      <button class="btn alt" id="start">开始战斗（揭开真实战场）</button>
+    </div>
+    <div class="hint">部署时每格<strong>直接显示自己对应的地形色</strong>（平原绿 / 山地灰褐 / 水域蓝 / 森林深绿 / 出生点黄），与下方真实战场由<strong>同一个 pointyTopCenter 函数</strong>排布（尖顶六边形 / Even-R / R=36），位置像素级重合。蓝色描边表示「部署中」。点「对齐检查」看格子精准压在地形格上；点「开始战斗」幕布淡出，露出原位不动的真实战场。</div>
+  </div>
+
+<script src="anime.min.js"></script>
+<script>
+/* ===== 从 hexUtils.js 逐字移植的坐标真相（保证与真实战场一致） ===== */
+const HEX_WIDTH = 64, HEX_HEIGHT = 72, HEX_RADIUS = 36;
+const SPACING_H = 1.0, SPACING_V = 1.0;
+// 尖顶 Even-R Offset：x = R·√3·q (+ 偶数行 R·√3/2)，y = 1.5·R·r
+function pointyTopCenter(q, r, size, sh = SPACING_H, sv = SPACING_V) {
+  let x = size * Math.sqrt(3) * q * sh;
+  if (r % 2 === 0) x += (size * Math.sqrt(3) / 2) * sh;
+  const y = size * 1.5 * r * sv;
+  return { x, y };
+}
+
+const COLS = 7, ROWS = 6;
+
+// 演示用真实地图地形分布（key = "q,r"，地形 id 取自 UNIVERSAL_TERRAIN_MAP）
+function terrainAt(q, r) {
+  if (q === 3 && r === 3) return 'spawn';
+  if ((q + r) % 7 === 0) return 'water';
+  if ((q === 1 && r === 0) || (q === 5 && r === 5)) return 'mountain';
+  if ((q === 2 && r === 4) || (q === 4 && r === 1)) return 'forest';
+  return 'plain';
+}
+const UNIT_AT = { '3,3': 'hq', '1,2': 'blue', '5,3': 'red' };
+
+/* ---- 预计算所有格位的容器坐标（含全局偏移，使最小左/上边 = 0） ---- */
+const cells = [];
+let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+for (let r = 0; r < ROWS; r++) {
+  for (let q = 0; q < COLS; q++) {
+    const p = pointyTopCenter(q, r, HEX_RADIUS);
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+}
+const offX = -minX + HEX_WIDTH / 2;
+const offY = -minY + HEX_HEIGHT / 2;
+const GW = (maxX - minX) + HEX_WIDTH;
+const GH = (maxY - minY) + HEX_HEIGHT;
+const CX = GW / 2, CY = GH / 2;   // 容器中心（飞入动画起点）
+
+for (let r = 0; r < ROWS; r++) {
+  for (let q = 0; q < COLS; q++) {
+    const p = pointyTopCenter(q, r, HEX_RADIUS);
+    const cx = p.x + offX, cy = p.y + offY;   // 容器内中心坐标
+    cells.push({
+      q, r,
+      left: cx - HEX_WIDTH / 2,
+      top: cy - HEX_HEIGHT / 2,
+      dx: CX - cx, dy: CY - cy,               // 飞入位移
+      dist: Math.hypot(CX - cx, CY - cy),
+      terrain: terrainAt(q, r),
+      unit: UNIT_AT[q + ',' + r] || null
+    });
+  }
+}
+
+/* ---------- ① 渲染真实战场（地形层，常驻） ---------- */
+(function buildBattlefield() {
+  const g = document.getElementById('bfGrid');
+  g.style.width = GW + 'px';
+  g.style.height = GH + 'px';
+  for (const c of cells) {
+    const el = document.createElement('div');
+    el.className = 'hex ' + c.terrain;
+    el.style.left = c.left + 'px';
+    el.style.top = c.top + 'px';
+    el.style.opacity = 1;
+    if (c.unit) {
+      const u = document.createElement('div');
+      u.className = 'unit ' + (c.unit === 'hq' ? 'blue' : c.unit);
+      u.textContent = c.unit === 'hq' ? '★' : (c.unit === 'blue' ? '🛡️' : '⚔️');
+      el.appendChild(u);
+    }
+    g.appendChild(el);
+  }
+})();
+
+/* ---------- ② 部署幕布动画（同坐标蓝格） ---------- */
+const overlay = document.getElementById('deploy-overlay');
+const grid = document.getElementById('grid');
+grid.style.width = GW + 'px';
+grid.style.height = GH + 'px';
+
+function buildDeploy() {
+  grid.innerHTML = '';
+  const hexes = [];
+  for (const c of cells) {
+    const h = document.createElement('div');
+    h.className = 'hex ' + c.terrain + ' deploy';
+    h.style.left = c.left + 'px';
+    h.style.top = c.top + 'px';
+    grid.appendChild(h);
+    hexes.push({ el: h, dx: c.dx, dy: c.dy, delay: c.dist * 7 });
+  }
+  return hexes;
+}
+
+function deploy() {
+  overlay.classList.remove('hidden');
+  overlay.style.display = 'flex';
+  overlay.style.opacity = 1;
+  const hexes = buildDeploy();
+  anime.set('#label', { opacity: 0 });
+  anime({
+    targets: hexes.map(h => h.el),
+    translateX: (el, i) => [hexes[i].dx, 0],
+    translateY: (el, i) => [hexes[i].dy, 0],
+    scale: [0, 1],
+    rotate: [200, 0],
+    opacity: [0, 1],
+    duration: 700,
+    easing: 'easeOutBack',
+    delay: (el, i) => hexes[i].delay
+  });
+  anime({ targets: '#label', opacity: [0, 1], delay: 1500, duration: 600, easing: 'easeOutQuad' });
+}
+
+document.getElementById('replay').addEventListener('click', deploy);
+document.getElementById('align').addEventListener('click', () => {
+  overlay.classList.remove('hidden');
+  overlay.style.display = 'flex';
+  overlay.style.opacity = 0.45;   // 半透明，露出下方地形格核对重合
+});
+document.getElementById('start').addEventListener('click', () => {
+  anime({ targets: '#deploy-overlay', opacity: [overlay.style.opacity || 1, 0], duration: 700,
+    easing: 'easeInQuad',
+    complete: () => { overlay.classList.add('hidden'); overlay.style.display = 'none'; } });
+});
+deploy();
+</script>
+</body>
+</html>

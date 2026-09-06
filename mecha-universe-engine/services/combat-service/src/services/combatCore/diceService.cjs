@@ -27,6 +27,11 @@ const DEFAULT_DICE_CONFIG = {
   availableDiceTypes: [4, 6, 8, 10, 12, 20],
   // 手动摇骰默认参数
   manualRollDefault: { successLine: 4, bonusDamage: 0, enabled: false },
+  // 全局命中判定（2026-08-07 新增）：统一「掷骰是否算命中」的真相源。
+  //   enabled: 是否启用骰点命中判定（关 → 一律视为命中，攻击必生效）
+  //   successLine: 命中成功线（骰点 >= 此值算命中，默认 4，即 1d6 掷出 4/5/6 命中）
+  // 该段是攻击/技能结算命中判定的唯一全局入口，取代散落在 combat.ts / skillExecutor 的硬编码 4。
+  hitCheck: { enabled: true, successLine: 4 },
 };
 
 /**
@@ -48,8 +53,57 @@ function parseDiceExpr(expr) {
   return { count: 1, sides: 6 };
 }
 
+/**
+ * 确定性随机源（隐患3防御 · Week1 预埋）
+ * 默认 = 裸 Math.random（向后兼容，旧局不回溯）。
+ * 调用 setSeed(battleId, round, step) 后切换为 Mulberry32 PRNG，
+ * 使同一 (battleId, round, step) 必产出相同序列 → 战报可重放。
+ */
+let _currentRng = Math.random;
+let _seeded = false;
+
+/**
+ * Mulberry32：32位种子伪随机，返回 [0,1) 浮点。
+ * 轻量、无依赖、跨平台确定性一致。
+ */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 字符串/数字 → 32位整数种子（FNV-1a 简化） */
+function hashSeed(str) {
+  const s = String(str);
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * 设置确定性随机种子（合并方案 7.4）。
+ * 不传参 → 复位为默认 Math.random（可用于测试/回退）。
+ */
+function setSeed(battleId, round = 1, step = 0) {
+  if (battleId == null) {
+    _currentRng = Math.random;
+    _seeded = false;
+    return;
+  }
+  _currentRng = mulberry32(hashSeed(`${battleId}-${round}-${step}`));
+  _seeded = true;
+}
+
 function rollOnce(sides) {
-  return Math.floor(Math.random() * sides) + 1;
+  return Math.floor(_currentRng() * sides) + 1;
 }
 
 /**
@@ -80,6 +134,11 @@ function mergeDiceConfig(def, over) {
         typeof over.manualRollDefault?.enabled === 'boolean'
           ? over.manualRollDefault.enabled
           : def.manualRollDefault.enabled,
+    },
+    hitCheck: {
+      enabled: typeof over.hitCheck?.enabled === 'boolean' ? over.hitCheck.enabled : def.hitCheck.enabled,
+      successLine:
+        typeof over.hitCheck?.successLine === 'number' ? over.hitCheck.successLine : def.hitCheck.successLine,
     },
   };
 }
@@ -168,9 +227,13 @@ class DiceService {
     const lo = Math.floor(min);
     const hi = Math.floor(max);
     if (hi < lo) return lo;
-    return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+    return Math.floor(_currentRng() * (hi - lo + 1)) + lo;
   }
 }
 
 // 单例：全进程共享同一份 config（combat.ts 与所有 .cjs 通过同一 require 缓存取到同一实例）
 module.exports = new DiceService();
+
+// 暴露确定性随机入口（合并方案 7.4 · Week1 预埋 seed 管道）
+module.exports.setSeed = setSeed;
+module.exports.isSeeded = () => _seeded;

@@ -76,6 +76,9 @@ export const EXCEL_TEMPLATE: ExcelTemplate = {
         { key: 'name', cell: 'C2', label: '机体番号', required: true },
         { key: 'codename', cell: 'F2', label: '行动代号' },
         { key: 'faction', cell: 'I2', label: '所属阵营', type: 'select', options: ['earth', 'balon', 'maxion'] },
+        // ★ 差异3修复：总点数必须从基本信息区 C3 读取（对齐 hangar-service 旧模板 excel-template.js:15），
+        //   否则 parsed.basic.totalPoints 恒为 null → 落库 total_points 恒为 0。
+        { key: 'totalPoints', cell: 'C3', label: '总点数', type: 'number' },
       ],
     },
     units: {

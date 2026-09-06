@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>词条库分镜原型 · 整页+镜头取景（直接复用 SVG 组件）</title>
+<style>
+  :root{
+    --amber:#e0b02c; --amber-soft:#f0c94a; --deep:#021838;
+    --panel:rgba(8,22,52,.72); --line:rgba(224,176,44,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:radial-gradient(1200px 700px at 50% -10%, #07204a, #020a1c 70%);color:#dfe8ff;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  #app{display:flex;flex-direction:column;height:100%}
+  header{padding:14px 22px;display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--line)}
+  .brand{font-weight:700;letter-spacing:.12em;color:var(--amber)}
+  .steps{display:flex;gap:10px}
+  .step{padding:6px 14px;border:1px solid var(--line);border-radius:999px;color:#9fb3da;font-size:13px;cursor:pointer;transition:.2s}
+  .step.active{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:700}
+  .step.done{color:var(--amber)}
+  .mini{display:flex;gap:8px;align-items:center;margin-left:auto;font-size:11px;color:#8fa6cf}
+  .mini .lab{opacity:.7}
+  .mini .lens{width:66px;height:12px;border:1px solid var(--line);border-radius:4px;cursor:pointer;transition:.2s;position:relative}
+  .mini .lens.on{background:var(--amber);border-color:var(--amber)}
+  .cap{color:#7e93bb;font-size:12px;padding:8px 22px 0}
+  #stageWrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:14px 18px}
+  #stage{width:min(96vw,1180px);height:auto;max-height:82vh;filter:drop-shadow(0 18px 40px rgba(0,0,0,.5));touch-action:none}
+  #stage *{touch-action:none}
+  .fo{position:absolute;inset:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;backdrop-filter:blur(4px);font-size:13px;height:100%}
+  .card h4{margin:0 0 10px;color:var(--amber);font-size:13px;letter-spacing:.08em}
+  .list{display:flex;flex-direction:column;gap:8px;max-height:56vh;overflow:auto}
+  .item{padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:rgba(224,176,44,.06);display:flex;justify-content:space-between;align-items:center}
+  .item:hover{border-color:var(--amber);background:rgba(224,176,44,.14)}
+  .item .k{color:#8fa6cf;font-size:11px}
+  .seg{color:#8fa6cf;font-size:11px;margin-bottom:6px}
+  .pill{display:inline-block;padding:4px 11px;border:1px solid var(--line);border-radius:999px;margin:3px;cursor:pointer;color:#cfe;font-size:12px}
+  .pill.on{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:700}
+  .edbox{display:flex;flex-direction:column;gap:10px}
+  textarea,.inp{width:100%;background:#06122e;border:1px solid var(--line);color:#dfe8ff;border-radius:8px;padding:8px 10px;font:inherit}
+  .hint{color:#7e93bb;font-size:11px}
+  .segbar{display:flex;gap:6px;margin-bottom:10px}
+  .segbar .segbtn{flex:1;text-align:center;padding:8px 4px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:12px;color:#bcd}
+  .segbar .segbtn.on{background:var(--amber);color:#1a1206;font-weight:700;border-color:var(--amber)}
+  .dragtip{color:#7e93bb;font-size:11px;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">词条库 · 整页 + 镜头</div>
+    <div class="steps" id="steps">
+      <div class="step active" data-l="镜头1_词条类型_">① 词条类型</div>
+      <div class="step" data-l="镜头2_词条选择_">② 词条选择</div>
+      <div class="step" data-l="镜头3_词条编辑_">③ 词条编辑</div>
+    </div>
+    <div class="mini"><span class="lab">整页镜头：</span><span id="mini"></span></div>
+  </header>
+  <div class="cap">整张 SVG = 一整张「词条库大页面」；上方 ①/②/③ 是三台相机取景框，分别对准页面的 词条类型区 / 词条选择区 / 词条编辑区。切换镜头 = 平移相机看同页不同部位。</div>
+  <div id="stageWrap"><svg id="stage" xmlns="http://www.w3.org/2000/svg"></svg></div>
+</div>
+<script>
+const SVGURL='./词条库分镜.svg';
+const SVGNS='http://www.w3.org/2000/svg';
+const TYPE_MAP={'技能词条':'skill','特殊词条':'special','阵营词条':'faction','其它词条':'other'};
+const MOCK={skill:['突袭斩击','力场格挡','过载射击','紧急回避','蓄能打击','破甲突刺','连击协议','护盾反震'],special:['相位跃迁','湮灭脉冲','时空褶皱','量子纠缠','奇点坍缩','虚空回响'],faction:['军团号令','协同立场','阵列压制','战旗激励','集结冲锋','羁绊链接'],other:['环境改造','补给协议','地形重构','天气干预','陷阱布置','信标投放']};
+const SEG_TITLE={when:'WHEN 触发',if:'IF 条件',roll:'ROLL 检定',do:'DO 执行',effect:'AFTER 后效',cost:'COST 消耗'};
+const SEGS=['when','if','roll','do','effect','cost'];
+let svg, entryType='skill', currentKey='';
+const lensIds=['镜头1_词条类型_','镜头2_词条选择_','镜头3_词条编辑_'];
+const sel=(...ids)=>'#'+ids.map(i=>CSS.escape(i)).join(' #');
+const q=s=>svg.querySelector(s);
+
+/* 坐标/变换辅助 */
+function toSvg(e){const pt=svg.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;return pt.matrixTransform(svg.getScreenCTM().inverse());}
+function getT(g){const m=/translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(g.style.transform||'');return m?{x:+m[1],y:+m[2]}:{x:0,y:0};}
+function setT(g,x,y){g.style.transform=`translate(${x}px,${y}px)`;}
+function baseCenter(g){const b=g.getBBox();return {x:b.x+b.width/2,y:b.y+b.height/2};}
+function centerNow(g){const c=baseCenter(g),t=getT(g);return {x:c.x+t.x,y:c.y+t.y};}
+function inBox(c,target){const b=target.getBBox();return c.x>=b.x&&c.x<=b.x+b.width&&c.y>=b.y&&c.y<=b.y+b.height;}
+function cycleNames(type,n){const base=MOCK[type]||['未命名词条'];const a=[];for(let i=0;i<n;i++)a.push(base[i%base.length]);return a;}
+
+(async function(){
+  const txt=await (await fetch(SVGURL)).text();
+  const doc=new DOMParser().parseFromString(txt,'image/svg+xml');
+  svg=doc.documentElement;
+  // 去掉三个镜头的大底框（红/绿/蓝，仅用于区分镜头，界面不显示）
+  svg.querySelectorAll('rect').forEach(r=>{
+    const w=+r.getAttribute('width')||0,h=+r.getAttribute('height')||0;
+    if(w>=1200&&h>=780) r.remove();
+  });
+  svg.setAttribute('width','100%'); svg.setAttribute('height','100%');
+  document.getElementById('stageWrap').appendChild(svg);
+  const old=document.getElementById('stage'); if(old) old.remove();
+  svg.id='stage';
+  // 镜头1 改为「环形轮播 + 点击选中」（见 buildLens1），不再需要拖放黄框
+  document.querySelectorAll('#steps .step').forEach(b=>b.onclick=()=>showLens(b.dataset.l));
+  buildMini();
+  buildLens1();
+  showLens('镜头1_词条类型_');
+})();
+
+function buildMini(){
+  const mini=document.getElementById('mini');
+  lensIds.forEach(l=>{const d=document.createElement('div');d.className='lens';d.dataset.l=l;d.title=l;d.onclick=()=>showLens(l);mini.appendChild(d);});
+}
+
+/* 镜头 = 相机取景：平移 viewBox 看同一张大页面的不同部位 */
+function showLens(id){
+  lensIds.forEach(l=>{ const g=q(sel(l)); if(g) g.style.display=(l===id?'':'none'); });
+  const g=q(sel(id));
+  const bb=g.getBBox();
+  svg.setAttribute('viewBox',`${bb.x-12} ${bb.y-12} ${bb.width+24} ${bb.height+24}`);
+  document.querySelectorAll('#steps .step').forEach(b=>{
+    const i=lensIds.indexOf(b.dataset.l);
+    b.classList.toggle('active',b.dataset.l===id);
+    b.classList.toggle('done', i<lensIds.indexOf(id));
+  });
+  document.querySelectorAll('#mini .lens').forEach(b=>b.classList.toggle('on',b.dataset.l===id));
+  if(id==='镜头2_词条选择_') buildLens2();
+  if(id==='镜头3_词条编辑_') buildLens3();
+}
+
+function addFO(group,x,y,w,h,html){
+  const fo=document.createElementNS(SVGNS,'foreignObject');
+  fo.setAttribute('x',x);fo.setAttribute('y',y);fo.setAttribute('width',w);fo.setAttribute('height',h);
+  fo.innerHTML=html; group.appendChild(fo); return fo;
+}
+
+/* 镜头1：四个类型六边形排成环形轮播，缓慢自转（轮播感）；可拖动旋转，点击任一类型即选中并平移到镜头2 */
+const TYPE_KEYS=['skill','special','faction','other'];
+let _lens1Built=false;
+function buildLens1(){
+  if(_lens1Built) return; _lens1Built=true;
+  const root=q(sel('镜头1_词条类型_'));
+  const md=q(sel('镜头1_词条类型_','运动方向')); if(md) md.style.display='none'; // 拖放隐喻已改为环形轮播+点击
+  const items=[...root.querySelectorAll('g[id$="词条"]')];          // 技能词条/特殊词条/阵营词条/其它词条（复用原组件）
+  if(items.length<4) return;
+  const cx=585, cy=420, R=180;
+  const ring=document.createElementNS(SVGNS,'g'); ring.setAttribute('id','typeRing');
+  items.forEach(it=>ring.appendChild(it)); root.appendChild(ring);
+  const info=items.map((el,i)=>{
+    const b=el.getBBox(); const cxp=b.x+b.width/2, cyp=b.y+b.height/2;
+    const th=(-90+i*90)*Math.PI/180; const px=cx+R*Math.cos(th), py=cy+R*Math.sin(th);
+    return {el,i,cxp,cyp,dx:px-cxp,dy:py-cyp,bw:b.width};
+  });
+  const TARGET=0.7*Math.max(...info.map(o=>o.bw));   // 以最大者为基准，统一四个六边形原始大小（整体缩小30%）
+  info.forEach(o=>o.ns=TARGET/o.bw);
+  let angle=0, dragging=false, lastA=0, moved=0;
+  const MIN=0.68, MAX=1.34;            // 远近缩放范围：最远(顶部≈11点)≈最小，最近(6点)≈最大
+  function frame(){
+    ring.setAttribute('transform',`rotate(${angle} ${cx} ${cy})`);
+    info.forEach(o=>{
+      const phi=(-90+o.i*90)+angle;                 // 该六边形当前世界角度（SVG 屏幕坐标）
+      const t=(Math.sin(phi*Math.PI/180)+1)/2;      // 0=最远(顶部) 1=最近(6点)
+      const sc=o.ns*(MIN+(MAX-MIN)*t);
+      const op=0.5+0.5*t;
+      o.el.setAttribute('transform',`translate(${o.dx} ${o.dy}) rotate(${-angle} ${o.cxp} ${o.cyp}) translate(${o.cxp} ${o.cyp}) scale(${sc}) translate(${-o.cxp} ${-o.cyp})`);
+      o.el.style.opacity=op.toFixed(3); o.el.style.cursor='pointer';
+    });
+    if(!dragging) angle=(angle+0.25)%360;
+    requestAnimationFrame(frame);
+  }
+  info.forEach(o=>{
+    o.el.addEventListener('pointerdown',e=>{dragging=true;moved=0;const p=toSvg(e);lastA=Math.atan2(p.y-cy,p.x-cx)*180/Math.PI;e.preventDefault();});
+    o.el.addEventListener('click',()=>{ if(moved>6) return; selectType(o.i); });
+  });
+  window.addEventListener('pointermove',e=>{
+    if(!dragging) return; const p=toSvg(e); const a=Math.atan2(p.y-cy,p.x-cx)*180/Math.PI;
+    let d=a-lastA; if(d>180)d-=360; if(d<-180)d+=360; angle=(angle+d)%360; lastA=a; moved+=Math.abs(d);
+  });
+  window.addEventListener('pointerup',()=>{ dragging=false; });
+  addFO(root, cx-140, cy+R+12, 280, 22,
+    `<div class="fo" style="text-align:center;color:#cfe0ff;font-size:12px;pointer-events:none">环形轮播 · 拖动可旋转 · 点击类型进入下一镜</div>`);
+  frame();
+}
+function selectType(i){ entryType=TYPE_KEYS[i]; showLens('镜头2_词条选择_'); }
+
+/* 镜头2：白色六边形网格 = 该类型下的所有词条，直接复用为可点列表，选中进镜头3 */
+function buildLens2(){
+  const g=q(sel('镜头2_词条选择_'));
+  g.querySelectorAll('foreignObject').forEach(f=>f.remove());
+  const hexes=[...g.querySelectorAll('polygon.cls-5')];
+  const names=cycleNames(entryType, hexes.length);
+  hexes.forEach((h,i)=>{
+    h.style.cursor='pointer';
+    const bb=h.getBBox();
+    const fo=addFO(g, bb.x, bb.y+bb.height/2-9, bb.width, 20,
+      `<div class="fo" style="display:flex;align-items:center;justify-content:center;pointer-events:none"><span style="color:#eaf1ff;font-size:10.5px;text-shadow:0 1px 3px #000">${names[i]}</span></div>`);
+    fo.setAttribute('pointer-events','none');
+    h.onclick=()=>{ currentKey=names[i]; showLens('镜头3_词条编辑_'); };
+  });
+}
+
+/* 镜头3：六段导航条 + 编辑段落大框 + 基础属性卡 */
+function buildLens3(){
+  const g=q(sel('镜头3_词条编辑_'));
+  g.querySelectorAll('foreignObject').forEach(f=>f.remove());
+  SEGS.forEach(s=>{
+    const el=q(sel(s)); if(!el) return;
+    el.style.cursor='pointer';
+    el.onclick=()=>editSegment(s);
+  });
+  addFO(q(sel('词条明细')), 1988, 196, 164, 124,
+    `<div class="fo"><div class="card"><h4>基础属性</h4>
+      <div class="seg">词条形态</div>
+      <span class="pill on">近战</span><span class="pill">远程</span><span class="pill">自动化</span>
+    </div></div>`);
+  document.querySelectorAll('#词条明细 .pill').forEach(p=>p.onclick=()=>{
+    document.querySelectorAll('#词条明细 .pill').forEach(x=>x.classList.remove('on')); p.classList.add('on');
+  });
+  editSegment('when');
+}
+let curSeg='when';
+function editSegment(s){
+  curSeg=s;
+  SEGS.forEach(x=>{ const el=q(sel(x)); if(el) el.setAttribute('opacity', x===s?'1':'.5'); });
+  const g=q(sel('镜头3_词条编辑_'));
+  const old=g.querySelector('#segFO'); if(old) old.remove();
+  const fo=document.createElementNS(SVGNS,'foreignObject');
+  fo.id='segFO'; fo.setAttribute('x',2278);fo.setAttribute('y',322);fo.setAttribute('width',268);fo.setAttribute('height',230);
+  fo.innerHTML=`<div class="fo"><div class="card">
+    <h4>${SEG_TITLE[s]}</h4>
+    <div class="segbar">${SEGS.map(x=>`<div class="segbtn ${x===s?'on':''}" data-s="${x}">${x}</div>`).join('')}</div>
+    <div class="edbox">
+      <input class="inp" placeholder="原子 / 描述…"/>
+      <textarea rows="4" placeholder="在「编辑段落」大框内编辑该段内容…"></textarea>
+      <div class="hint">当前编辑：${s}</div>
+    </div></div></div>`;
+  g.appendChild(fo);
+  fo.querySelectorAll('.segbtn').forEach(b=>b.onclick=()=>editSegment(b.dataset.s));
+}
+</script>
+</body>
+</html>

@@ -21,7 +21,7 @@ const THUNDER_MAGNET_SKILL = {
   label: '雷磁蓄能·绝地轰击',
   action_type: 'attack',
   attack_stat: 'ranged',
-  category: 'special',
+  category: 'ranged',
   damage_kind: 'beam',
   target_filter: 'enemy',
   cast_range: 5,

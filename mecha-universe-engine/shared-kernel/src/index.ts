@@ -72,4 +72,20 @@ export {
   getNeighbors,
   getHexesInRange,
   getHexKey,
+  isTargetInRange,
+  isTargetInRangeCoord,
+  DEFAULT_RANGE_BY_CATEGORY,
+  DEFAULT_MIN_RANGE_BY_CATEGORY,
+  resolveSkillCategory,
+  getSkillRangeFields,
+  type SkillRangeFields,
+  computeAOECells,
+  type AoeShape,
+  rotateShadowEast,
 } from './hexMath.js';
+
+// Phase 33-Contract: 强契约（Zod 运行时校验 + 统一诊断通道）
+export * from './contracts/index.js';
+
+// Phase A: 词表与契约统一 —— 战斗词条枚举唯一真相源
+export * from './enums.js';

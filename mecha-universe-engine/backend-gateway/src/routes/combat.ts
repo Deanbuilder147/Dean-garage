@@ -14,6 +14,9 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validateBody.js';
+import { BattlefieldMapContract } from '@mecha/shared-kernel';
+import { z } from 'zod';
 import { get } from '../db/sqlite.js';
 import {
   createBattleUnit,
@@ -24,6 +27,7 @@ import {
   markStandbyIfDone,
   resolveRole,
   getRoleUnits,
+  isUnitAlive,
   TURN_ROLES,
   LEGACY_FACTION_TO_ROLE,
 } from '../battleStateFactory.js';
@@ -36,7 +40,8 @@ import {
   reconcileBattle,
 } from '../combatSnap.js';
 import type { BattleState, BattleUnit, HexCoord, UnitStats } from '@mecha/shared-kernel';
-import { getSkillExecutor, getEffectExecutor } from '../combatBridge.js';
+import { getSkillRangeFields, resolveSkillCategory } from '@mecha/shared-kernel';
+import { getSkillExecutor, getEffectExecutor, getEquipmentDurabilityManager } from '../combatBridge.js';
 import { logger } from '../utils/logger.js';
 import { pickUnitId } from '../utils/combatId.js';
 import { sanitizeSkillContext } from '../utils/skillDto.js';
@@ -44,25 +49,42 @@ import { createRequire } from 'module';
 
 // H1~H7 反应钩子注册表与联防纯函数（F 基础：文件隔离，零侵入主链路）
 const nodeRequire = createRequire(import.meta.url);
-const { fire: fireReaction } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/index.cjs');
+const { fire: fireReaction, setGatewayTriggers, listTriggers } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/index.cjs');
 const { isCollinearBlockade } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/zoc_block.cjs');
 const { resolveDuel, duelCheck } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/duel.cjs');
 const { resolveSnatch } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/steal.cjs');
 const { resolveCover } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/cover.cjs');
 const { pickupAirdrops } = nodeRequire('../../services/combat-service/src/services/combatCore/reactionHandlers/airdrop_drop.cjs');
 const BuffManager = nodeRequire('../../services/combat-service/src/services/combatCore/buffManager.cjs');
+const atomRegistry = nodeRequire('../../services/combat-service/src/services/combatCore/atomRegistry.cjs');
+
+// ── Phase B：事件总线归一 ──────────────────────────────────────
+// 网关层面"官方点火清单"。任何 register(trigger) 不在该清单内 → 启动自检告警（死代码旁路防护）。
+// 新增接线点时务必同步登记到此清单，否则自检会告警。
+const GATEWAY_KNOWN_TRIGGERS = [
+  'on_attacked', 'on_attack_start', 'on_target_selected', 'on_damage_dealt',
+  'on_kill', 'on_round_start',
+  // ── RESERVED 预留埋点（Phase 8 清单收口核查）：以下 trigger 已登记于清单，
+  //    但当前 combat.ts 无 fireReaction 点火点、reactionHandlers 也无 register。
+  //    保留以允许未来接线时通过自检；请勿误读为「已接通」。
+  'on_counterattack', 'on_reaction', 'on_after_skill_resolve', 'on_phase',
+  'on_move', 'on_faction_skill', 'on_visibility_changed',
+  'on_move_path', 'on_item_pickup', 'on_turn_end', 'pre_damage_apply',
+  'on_action_order_changed', 'on_unit_turn_start', 'post_melee_damage', 'on_ally_attacked',
+  'on_battle_start', // ★ Phase 7.3：补登 combat.ts 第3171行点火点，消除自检「不在点火清单」误告警
+];
+setGatewayTriggers(GATEWAY_KNOWN_TRIGGERS);
+if (process.env.COMBAT_REACTION_DEBUG === '1') {
+  console.log(`[combat.ts] 事件总线自检：已登记点火点 ${GATEWAY_KNOWN_TRIGGERS.length} 个；反应器已注册 ${listTriggers().length} 个: ${listTriggers().join(', ')}`);
+}
 const { evaluateVictory } = nodeRequire('../../services/combat-service/src/services/combatCore/victoryChecker.cjs');
 const { getHexKey } = nodeRequire('../../services/combat-service/src/services/combatCore/hexKey.cjs');
 const DiceService = nodeRequire('../../services/combat-service/src/services/combatCore/diceService.cjs');
-const { getGlossaryConfig, saveGlossaryConfig } = nodeRequire('../../services/combat-service/src/services/combatCore/configLoader.cjs');
+// ★ Week3：每战局掷骰 nonce 计数器（确定性种子第三步），保证同战局不同攻击步骤的掷骰序列可复现且互不串扰。
+const _battleDiceNonce = new Map<string, number>();
+const { getGlossaryConfig, saveGlossaryConfig, checkCost, consumeCost } = nodeRequire('../../services/combat-service/src/services/combatCore/configLoader.cjs');
 import { pushBattleState } from '../services/commPush.js';
 import { applySizeConfigOverride, snapshotSizeConfig, applySizeHp } from '../unitSize.js';
-
-// 基础攻击射程：以基础攻击技能自身属性(分类默认 cast_range)为准，
-// 不再使用单位"范围"(currentStats.range) stat。范围仅保留作近战/远程分类信号。
-// 数值与 skillExecutor.DEFAULT_RANGE_BY_CATEGORY 对齐（melee=1 / ranged=6）。
-const BASIC_MELEE_RANGE = 1;
-const BASIC_RANGED_RANGE = 6;
 
 // ============================================
 // 战局获取统一入口（第3步：路由重构 / 重启重hydration）
@@ -193,9 +215,9 @@ function applyNewRoundEffects(battle: BattleState): void {
   try {
     fireReaction('on_round_start', { battleState: battle, round: battle.round, log: () => {}, broadcast: () => {} });
     if (Array.isArray(battle.units)) {
-      for (const u of battle.units) pickupAirdrops(battle, u as any);
+      for (const u of battle.units) { fireReaction('on_item_pickup', { battleState: battle, unit: u }); pickupAirdrops(battle, u as any); }
     } else if (battle.units && typeof (battle.units as any).forEach === 'function') {
-      (battle.units as any).forEach((u: any) => pickupAirdrops(battle, u));
+      (battle.units as any).forEach((u: any) => { fireReaction('on_item_pickup', { battleState: battle, unit: u }); pickupAirdrops(battle, u); });
     }
   } catch (e) { logger.error({ msg: `[airdrop/H4] ${ JSON.stringify((e as any)?.message) }` }); }
   // 清除上一轮遗留的「防御姿态」减伤（持续到该单位下个自己的回合开始 = 新一轮时点）
@@ -236,6 +258,369 @@ function advanceTurn(battle: BattleState): { isNewRound: boolean } {
     }
   }
   return { isNewRound: false };
+}
+
+/**
+ * Phase 6：服务端驱动的 AI 回合。
+ *
+ * 遍历指定角色下所有有行动点的存活单位，对每个单位循环行动直到无法再动：
+ *  - 若射程内有存活敌方 → 复用 runAttackInternal 执行攻击（force 绕过回合/AP 门控）
+ *  - 否则用 tsFindPath 走向最近敌方的射程内格
+ * 每一步都记录进 battle.aiActions 并通过 battleStore.set 推送全量快照，
+ * 客户端据此平滑补间位移与播放受击飘字，而非瞬移/瞬砍。
+ *
+ * 该函数被 end-turn 在切到 AI 角色后异步触发（不阻塞 HTTP 响应）。
+ */
+/**
+ * ★ Phase 7.1 AI 技能策略优选
+ * 从单位的 attack 类技能中，依据【射程覆盖 / AOE 覆盖 / 预估伤害】给每个候选打分，
+ * 返回最优技能（含 key/skill_key）。若无任何 attack 技能则兜底取 skills[0]。
+ * @param battle 战局（用于统计 AOE 覆盖的敌方数量）
+ * @param unit  AI 行动单位
+ * @param nearest 当前锁定的最近敌方
+ */
+function aiPickAttackSkill(battle: any, unit: any, nearest: any): any {
+  const skills = Array.isArray(unit.skills) ? unit.skills : [];
+  const atkSkills = skills.filter(
+    (s: any) => s && (s.attack_type === 'attack' || s.action_type === 'attack' || s.category === 'attack'),
+  );
+  const pool = atkSkills.length > 0 ? atkSkills : skills;
+  if (pool.length === 0) return null;
+  if (pool.length === 1) {
+    const s = pool[0];
+    return { key: s.key || s.skill_key || s.id, skill: s };
+  }
+  const nearestPos = nearest?.position || { q: 0, r: 0 };
+  let best: any = null;
+  let bestScore = -Infinity;
+  for (const s of pool) {
+    let score = 0;
+    // 1) 射程覆盖：能命中最近敌 → +2
+    const rf = getSkillRangeFields(s);
+    const maxR = rf?.maxRange ?? (s.cast_range ?? unit.range ?? 1);
+    const minR = rf?.minRange ?? 1;
+    const dToNearest = hexDist(unit.position, nearestPos);
+    if (dToNearest >= minR && dToNearest <= maxR) score += 2;
+    // 2) AOE 覆盖：技能带 aoe/area 且能波及 ≥2 敌 → +3
+    const aoeR = (s.aoe ?? s.area ?? s.radius ?? 0);
+    if (aoeR > 0) {
+      const selfRole = resolveRole(battle.factionRoles || {}, unit.faction);
+      const extra = Array.from(battle.units.values()).filter(
+        (e: any) => isUnitAlive(e)
+          && resolveRole(battle.factionRoles || {}, e.faction) !== selfRole
+          && hexDist(nearestPos, e.position) <= aoeR,
+      ).length;
+      if (extra >= 2) score += 3;
+    }
+    // 3) 预估伤害：粗略取 power/base_damage/effects 中的最大值，加权 +dmg/10
+    const dmg = Math.max(
+      Number(s.power) || 0,
+      Number(s.base_damage) || 0,
+      ...(Array.isArray(s.effects) ? s.effects.map((ef: any) => Number(ef?.value) || 0) : [0]),
+    );
+    score += dmg / 10;
+    if (score > bestScore) { bestScore = score; best = s; }
+  }
+  return best ? { key: best.key || best.skill_key || best.id, skill: best } : null;
+}
+
+async function runAiTurn(battle: BattleState, role: string, depth: number = 0): Promise<void> {
+  try {
+    // 防御：全 AI 战局或异常时限制连续 AI 推进行数（避免死循环）
+    if (depth > 40) { logger.warn({ msg: '[ai/turn] 超出最大 AI 推进深度，中止' }); return; }
+    // 清空上一轮 AI 增量，本次重新累积
+    battle.aiActions = [];
+    const units = getRoleUnits(battle, role).filter((u: any) => isUnitAlive(u));
+    for (const unit of units) {
+      if (!isUnitAlive(unit)) continue;
+      let acted = true;
+      let guard = 0;
+      while (acted && guard < 4) {
+        guard++;
+        acted = false;
+        // 找最近存活敌方（角色键 ≠ 自身角色）
+        const enemies = Array.from(battle.units.values()).filter(
+          (e: any) => isUnitAlive(e) && resolveRole(battle.factionRoles || {}, e.faction) !== role,
+        );
+        if (enemies.length === 0) break;
+        let nearest: any = null;
+        let best = Infinity;
+        for (const e of enemies) {
+          const d = hexDist(unit.position, e.position);
+          if (d < best) { best = d; nearest = e; }
+        }
+        if (!nearest) break;
+        const range = (unit as any).range ?? (unit as any).currentStats?.range ?? 1;
+        if (best <= range) {
+          // 攻击：★ Phase 7.1 AI 策略优选技能（射程/AOE/伤害）
+          const pick = aiPickAttackSkill(battle, unit, nearest);
+          const skillKey = pick?.key
+            || (Array.isArray((unit as any).skills) && (unit as any).skills[0]
+              && ((unit as any).skills[0].key || (unit as any).skills[0].id));
+          const from = { q: unit.position.q, r: unit.position.r };
+          const res = await runAttackInternal(battle, {
+            attackerId: (unit as any).unitId,
+            targetId: (nearest as any).unitId,
+            skillKey,
+            force: true,
+            skipConsume: true,
+          });
+          battle.aiActions = battle.aiActions || [];
+          const cr = res?.result || {};
+          battle.aiActions.push({
+            type: 'attack',
+            unitId: (unit as any).unitId,
+            from,
+            targetId: (nearest as any).unitId,
+            skillKey,
+            combat_result: {
+              ...cr,
+              killed: !!cr.killed,
+              killed_targets: Array.isArray(cr.killedTargets) ? cr.killedTargets : [],
+              // 阶段 6：机动/姿态数据透传（与 /attack 响应一致，读 damagePipe.stages）
+              mobility_diff: (cr && cr.stages) ? (cr.stages.mobility_diff ?? 0) : 0,
+              sniper_mobility_reduction: (cr && cr.stages) ? (cr.stages.sniper_mobility_reduction ?? 0) : 0,
+              height_bonus: (cr && cr.stages) ? (cr.stages.height_bonus ?? 0) : 0,
+              attacker_stance: ((unit as any).stance) ? String((unit as any).stance) : null,
+              defender_stance: ((nearest as any).stance) ? String((nearest as any).stance) : null,
+            },
+          });
+          battleStore.set(battle.id, battle);
+          acted = true;
+        } else {
+          // 移动：寻路到最近敌射程内（路径上限 = range+2 搜索半径）
+          const path = tsFindPath(battle, unit.position, nearest.position, Number(range) + 2);
+          if (path && path.length > 1) {
+            const steps = Math.max(1, (unit as any).moveRange || (unit as any).mobility || 3);
+            const idx = Math.min(steps, path.length - 1);
+            const target = path[idx] || path[path.length - 1];
+            const from = { q: unit.position.q, r: unit.position.r };
+            unit.position = { q: target.q, r: target.r };
+            (unit as any).q = target.q;
+            (unit as any).r = target.r;
+            battle.aiActions = battle.aiActions || [];
+            battle.aiActions.push({
+              type: 'move',
+              unitId: (unit as any).unitId,
+              from,
+              to: { q: target.q, r: target.r },
+            });
+            battleStore.set(battle.id, battle);
+            acted = true;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+    // AI 本角色行动完毕：推进到下一角色（可能跨入新一轮）
+    const adv2 = advanceTurn(battle);
+    if (adv2.isNewRound) applyNewRoundEffects(battle);
+    const v2 = evaluateVictory(battle);
+    if (v2.victory) {
+      (battle as any).status = 'finished';
+      try { clearBattleSnapshot(battle.id); } catch { /* ignore */ }
+    }
+    battle.aiActions = battle.aiActions || [];
+    battle.aiActions.push({ type: 'end_turn', unitId: '' });
+    battleStore.set(battle.id, battle);
+    // 若下一角色仍是 AI 控制，链式触发其回合；否则停手交由玩家/客户端接手
+    if (!v2.victory && Array.isArray(battle.aiRoles) && battle.aiRoles.includes(battle.activeFaction)) {
+      await runAiTurn(battle, battle.activeFaction, depth + 1);
+    }
+  } catch (e) {
+    logger.error({ msg: `[ai/turn] ${ (e as any)?.message }` });
+  }
+}
+
+/**
+ * 被动调度器：在单位每次"开始行动"时调用。
+ * 遍历该单位所有 action_type==='passive' 的技能，校验 trigger.type 与 trigger.condition，
+ * 条件满足且本回合未触发过，则将技能的 effects 转写为运行时 statusEffect 写入单位，
+ * 并产出战报日志（供前端透传"XX 被动自动触发"）。
+ *
+ * 触发模型（与 shared-kernel TriggerContract 对齐）：
+ *  - trigger.type 须为 'on_turn_start' 或省略（行动时触发）。其它时机（on_damage_taken 等）此处不处理。
+ *  - trigger.condition（可选）：
+ *      hp_below_pct            当前 HP/MaxHP*100 < 该值
+ *      distance_less_than      与最近敌方六角距离 ≤ 该值
+ *      distance_greater_than   与最近敌方六角距离 ≥ 该值
+ *    所有给定的阈值条件需同时满足。
+ */
+function evaluatePassives(unit: any, battle: any): any[] {
+  const logs: any[] = [];
+  if (!unit || !battle) return logs;
+  const selfRole = resolveRole(battle.factionRoles, unit.faction);
+  const skills = Array.isArray(unit.skills) ? unit.skills : (safeParseValue(unit.skills) || []);
+  const passives = skills.filter(
+    (s: any) => s && (s.action_type === 'passive' || s.trigger?.type === 'on_turn_start'),
+  );
+  if (passives.length === 0) return logs;
+
+  // 本回合去重：避免一次行动多次结算时重复叠加同一被动
+  const fired = (unit as any)._passiveFired ?? {};
+  if (fired.round !== battle.round) {
+    (unit as any)._passiveFired = { round: battle.round, keys: new Set<string>() };
+  }
+  const firedKeys = (unit as any)._passiveFired.keys as Set<string>;
+
+  // 最近敌方距离
+  let nearestEnemyDist = Infinity;
+  for (const e of battle.units.values()) {
+    if (!e || e === unit) continue;
+    if ((e.currentStats?.hp ?? 0) <= 0) continue;
+    if (resolveRole(battle.factionRoles, e.faction) === selfRole) continue; // 仅敌方
+    if (!unit.position || !e.position) continue;
+    const d = hexDist(unit.position, e.position);
+    if (d < nearestEnemyDist) nearestEnemyDist = d;
+  }
+
+  for (const skill of passives) {
+    const skillKey = skill.key || skill.skill_key || skill.id || skill.name;
+    if (firedKeys.has(String(skillKey))) continue; // 本回合已触发
+    const trig = skill.trigger || {};
+    if (trig.type && trig.type !== 'on_turn_start' && trig.type !== 'unconditional') continue;
+
+    const cond = trig.condition || {};
+    let ok = true;
+    if (typeof cond.hp_below_pct === 'number') {
+      const maxHp = unit.currentStats?.maxHp ?? unit.maxHp ?? 0;
+      const hp = unit.currentStats?.hp ?? unit.hp ?? 0;
+      const pct = maxHp > 0 ? (hp / maxHp) * 100 : 100;
+      if (!(pct < cond.hp_below_pct)) ok = false;
+    }
+    if (ok && typeof cond.distance_less_than === 'number') {
+      if (!(nearestEnemyDist <= cond.distance_less_than)) ok = false;
+    }
+    if (ok && typeof cond.distance_greater_than === 'number') {
+      if (!(nearestEnemyDist >= cond.distance_greater_than)) ok = false;
+    }
+    if (!ok) continue;
+
+    // 条件满足：把 effects 转写为运行时 statusEffect
+    const effects = Array.isArray(skill.effects) ? skill.effects : [];
+    for (const eff of effects) {
+      if (!eff) continue;
+      const fx = {
+        label: skill.name || skill.name || skillKey,
+        key: String(skillKey),
+        source: String(skillKey),
+        trigger: { type: 'unconditional', attack_type: eff.type, damage_kind: eff.damage_kind },
+        applies_on: eff.applies_on || 'defense',
+        consumption: eff.consumption || { mode: 'duration', value: eff.consumption?.value ?? 1 },
+        mode: eff.mode || 'restore',
+        target_type: eff.target_type || 'self',
+        value: eff.value ?? null,
+        flat_value: eff.flat_value ?? null,
+        fixed_rate_multiplier: eff.fixed_rate_multiplier ?? null,
+        armor_pen: eff.armor_pen ?? null,
+        fixed_mod: eff.fixed_mod ?? null,
+        rate_value: eff.rate_value ?? null,
+        base: eff.base ?? null,
+        duration: eff.duration ?? null,
+        trigger_scope: eff.trigger_scope || null,
+        meta: { passive: true, fromTrigger: trig.type || 'on_turn_start' },
+      };
+      unit.statusEffects = Array.isArray(unit.statusEffects) ? unit.statusEffects : [];
+      unit.statusEffects.push(fx);
+    }
+
+    firedKeys.add(String(skillKey));
+    logs.push({
+      type: 'passive_triggered',
+      unit_id: unit.id,
+      unit_name: unit.name,
+      skill_key: String(skillKey),
+      skill_name: skill.name || String(skillKey),
+      trigger: trig.type || 'on_turn_start',
+      condition: cond,
+    });
+  }
+  return logs;
+}
+
+/**
+ * 效果堆栈分头路由（双阵营主目标核心）：
+ * 把技能自身的 effects 数组按每个 effect 的 target_type 路由到对应阵营的单位，
+ * 转写为运行时 statusEffect 写入。这样「对友方产生效果1、对敌方产生效果2」的
+ * 双阵营技能只需在词条编辑器里让两个 effect 分别设为 SINGLE_ALLY / SINGLE_ENEMY，
+ * 而玩家释放时只需选一个敌方主目标（友方自动按施法者阵营寻找）。
+ *
+ * target_type 语义：
+ *  SELF / 缺省   → 施法者自身
+ *  SINGLE_ALLY   → 施法者阵营第一个存活友军
+ *  AREA_ALLY     → 施法者阵营全部存活友军
+ *  SINGLE_ENEMY  → 主目标（primaryTarget，应为敌方）
+ *  AREA_ENEMY    → 敌方全体存活单位
+ *  ALL_UNITS     → 战局全体存活单位
+ * 返回写入的战报日志数组。
+ */
+function routeEffectStackToTargets(skill: any, casterUnit: any, primaryTarget: any, battle: any): any[] {
+  const logs: any[] = [];
+  if (!skill || !battle) return logs;
+  const effects = Array.isArray(skill.effects) ? skill.effects : [];
+  if (effects.length === 0) return logs;
+
+  const casterRole = resolveRole(battle.factionRoles, casterUnit.faction);
+  const allies: any[] = [];
+  const enemies: any[] = [];
+  for (const u of battle.units.values()) {
+    if (!u || u === casterUnit) continue;
+    if ((u.currentStats?.hp ?? 0) <= 0) continue;
+    const r = resolveRole(battle.factionRoles, u.faction);
+    if (r === casterRole) allies.push(u); else enemies.push(u);
+  }
+
+  const pickTargets = (tt: string): any[] => {
+    switch (tt) {
+      case 'SELF': return [casterUnit];
+      case 'SINGLE_ALLY': return allies.length ? [allies[0]] : [];
+      case 'AREA_ALLY': return allies;
+      case 'SINGLE_ENEMY': return primaryTarget ? [primaryTarget] : (enemies.length ? [enemies[0]] : []);
+      case 'AREA_ENEMY': return enemies;
+      case 'ALL_UNITS': return [casterUnit, ...allies, ...enemies];
+      default: return [casterUnit];
+    }
+  };
+
+  const skillKey = skill.key || skill.skill_key || skill.id || skill.name || 'effect_stack';
+  for (const eff of effects) {
+    if (!eff) continue;
+    const targets = pickTargets(eff.target_type || 'SELF');
+    if (targets.length === 0) continue;
+    for (const tu of targets) {
+      const fx = {
+        label: skill.name || skillKey,
+        key: String(skillKey),
+        source: String(skillKey),
+        trigger: { type: 'unconditional', attack_type: eff.type, damage_kind: eff.damage_kind },
+        applies_on: eff.applies_on || 'defense',
+        consumption: eff.consumption || { mode: 'duration', value: eff.consumption?.value ?? 1 },
+        mode: eff.mode || 'restore',
+        target_type: eff.target_type || 'SELF',
+        value: eff.value ?? null,
+        flat_value: eff.flat_value ?? null,
+        fixed_rate_multiplier: eff.fixed_rate_multiplier ?? null,
+        armor_pen: eff.armor_pen ?? null,
+        fixed_mod: eff.fixed_mod ?? null,
+        rate_value: eff.rate_value ?? null,
+        base: eff.base ?? null,
+        duration: eff.duration ?? null,
+        trigger_scope: eff.trigger_scope || null,
+        meta: { routed_effect: true, fromSkill: skillKey },
+      };
+      tu.statusEffects = Array.isArray(tu.statusEffects) ? tu.statusEffects : [];
+      tu.statusEffects.push(fx);
+    }
+    logs.push({
+      type: 'effect_routed',
+      skill_key: String(skillKey),
+      effect_type: eff.type,
+      target_type: eff.target_type || 'SELF',
+      targets: pickTargets(eff.target_type || 'SELF').map((t: any) => t.id || t.unitId),
+    });
+  }
+  return logs;
 }
 
 /**
@@ -330,9 +715,16 @@ class PushBattleStore extends Map<string, BattleState> {
     pushBattleState(key, value);
     // 第2步：每次权威态变更即同步落库快照（覆盖 deploy/recall/end-deployment/move/
     // attack/skill/damage/end-turn/victory/seed 所有 mutation 路由）。
+    // ★ A-5：CAS 乐观锁——每次写回自动携带 _version（并发写冲突则拒绝落库，避免半更新态覆盖）。
     // 同步调用（与 combatSnap 防呆纪律一致）；失败被吞，不影响主链路。
     try {
-      saveBattleSnapshot(key, value);
+      const baseVersion = Number((value as any)._version ?? 0);
+      const nextVersion = baseVersion + 1;
+      (value as any)._version = nextVersion;
+      const casOk = saveBattleSnapshot(key, value, baseVersion);
+      if (!casOk) {
+        logger.warn({ msg: `[PushBattleStore] CAS 冲突 ${ key } base=${ baseVersion }（丢弃落库，内存态保留）` });
+      }
     } catch (e: any) {
       logger.error({ msg: `[PushBattleStore] saveBattleSnapshot 失败 ${ key } ${ e?.message || e }` });
     }
@@ -341,12 +733,153 @@ class PushBattleStore extends Map<string, BattleState> {
 }
 const battleStore = new PushBattleStore();
 
+/**
+ * ★ A-5：applyPatch —— 唯一状态写回出口（原子事务 + 增量 Diff + CAS）。
+ *
+ * 职责：
+ *  1. 五条不变量守卫（HP/占位/越界/悬空 unitId/批内双写），任一违反则整体回滚。
+ *  2. 原子性：先在内存克隆上应用 patches，全部通过后才提交 battleStore.set；
+ *     失败则回滚（Object.assign 顶层替换受影响单位子集，恢复 _meta 等活路径）。
+ *  3. 增量 Diff：生成 { version, baseVersion, patches[] } 挂到 battle._lastDiff，
+ *     供 comm 增量广播（替代整局全量推送，逐步演进）。
+ *  4. CAS 乐观锁：调 saveBattleSnapshot 时携带 expectedVersion，并发写冲突则拒绝落库。
+ *
+ * @param battleId 战局 id
+ * @param patches PatchContract.statePatch 数组（{unitId, field, op, value}）
+ * @param opts.fromPhase 调用来源标记（'skill'|'attack'|...），仅日志
+ */
+function applyPatch(battleId: string, patches: any[], opts: { fromPhase?: string } = {}): { ok: boolean; error?: string } {
+  const battle = requireBattle(battleId);
+  if (!battle) return { ok: false, error: 'BATTLE_NOT_FOUND' };
+  const units = battle.units instanceof Map ? battle.units : new Map();
+  const width = battle.map?.attributes?.get?.('width') ?? battle.map?.width ?? 100;
+  const height = battle.map?.attributes?.get?.('height') ?? battle.map?.height ?? 100;
+
+  // ---- 1. 预检：悬空 unitId（不变量4） ----
+  for (const p of patches) {
+    if (!units.has(String(p.unitId))) {
+      logger.warn({ msg: `[applyPatch] 悬空 unitId 拒绝 ${ battleId } ${ p.unitId }` });
+      return { ok: false, error: 'ORPHAN_UNIT_ID' };
+    }
+  }
+
+  // ---- 2. 克隆受影响单位子集，准备原子应用（不变量5：批内双写检测） ----
+  const touched = new Map<string, any>();
+  for (const p of patches) {
+    const id = String(p.unitId);
+    if (!touched.has(id)) {
+      const u = units.get(id);
+      touched.set(id, structuredClone(u));
+    }
+  }
+  // 批内双写：同一 unitId 同一 field 出现多次 → 视为非法（非幂等）
+  const seen = new Set<string>();
+  for (const p of patches) {
+    const k = `${p.unitId}:${p.field}`;
+    if (seen.has(k)) {
+      logger.warn({ msg: `[applyPatch] 批内双写拒绝 ${ battleId } ${ k }` });
+      return { ok: false, error: 'BATCH_DOUBLE_WRITE' };
+    }
+    seen.add(k);
+  }
+
+  // ---- 3. 应用 patches（在克隆上） + 不变量守卫 ----
+  const applied: { unitId: string; field: string; value: number }[] = [];
+  for (const p of patches) {
+    const u = touched.get(String(p.unitId));
+    const stats = u.currentStats || (u.currentStats = {});
+    const cur = Number(stats[p.field] ?? 0);
+    let next = cur;
+    if (p.op === 'set') next = Number(p.value);
+    else if (p.op === 'add') next = cur + Number(p.value);
+    else if (p.op === 'sub') next = cur - Number(p.value);
+
+    // 不变量1：HP 边界
+    if (p.field === 'hp') {
+      const maxHp = Number(u.currentStats?.max_hp ?? u.currentStats?.maxHp ?? 0);
+      if (next < 0) next = 0;
+      if (maxHp > 0 && next > maxHp) next = maxHp;
+    }
+    // 不变量2/3 占位与越界：仅对 position 变更做校验（field 为 position 时 value 为 {q,r}）
+    if (p.field === 'position') {
+      const pos = p.value;
+      if (pos && (pos.q < 0 || pos.r < 0 || pos.q >= width || pos.r >= height)) {
+        logger.warn({ msg: `[applyPatch] 越界拒绝 ${ battleId }`, pos });
+        return { ok: false, error: 'OUT_OF_BOUNDS' };
+      }
+    }
+    stats[p.field] = next;
+    applied.push({ unitId: String(p.unitId), field: p.field, value: next });
+  }
+
+  // ---- 4. 提交：写回受影响的单位子集（顶层替换，保留 Map 引用） ----
+  for (const [id, u] of touched) {
+    units.set(id, u);
+  }
+
+  // ---- 5. 增量 Diff 生成（version/baseVersion/patches） ----
+  const baseVersion = Number((battle as any)._version ?? 0);
+  const version = baseVersion + 1;
+  (battle as any)._version = version;
+  (battle as any)._lastDiff = {
+    version,
+    baseVersion,
+    battleId,
+    patches: applied.map((a) => ({ unitId: a.unitId, field: a.field, value: a.value })),
+  };
+
+  // ---- 6. 落库（CAS 乐观锁） ----
+  try {
+    const ok = saveBattleSnapshot(battleId, battle, baseVersion);
+    if (!ok) {
+      logger.warn({ msg: `[applyPatch] CAS 冲突 ${ battleId } base=${ baseVersion }` });
+      return { ok: false, error: 'CAS_CONFLICT' };
+    }
+  } catch (e: any) {
+    logger.error({ msg: `[applyPatch] saveBattleSnapshot 失败 ${ battleId } ${ e?.message || e }` });
+    return { ok: false, error: 'SNAPSHOT_FAILED' };
+  }
+
+  // ---- 7. 触发实时推送（整局 + 增量 diff 一并携带，逐步演进） ----
+  battleStore.set(battleId, battle);
+  logger.info({ msg: `[applyPatch] 写回成功 ${ battleId } patches=${ patches.length } v=${ version }`, fromPhase: opts.fromPhase });
+  return { ok: true };
+}
+
 /** P8：向战局追加一条战报（combatLog[] 缓冲），随推送流携带给前端。 */
 function appendCombatLog(battle: any, entry: any): void {
   if (!battle) return;
   battle.combatLog = Array.isArray(battle.combatLog) ? battle.combatLog : [];
   battle.combatLog.push({ ...entry, t: Date.now() });
   if (battle.combatLog.length > 200) battle.combatLog.shift();
+}
+
+/**
+ * ★ HP 写回统一入口：顶层 hp/maxHp 与 currentStats.hp 同源（项目契约，见 createBattleUnit）。
+ * 攻击/治疗/反击/分担等所有伤害结算必须经由本函数，确保：
+ *   1. currentStats.hp 被扣减（引擎内部读 currentStats.hp 做存活/胜利判定）；
+ *   2. 顶层 bu.hp 同步扣减（前端 normalizeBattleState 仅当顶层 hp===undefined 才回灌 currentStats，
+ *      而 createBattleUnit 已注入顶层 hp，故若不在此同步顶层，前端棋子 HP 永远显示初始满血）。
+ * @param bu       BattleUnit（来自 battle.units.get）
+ * @param delta    伤害为负、治疗为正
+ * @param maxHp    可选，提供则用其钳制治疗上限；缺省用 currentStats.maxHp
+ */
+function applyHpDelta(bu: any, delta: number, maxHp?: number): number {
+  if (!bu) return 0;
+  const st = bu.currentStats || (bu.currentStats = {});
+  const before = st.hp ?? 0;
+  // delta 符号约定：负值=扣血，正值=治疗；统一用 before + delta。
+  let next = before + delta;
+  if (delta < 0) next = Math.max(0, next);                 // 扣血下限 0
+  else if (delta > 0) {                                     // 治疗上限
+    const cap = (maxHp ?? st.maxHp ?? before);
+    if (cap > 0) next = Math.min(cap, next);
+  }
+  st.hp = next;
+  // 同步顶层（前端直接读取顶层 hp，且 dead 判定依赖顶层）
+  bu.hp = next;
+  if (next <= 0) bu.killed = true;
+  return next;
 }
 
 /** 战斗态对外视图：units（Map）→ 数组，便于前端消费；未找到返回 null。 */
@@ -369,12 +902,21 @@ function canIssueCommand(battle: any, unit: any, reqUser?: any): boolean {
   const f = unit.faction;
   if (f === 'neutral') return true; // neutral 单位不受阵营轮转限制
   if (battle.activeFaction && resolveRole(battle.factionRoles, f) === battle.activeFaction) return true;
-  // GM / 裁判越权放行（角色来源：(req as any).user.role 或嵌套 user.role）
-  const role = (reqUser?.role || reqUser?.user?.role || '').toUpperCase();
+
+  const uid = String(reqUser?.userId || reqUser?.user?.userId || '');
+  // 战局身份快照（开战瞬间固化，防中途后台改 role 越权作弊）；缺失时回退实时 token role（兼容旧战局）
+  const snap = (battle as any).state_snapshot?.roles?.[uid];
+  const liveRole = (reqUser?.role || reqUser?.user?.role || '').toUpperCase();
+  const role = (snap?.role || liveRole).toUpperCase();
+  // GM / 裁判越权放行：只读开战瞬间固化的账号 role 快照
   if (role === 'REFEREE' || role === 'DOMINATOR') return true;
-  // 代打机制（2026-07-30）：房主（isHost）可代理场上任意棋子，无视回合门控
-  const uid = reqUser?.userId || reqUser?.user?.userId;
-  if (battle.hostId && uid && String(uid) === String(battle.hostId)) return true;
+  // 代打机制（2026-07-30）：房主（isHost）可代理场上任意棋子，无视回合门控。
+  // 2026-08-05 解耦：仅当房主未作为普通玩家下场（identity_role !== 'player'）时生效，
+  // 避免房主亲自 1v1 时仍持有操控对方棋子的「合法开挂」特权。
+  if (battle.hostId && uid && String(uid) === String(battle.hostId)) {
+    const hostIdentity = snap?.identity_role || 'referee'; // 未下场默认 referee（纯代打）
+    if (hostIdentity !== 'player') return true;
+  }
   return false;
 }
 
@@ -395,6 +937,9 @@ function safeParseValue(v: any): any {
   }
   return v;
 }
+
+// ★ B.7 Gateway 预注入校验器（难度 / H-Safe 数值护栏）— 实现见 battleGuards.ts
+import { preInjectBattleGuards } from './battleGuards.js';
 
 // ============================================
 // ★ 阶段 B：坐标语义统一（Even-R Offset 真理源）
@@ -497,7 +1042,8 @@ function tsFindPath(state: any, from: any, to: any, maxRange: number): Array<{ q
   return path.length ? path : null;
 }
 
-router.post('/api/combat', authenticate, (req: Request, res: Response) => {
+// B-4 Macro 边界：地图加载入口全量 safeParse（battlefield_id 必填、英文键）
+router.post('/api/combat', authenticate, validateBody(z.object({ battlefield_id: z.string().min(1) })), (req: Request, res: Response) => {
   const { battlefield_id } = req.body || {};
 
   if (!battlefield_id) {
@@ -724,7 +1270,7 @@ function sanitizeEquipment(equipment: any): any {
 
 // 房间开战时由 rooms 路由调用：确保 battleStore 中存在该战局（含地图），并预置部署池 pendingUnits。
 // 这样 NewBattleView 进入时 getBattleState 命中已有战局，pendingUnits 不会被兜底 createBattle 清空。
-export function seedRoomBattle(battleId: string, mapId: string | null, pendingUnits: any[], factionRolesConfig: any = null, hostId: string | null = null): void {
+export function seedRoomBattle(battleId: string, mapId: string | null, pendingUnits: any[], factionRolesConfig: any = null, hostId: string | null = null, players: any[] = []): void {
   let battle = requireBattle(battleId);
   if (!battle) {
     let battleMap: any = { id: mapId || 'default', name: 'battlefield', width: 50, height: 50, cells: [], spawn_points: [] };
@@ -766,7 +1312,42 @@ export function seedRoomBattle(battleId: string, mapId: string | null, pendingUn
   (battle as any).hostId = hostId || (battle as any).hostId || null;
   // 权威阵营↔角色配置（来自 room.rules.factionRoles），开战部署完成后供 reconcileFactionRoles 使用
   (battle as any).factionRolesConfig = (factionRolesConfig && typeof factionRolesConfig === 'object') ? factionRolesConfig : null;
-  logger.info({ msg: `[Gateway:3006] [seedRoomBattle] battle=${battleId} 预置部署池 ${((battle as any).pendingUnits || []).length} 个单位；hostId=${hostId || '缺省'}；factionRolesConfig=${factionRolesConfig ? '已注入' : '缺省'}` });
+  // 战局身份快照（2026-08-05 安全加固）：开战瞬间定格每个参战玩家的账号 role + 房间内 identity_role，
+  // 局内 canIssueCommand / resolveSurpriseChoice 只读此快照，杜绝中途后台改账号 role 的越权作弊。
+  // 随 battles.state_snapshot 自动落库（下方 battleStore.set 触发 saveBattleSnapshot）。
+  const snapRoles: Record<string, { role: string; identity_role: string }> = {};
+  for (const p of (Array.isArray(players) ? players : [])) {
+    const uid = String(p?.userId || p?.user_id || '');
+    if (!uid) continue;
+    snapRoles[uid] = {
+      role: String(p?.accountRole || p?.role || 'user').toUpperCase(),
+      identity_role: String(p?.identityRole || p?.identity_role || 'player'),
+    };
+  }
+  (battle as any).state_snapshot = {
+    ...((battle as any).state_snapshot || {}),
+    roles: snapRoles,
+    hostId: (battle as any).hostId || null,
+  };
+  // 重新写入以触发 PushBattleStore.set → 自动 saveBattleSnapshot 落库
+  battleStore.set(battleId, battle);
+
+  // ★ 2.0B.1 战斗初始化：将所有对局单位显式注册进装备耐久管理器。
+  // 数据真相源为 unit.equipState（活路径），register 将耐久快照载入 _state，
+  // 供结算时 applyDamage / consumeWeaponDurability 与 K1 lockDurability 读写。
+  // （注册自带自动守卫：若结算时仍未注册，耐久模块会按 equipState 即时装载。）
+  try {
+    const edMgr = getEquipmentDurabilityManager();
+    const initUnits = Array.isArray(pendingUnits) ? pendingUnits.slice() : [];
+    if (battle.units && typeof (battle.units as any).forEach === 'function') {
+      (battle.units as any).forEach((u: any) => { if (u) initUnits.push(u); });
+    } else if (battle.units && typeof (battle.units as any).values === 'function') {
+      (battle.units as any).values().forEach((u: any) => { if (u) initUnits.push(u); });
+    }
+    initUnits.forEach((u: any) => { try { edMgr.register(u); } catch (_) { /* 单个单位注册失败不影响整体 */ } });
+  } catch (_) { /* 耐久注册失败不应阻断开局 */ }
+
+  logger.info({ msg: `[Gateway:3006] [seedRoomBattle] battle=${battleId} 预置部署池 ${((battle as any).pendingUnits || []).length} 个单位；hostId=${hostId || '缺省'}；factionRolesConfig=${factionRolesConfig ? '已注入' : '缺省'}；快照角色数=${Object.keys(snapRoles).length}` });
 }
 
 // 清除内存中的对局（房间删除/对局解散时调用，由 rooms 路由在 dominator 或房主删除房间时触发）
@@ -777,7 +1358,8 @@ export function clearBattle(battleId: string): void {
   }
 }
 
-router.post('/api/combat/:battleId/pending-units', authenticate, (req: Request, res: Response) => {
+// B-4 Macro 边界：pending-units 提交入口全量 safeParse（units 数组必填）
+router.post('/api/combat/:battleId/pending-units', authenticate, validateBody(z.object({ units: z.array(z.any()).min(1) })), (req: Request, res: Response) => {
   const { battleId } = req.params;
   const { units: rawUnits } = req.body || {};
 
@@ -890,7 +1472,12 @@ router.post('/api/combat/:battleId/initialize', authenticate, (req: Request, res
     return;
   }
 
-  const units: BattleUnit[] = rawUnits.map((u: any) => {
+  // ★ B.7 Gateway 预注入校验器：难度归一化 + H-Safe 数值护栏
+  // 在进入引擎 zygote 前，对 difficulty 与所有单位的数值（currentStats / statusEffects）
+  // 做合法化与钳制，阻断词链条目/快照造成的属性爆炸或负值穿透。
+  const guard = preInjectBattleGuards(req.body);
+
+  const units: BattleUnit[] = guard.units.map((u: any) => {
     const bu = createBattleUnit({
       unitId: u.unitId,
       matrixId: u.matrixId,
@@ -913,6 +1500,10 @@ router.post('/api/combat/:battleId/initialize', authenticate, (req: Request, res
       viewUrls: (() => { const v = safeParseValue(u.view_urls ?? u.viewUrls); return (v && typeof v === 'object') ? v : undefined })(),
       // 单位体型（体积）：透传，缺省 m
       size: u.size,
+      // 机体基础属性（编辑器原始值）：射击/格斗/机动，供前端单位卡片展示
+      main_射击: u.main_射击,
+      main_格斗: u.main_格斗,
+      main_机动: u.main_机动,
     });
     // 登场即隐匿：从存档/快照载入的偷袭单位同样开局即隐匿
     if (isStealthCapableUnit(u, u.factionRoles)) applySpawnStealth(bu);
@@ -1050,6 +1641,13 @@ router.post('/api/combat/:battleId/end-turn', authenticate, (req: Request, res: 
   ensureTurnModel(battle);
   const endedFaction = battle.activeFaction; // 记录刚结束的阵营，回合末清除其 Buff
   const adv = advanceTurn(battle);
+  // Phase E：on_action_order_changed 点火（行动序切换后）—— 供行动债/结算序反应器接管
+  fireReaction('on_action_order_changed', {
+    battleState: battle,
+    newCurrentFaction: battle.currentFaction,
+    newTurn: battle.turn,
+    advanceResult: adv,
+  });
   // 任务 4.3 D5：跨回合 AP 债务扣减（advanceTurn 已重置 AP，此处仅扣 1 点 ATTACK + 解锁，不叠加）
   if (endedFaction) {
     for (const u of battle.units.values()) {
@@ -1065,6 +1663,8 @@ router.post('/api/combat/:battleId/end-turn', authenticate, (req: Request, res: 
     for (const u of battle.units.values()) {
       if (u.faction === endedFaction) { BuffManager.tickBuffs(u); BuffManager.tickStatus(u); }
     }
+    // Phase B：on_turn_end 点火（刚结束阵营的回合末）—— 供结算类反应器接管
+    fireReaction('on_turn_end', { battleState: battle, endedFaction, endedUnits: Array.from(battle.units.values()).filter((u: any) => u.faction === endedFaction) });
   }
   // 新一轮：空投生成与拾取结算（行动点已在 advanceTurn 内统一重置）
   if (adv.isNewRound) applyNewRoundEffects(battle);
@@ -1080,6 +1680,16 @@ router.post('/api/combat/:battleId/end-turn', authenticate, (req: Request, res: 
   logger.info({ msg: `[Gateway:3006] [TURN END] 战局 ${battleId} 阵营切换 → ${battle.activeFaction} | Round ${battle.round} | ${adv.isNewRound ? '统一重置AP' : '仅切换阵营'}` });
 
   battleStore.set(battleId, battle); // 触发实时推送：阵营切换/AP 重置/胜利判定
+
+  // Phase 6：若下一个行动角色属于 AI 控制，则异步驱动 AI 回合（不阻塞本次 HTTP 响应）。
+  // runAiTurn 内部每步都会 battleStore.set 推送全量快照，客户端据此平滑播放敌方行动。
+  const nextRole = battle.activeFaction;
+  if (!victoryResult.victory && Array.isArray(battle.aiRoles) && battle.aiRoles.includes(nextRole)) {
+    // fire-and-forget：AI 回合与 HTTP 响应并行，客户端通过 WS 增量快照接管表现层
+    Promise.resolve().then(() => runAiTurn(battle, nextRole)).catch((e) => {
+      logger.error({ msg: `[ai/turn/dispatch] ${ (e as any)?.message }` });
+    });
+  }
 
   res.json({
     success: true,
@@ -1144,6 +1754,9 @@ function toExecutorUnit(u: any): any {
     melee: s.attack ?? s.melee ?? 0,
     ranged: s.attack ?? s.ranged ?? 0,
     defense: s.defense ?? 0,
+    // ★ 2026-08-06 契约修复：前端计算并落库 stats.armor，damagePipe 也确实读 armor 参与减伤，
+    //   但此转换层此前未透传 → 引擎内 armor 恒 undefined，护甲属性全程无效。
+    armor: s.armor ?? 0,
     shield: s.shield ?? 0,
     mobility: s.mobility ?? 0,
     // A 修复：faction 表达政治/战局阵营（earth/balon...），ownerId 仅表达玩家归属，二者彻底分离
@@ -1162,6 +1775,10 @@ function toExecutorUnit(u: any): any {
     statusEffects: (u && Array.isArray(u.statusEffects)) ? [...u.statusEffects] : [],
     // 体型（体积）：透传给引擎以计算体型克制减伤/机动补偿
     size: u?.size ?? 'm',
+    // ★ A-5 (A-2)：活路径元信息 _meta（含 C-6 lockedDurability）必须透传引擎，
+    // 否则引擎结算副本丢失状态锁，导致"已锁装备被维修/复用"的幽灵行为。
+    // 结构化克隆避免引擎改副本污染内存态。
+    _meta: u?._meta ? structuredClone(u._meta) : undefined,
   };
 }
 
@@ -1176,10 +1793,14 @@ function applyStatusEffectsWriteback(casterUnit: any, exeCaster: any, targetUnit
   if (exeCaster && casterUnit) {
     BuffManager.consumeStatuses(exeCaster, ids);
     casterUnit.statusEffects = exeCaster.statusEffects;
+    // ★ 闭环：引擎可能在 _meta.flags 写入阻断/状态锁等标记（如 block_movement），
+    //   必须回写真实单位，否则 /move 等消费侧读不到。structuredClone 避免副本污染。
+    if (exeCaster._meta) casterUnit._meta = structuredClone(exeCaster._meta);
   }
   if (exeTarget && targetUnit) {
     BuffManager.consumeStatuses(exeTarget, ids);
     targetUnit.statusEffects = exeTarget.statusEffects;
+    if (exeTarget._meta) targetUnit._meta = structuredClone(exeTarget._meta);
   }
 }
 
@@ -1207,8 +1828,40 @@ function applyStatusEffectsWriteback(casterUnit: any, exeCaster: any, targetUnit
 // 攻击方机动优势带来的增伤由引擎封顶 +4；防御方优势减伤无上限。
 // ============================================================
 const WEAPON_SLOTS = ['left', 'right', 'extra'];
-function computeWeaponMobilityBonus(exeCaster: any, skillSlot: any): { mobility: number; isWeapon: boolean } {
+
+/**
+ * ★ C-6：装备活路径统一 helper。
+ * 返回未损毁且耐久 > 0 的装备列表（拦截 destroyed / durability<=0），
+ * computeWeaponMobilityBonus 与 getEquipmentAttackStat 共用，消除重复拦截逻辑。
+ */
+function activeEquip(exeCaster: any): any[] {
   const eq = (exeCaster && exeCaster.equipState) || [];
+  return eq.filter((e: any) => e && !e.destroyed && (e.durability ?? 0) > 0);
+}
+
+/** ★ C-6：装备槽位是否已被锁定（lockedDurability 状态锁） */
+function isEquipmentLocked(unit: any, slotKey: string): boolean {
+  const locked = unit?._meta?.lockedDurability;
+  return !!(locked && locked[slotKey]);
+}
+
+/** ★ C-6：锁定装备槽位（三写原子：destroyed=true / durability=0 / _meta.lockedDurability[slot]=true） */
+function applyEquipmentLock(unit: any, slotKey: string): void {
+  if (!unit) return;
+  const eq = unit.equipState || (unit.equipState = []);
+  const target = eq.find((e: any) => e && String(e.slot || '') === slotKey);
+  if (target) {
+    target.destroyed = true;
+    target.durability = 0;
+  }
+  unit._meta = unit._meta || { lockedDurability: {} };
+  unit._meta.lockedDurability = unit._meta.lockedDurability || {};
+  unit._meta.lockedDurability[slotKey] = true;
+}
+
+function computeWeaponMobilityBonus(exeCaster: any, skillSlot: any): { mobility: number; isWeapon: boolean } {
+  const eq = activeEquip(exeCaster);
+  // 2.0B.2：已损毁（destroyed）或耐久归零的武器不再提供任何机动加成（由 activeEquip 拦截）
   const weapons = eq.filter((e: any) => e && (e.type === '武器' || e.type === 'weapon' || String(e.type || '').toLowerCase() === 'weapon'));
   if (!weapons.length) return { mobility: 0, isWeapon: false };
   // 是否武器来源：基础攻击(skillSlot 为空)或技能槽属于武器槽
@@ -1236,6 +1889,13 @@ const EQ_TYPES = ['武器', '防具', '载具', '背包'];
 function getEquipmentAttackStat(casterUnit: any, skillSlot: any, isRanged: boolean): number {
   const parts = (casterUnit && casterUnit.parts) || null;
   if (!parts || !skillSlot) return 0;
+  // 2.0B.2：已损毁或耐久归零的装备槽，其攻击加成一律失效（由 activeEquip 给出活路径列表）
+  const active = activeEquip(casterUnit);
+  const disabledSlots = new Set<string>();
+  active.forEach((e: any) => {
+    if (e.slot) disabledSlots.add(String(e.slot));
+    if (e.name) disabledSlots.add(String(e.name));
+  });
   const bare = String(skillSlot).replace(/_hand$/, '');
   let total = 0;
   for (const p of Object.values(parts) as any[]) {
@@ -1243,6 +1903,7 @@ function getEquipmentAttackStat(casterUnit: any, skillSlot: any, isRanged: boole
     const t = String(p.normalizedType || p.type || '').trim();
     if (!EQ_TYPES.includes(t)) continue; // 仅装备类计入（机体不计入，避免与基础值重复）
     const ps = String(p.slot || '');
+    if (disabledSlots.has(ps) || disabledSlots.has(String(p.name || ''))) continue; // 2.0B.2：损毁槽不计入攻击
     const pb = ps.replace(/_hand$/, '');
     const matched = ps === skillSlot || pb === bare || ps.includes(bare) || bare.includes(pb);
     if (!matched) continue;
@@ -1267,6 +1928,7 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
     target_id,
     skill_id,
     attack_type,
+    aoe_dir,
   } = req.body || {};
 
   // skillType 可由前端 skill_id（UUID）或 attack_type（melee/ranged）兜底
@@ -1287,6 +1949,7 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
 
   const casterId = casterUnitId || attacker_id;
   const targetId = targetUnitId || target_id;
+  let passiveLogsSkill: any[] = [];
 
   if (casterId) {
     if (!battle) { res.status(404).json({ success: false, error: 'BATTLE_NOT_FOUND' }); return; }
@@ -1294,6 +1957,8 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
     if (!u) { res.status(404).json({ success: false, error: 'CASTER_UNIT_NOT_FOUND' }); return; }
     exeCaster = toExecutorUnit(u);
     casterBattleUnit = u;
+    // 被动调度器：技能施放单位开始行动时按 trigger 条件自动发动被动技能
+    passiveLogsSkill = evaluatePassives(u, battle);
     // 阵营轮转门控（角色制）：仅当前行动角色的单位可攻击；单人沙盒模式放开
     ensureTurnModel(battle);
     const owners = new Set<string>();
@@ -1319,11 +1984,50 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
     exeTarget = target;
   }
 
-  // 射程判定已由前端"选中目标"阶段权威完成（getSkillRange + validTargets 门控，含 min_range 内圈排除）。
-  // 结算端不再重复校验距离——两套数据源不一致会误杀合法目标（OUT_OF_RANGE 距离坍缩）。选中即视为已通过射程判定。
+  // ★ Phase 31-RangeNormalize：射程判定由前端"选中目标"阶段权威完成（getSkillRange + validTargets 门控），
+  // 网关层不重复校验（避免双重拒绝：前端已选 + 内部 executeUniversalSkill 已用 isTargetInRange 兜底）。
+  // 内部路径（反击/决斗/治疗等）经 executeUniversalSkill 内的 isTargetInRange 统一校验，
+  // 三端共用 shared-kernel 纯函数，杜绝口径分叉。选中即视为已通过射程判定。
 
   try {
+    // ★ C-6：E 组（装备携带）技能预检——若技能来源装备槽已被 lockedDurability 锁定，
+    // 显式返回 EQUIPMENT_LOCKED，杜绝"武器已炸仍在放技能"的幽灵加成。
+    const _skillSlot = (casterBattleUnit?.skills || []).find((s: any) => s && (s.id === skillKey || s.key === skillKey || s.skill_key === skillKey))?.slot;
+    if (casterBattleUnit && _skillSlot && isEquipmentLocked(casterBattleUnit, _skillSlot)) {
+      res.status(400).json({ success: false, error: 'EQUIPMENT_LOCKED', message: `装备槽 ${_skillSlot} 已损毁锁定，技能不可用` });
+      return;
+    }
+    // ★ Week3：确定性掷骰入口——以 (battleId, round, nonce) 注入种子，使同一战斗同一步必产出相同掷骰序列，战报可重放。
+    // nonce 为每战局独立递增计数器（模块级 Map 维护），保证单次攻击内部多次掷骰序列确定且不同攻击间互不干扰。
+    if (!_battleDiceNonce.has(battleId)) _battleDiceNonce.set(battleId, 0);
+    const diceNonce = _battleDiceNonce.get(battleId)! + 1;
+    _battleDiceNonce.set(battleId, diceNonce);
+    DiceService.setSeed(battleId, battle.round || 1, diceNonce);
     const executor = getSkillExecutor();
+    // Phase B：on_attack_start 点火（攻击发起前、目标已锁定）—— 供决斗/掩护/ZOC 等反应器接管
+    if (casterBattleUnit && writeBackTarget) {
+      fireReaction('on_attack_start', {
+        caster: casterBattleUnit, target: writeBackTarget, battle, skillKey,
+        pendingAction: (battle as any).pendingAction || null,
+      });
+      // S2：补齐 on_attacked 点火（目标被攻击时）—— 此前仅登记于 GATEWAY_KNOWN_TRIGGERS 却从未点火
+      fireReaction('on_attacked', {
+        caster: casterBattleUnit, target: writeBackTarget, battle, skillKey,
+        pendingAction: (battle as any).pendingAction || null,
+      });
+    }
+    // Phase C：三型寿命管制（opt-in；仅 entry.cost.enforce===true 时拦截，默认不影响现有词条）
+    if (casterBattleUnit && writeBackTarget) {
+      const entry = (getGlossaryConfig().skills || {})[skillKey];
+      if (entry) {
+        const costCheck = checkCost(battle, casterBattleUnit, entry);
+        if (!costCheck.ok) {
+          res.status(400).json({ success: false, error: 'COST_LIMIT_REACHED', message: costCheck.reason });
+          return;
+        }
+        (req as any).__costEntry = entry; // 结算成功后扣减
+      }
+    }
     // 武器类装备机动值加成：基础攻击(skillSlot 为空)或武器槽技能 → 叠加武器机动
     const ownedSkillForWeapon = (exeCaster?.skills || []).find((s: any) => s && (s.id === skillKey || s.key === skillKey || s.skill_key === skillKey || s.id === skill_id));
     const weaponInfo = computeWeaponMobilityBonus(exeCaster, ownedSkillForWeapon?.slot || null);
@@ -1338,29 +2042,100 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
         terrainMap: battle ? buildTerrainMap(battle) : (context?.terrainMap || null),
         weaponMobility: weaponInfo.mobility,
         isWeaponAttack: weaponInfo.isWeapon,
+        // ★ 地图炮方向选择：前端显式 aoe_dir（1-6）透传给战斗引擎
+        aoe_dir: (typeof aoe_dir === 'number' && aoe_dir >= 1 && aoe_dir <= 6) ? aoe_dir : (typeof aoe_dir === 'string' && /^[1-6]$/.test(aoe_dir) ? Number(aoe_dir) : null),
       },
       skillDefinition || null,
     );
 
-    // 回写伤害/治疗到内存战局目标单位
-    if (writeBackTarget && result && result.triggered !== false) {
-      const st = writeBackTarget.currentStats || (writeBackTarget.currentStats = {});
-      if (typeof result.final_damage === 'number' && result.final_damage > 0) {
-        st.hp = Math.max(0, (st.hp ?? 0) - result.final_damage);
-      }
-      if (typeof result.heal_amount === 'number' && result.heal_amount > 0) {
-        const maxHp = st.maxHp ?? st.hp ?? 0;
-        st.hp = Math.min(maxHp, (st.hp ?? 0) + result.heal_amount);
+    // Phase C：结算成功后扣减三型寿命（opt-in；entry.cost.enforce===true 才实际扣减）
+    if ((req as any).__costEntry) {
+      try { consumeCost(battle, casterBattleUnit, (req as any).__costEntry); } catch (_) { /* 不影响主链路 */ }
+    }
+
+    // ★ 2026-08-06 Phase 33-Contract：结算诊断落盘。
+    //   引擎侧的 diagnostics（如 UNKNOWN_PREDICATE）在此同步到服务端 logger，
+    //   前端经 result.diagnostics 渲染黄色警告条，彻底消除静默吞失败。
+    if (result && Array.isArray((result as any).diagnostics) && (result as any).diagnostics.length) {
+      const diags = (result as any).diagnostics;
+      const level = diags.some((d: any) => d.level === 'error') ? 'error' : 'warn';
+      logger[level]({
+        msg: `[SKILL DIAGNOSTICS] 战局 ${battleId} 技能 ${skillKey}`,
+        diagnostics: diags,
+      });
+    }
+
+    // ★ Phase 32-AOE：多目标批量写回（形状驱动范围技能）
+    //   当 result.targets 存在时遍历所有命中单位扣血 + 状态挂接；否则回落单目标写回。
+    if (result && result.triggered !== false) {
+      if (Array.isArray(result.targets) && result.targets.length > 0) {
+        result.targets.forEach((t: any) => {
+          const bu = battle ? battle.units.get(String(t.unitId)) : null;
+          if (!bu) return;
+          if (typeof t.finalDamage === 'number' && t.finalDamage > 0) {
+            // ★ 统一 HP 写回（同步顶层 hp 与 currentStats.hp，使前端棋子真实扣血）
+            applyHpDelta(bu, -t.finalDamage);
+            t.killed = ((bu.currentStats?.hp ?? 0) <= 0);
+            // ★ 2.0B.3 防御侧：受击触发防具耐久消耗（铠甲归零自动破损并移除加成，同步回写 equipState）
+            try { getEquipmentDurabilityManager().applyDamage(bu, t.finalDamage, result.damage_kind); } catch (_) { /* 耐久不影响 HP 主流程 */ }
+          }
+          if (Array.isArray(t.statusEffects) && t.statusEffects.length) {
+            const list = bu.statusEffects || (bu.statusEffects = []);
+            t.statusEffects.forEach((se: any) => {
+              list.push({
+                status: se.status,
+                value: se.value,
+                stacks: se.stacks || 1,
+                duration: se.duration || 3,
+                appliedAt: Date.now(),
+                source: skillKey,
+              });
+            });
+          }
+        });
+      } else if (writeBackTarget) {
+        // Phase B：pre_damage_apply 点火（伤害/治疗写回前）—— 供减免/转移/均摊等反应器介入
+        fireReaction('pre_damage_apply', {
+          caster: casterBattleUnit, target: writeBackTarget, battle, skillKey,
+          result, pendingAction: (battle as any).pendingAction || null,
+        });
+        // 回写伤害/治疗到内存战局目标单位（单目标）★ 统一经 applyHpDelta 同步顶层
+        if (typeof result.final_damage === 'number' && result.final_damage > 0) {
+          applyHpDelta(writeBackTarget, -result.final_damage);
+          // ★ 2.0B.3 防御侧：受击触发防具耐久消耗（铠甲归零自动破损并移除加成，同步回写 equipState）
+          try { getEquipmentDurabilityManager().applyDamage(writeBackTarget, result.final_damage, result.damage_kind); } catch (_) { /* 耐久不影响 HP 主流程 */ }
+        }
+        if (typeof result.heal_amount === 'number' && result.heal_amount > 0) {
+          applyHpDelta(writeBackTarget, result.heal_amount);
+        }
       }
     }
 
-    // 反击伤害写回施法者（仅当施法者取自战局单位）
+    // ★ 2.0B.3 攻击侧武器耐久消耗（/skill 路径）：造成伤害时武器 -1（被锁定槽由 isLocked 钳 0）
+    if (result && result.final_damage > 0 && !result.dodged) {
+      try { getEquipmentDurabilityManager().consumeWeaponDurability(casterBattleUnit); } catch (_) { /* 耐久不影响主流程 */ }
+    }
+    // 反击伤害写回施法者（仅当施法者取自战局单位）★ 统一经 applyHpDelta 同步顶层
     if (casterBattleUnit && result && result.counter_triggered && result.counter_damage > 0) {
-      const cst = casterBattleUnit.currentStats || (casterBattleUnit.currentStats = {});
-      cst.hp = Math.max(0, (cst.hp ?? 0) - result.counter_damage);
+      applyHpDelta(casterBattleUnit, -result.counter_damage);
+    }
+
+    // 双阵营效果堆栈路由：当技能自身携带 effects 数组（纯效果组 / target_scope=both|all），
+    // 按每个 effect 的 target_type 分头命中敌友单位，补挂 statusEffect（与 DSL 引擎结算互补，互不重复）。
+    const ownedSkillForRouting = (casterBattleUnit?.skills || []).find(
+      (s: any) => s && (s.id === skillKey || s.key === skillKey || s.skill_key === skillKey || s.id === skill_id),
+    );
+    const routingLogs: any[] = [];
+    if (ownedSkillForRouting && Array.isArray(ownedSkillForRouting.effects) && ownedSkillForRouting.effects.length) {
+      const scope = ownedSkillForRouting.target_scope;
+      if (scope === 'both' || scope === 'all' || !ownedSkillForRouting.order) {
+        const rl = routeEffectStackToTargets(ownedSkillForRouting, casterBattleUnit, writeBackTarget, battle);
+        routingLogs.push(...rl);
+      }
     }
 
     // 结构化 statusEffects 写回（buff/debuff 生成实例 或 attack 消费的层数扣减）
+    // 多目标场景：target 端的 status 已由上方批量写回处理，此处仅处理 caster 端（反击类）。
     applyStatusEffectsWriteback(casterBattleUnit, exeCaster, writeBackTarget, exeTarget, result);
 
     // 破隐规则②：释放任意主动技能（非"进入隐匿"类）即强制破隐。
@@ -1385,6 +2160,8 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
       engine: 'combat-service/.cjs',
       result,
       victory: skillVictory,
+      passive_triggers: (typeof passiveLogsSkill !== 'undefined' && passiveLogsSkill.length) ? passiveLogsSkill : undefined,
+      effect_routes: routingLogs.length ? routingLogs : undefined,
     });
   } catch (err: any) {
     logger.error({ msg: `[Gateway:3006] [SKILL ERROR] 战局 ${battleId}: ${ err }` });
@@ -1403,7 +2180,7 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
 // 依赖（同模块作用域）：getSkillExecutor / toExecutorUnit / buildTerrainMap /
 //   applyStatusEffectsWriteback / fireReaction / evaluateVictory / applySizeTacticBuff /
 //   consumeActionPoint / markStandbyIfDone / hasActionPoints / resolveRole /
-//   hexDistanceOffset / battleStore / getGlossaryConfig / BASIC_MELEE_RANGE / BASIC_RANGED_RANGE /
+//   hexDistanceOffset / battleStore / getGlossaryConfig /
 //   computeWeaponMobilityBonus / getEquipmentAttackStat
 // 注：当前 Gateway 无 WS 推送通道（commPush 未接线），客户端经 GET /state 轮询 pendingSurprise。
 // ============================================
@@ -1411,11 +2188,14 @@ router.post('/api/combat/:battleId/skill', (req: Request, res: Response) => {
 const SURPRISE_TIMEOUT_MS = 10000;
 const OVERWATCH_SKILL_KEY = 'tactical_overwatch';
 
-/** tactical_overwatch 反应射程（优先技能本体 cast_range，否则 systems.ambush.activation_range 兜底） */
+/** tactical_overwatch 反应射程：统一由 getSkillRangeFields 派生（加法模型）；systems.ambush.activation_range 为系统层参数特例兜底（不传入 getSkillRangeFields） */
 function getOverwatchRange(battle: any): number {
   const cfg = getGlossaryConfig();
   const skill = cfg?.skills?.[OVERWATCH_SKILL_KEY];
-  if (skill && typeof skill.cast_range === 'number') return skill.cast_range;
+  if (skill) {
+    const rf = getSkillRangeFields(skill);
+    if (typeof rf.maxRange === 'number' && rf.maxRange > 0) return rf.maxRange;
+  }
   const amb = cfg?.systems?.ambush;
   if (amb && typeof amb.activation_range === 'number') return amb.activation_range;
   return 6;
@@ -1507,13 +2287,15 @@ function buildSkillDef(battle: any, body: any): { skillKey: string; inlineDef: a
         action_type: 'attack',
         attack_stat: isRanged ? 'ranged' : 'melee',
         damage_kind: sk.damageType === 'ENERGY' ? 'energy' : 'kinetic',
-        cast_range: sk.cast_range ?? (isRanged ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE),
-        max_range: sk.cast_range ?? (isRanged ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE),
-        min_cast_range: sk.min_cast_range ?? 0,
-        min_range: sk.min_cast_range ?? 0,
+        // ★ 归拢：射程统一由 getSkillRangeFields（shared-kernel 真相源）派生，不再写死 BASIC_*_RANGE
+        // 派生值 cast_range/max_range/min_range 仅作为引擎兼容字段，值来自派生结果（非来源写死），严禁回退读取为真相
+        ...(() => {
+          const rf = getSkillRangeFields(sk);
+          return { cast_range: rf.maxRange, max_range: rf.maxRange, min_cast_range: rf.minRange, min_range: rf.minRange };
+        })(),
         base_damage: (isRanged ? (sk.ranged || sk.attack || 0) : (sk.melee || sk.attack || 0)) + getEquipmentAttackStat(casterUnit, (sk as any)?.slot ?? null, isRanged),
         dice_type: '1d6',
-        success_line: 4,
+        success_line: DiceService.getConfig().hitCheck?.successLine ?? 4,
         success_bonus_damage: 0,
         is_manual_roll: false,
         target_filter: 'enemy',
@@ -1522,30 +2304,8 @@ function buildSkillDef(battle: any, body: any): { skillKey: string; inlineDef: a
       };
     }
   } else {
-    const at = attack_type === 'ranged' ? 'ranged' : 'melee';
-    const rangeVal = at === 'ranged' ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE;
-    inlineDef = {
-      type: 'active',
-      label: at === 'ranged' ? '远程攻击' : '近战攻击',
-      category: at,
-      action_type: 'attack',
-      attack_stat: at,
-      damage_kind: 'kinetic',
-      cast_range: rangeVal,
-      max_range: rangeVal,
-      min_cast_range: 0,
-      min_range: 0,
-      base_damage: (at === 'ranged'
-        ? (exeCaster?.ranged || exeCaster?.attack || 0)
-        : (exeCaster?.melee || exeCaster?.attack || 0)) + getEquipmentAttackStat(casterUnit, null, at === 'ranged'),
-      dice_type: '1d6',
-      success_line: 4,
-      success_bonus_damage: 0,
-      is_manual_roll: false,
-      target_filter: 'enemy',
-      requires_hit: true,
-      height_bonus_enabled: true,
-    };
+    // 攻击必须由技能承载，不存在"普通攻击"概念：拒绝无 skill_id 的 ranged/melee 基础攻击。
+    return { skillKey: '', inlineDef: null, error: { status: 400, body: { success: false, error: 'SKILL_REQUIRED', message: '攻击必须由技能承载：attack_type=skill 且携带 skill_id' } } };
   }
   if (!skillKey) {
     return { skillKey: '', inlineDef: null, error: { status: 400, body: { success: false, error: 'VALIDATION_ERROR', message: 'skill_key/skill_id/attack_type 不能为空' } } };
@@ -1589,6 +2349,10 @@ function runAttackInternal(battle: any, opts: any): any {
   try {
     const executor = getSkillExecutor();
     const ownedSkillForWeapon = (exeCaster?.skills || []).find((s: any) => s && (s.id === skillKey || s.key === skillKey || s.skill_key === skillKey));
+    // ★ C-6：装备槽锁定预检（EQUIPMENT_LOCKED），与 /skill 路由一致
+    if (ownedSkillForWeapon?.slot && isEquipmentLocked(casterUnit, ownedSkillForWeapon.slot)) {
+      return { ok: false, code: 'EQUIPMENT_LOCKED', status: 400, message: `装备槽 ${ownedSkillForWeapon.slot} 已损毁锁定，技能不可用` };
+    }
     const weaponInfo = computeWeaponMobilityBonus(exeCaster, ownedSkillForWeapon?.slot || null);
     const result = executor.executeUniversalSkill(
       skillKey,
@@ -1610,19 +2374,59 @@ function runAttackInternal(battle: any, opts: any): any {
       result.final_damage = Math.floor(result.final_damage * opts.damageMultiplier);
     }
 
-    if (writeBackTarget && result && result.triggered !== false) {
-      const st = writeBackTarget.currentStats || (writeBackTarget.currentStats = {});
-      if (typeof result.final_damage === 'number' && result.final_damage > 0) {
-        st.hp = Math.max(0, (st.hp ?? 0) - result.final_damage);
-      }
-      if (typeof result.heal_amount === 'number' && result.heal_amount > 0) {
-        const maxHp = st.maxHp ?? st.hp ?? 0;
-        st.hp = Math.min(maxHp, (st.hp ?? 0) + result.heal_amount);
+    // ★ Phase 32-AOE：多目标批量写回（runAttackInternal 路径）
+    if (result && result.triggered !== false) {
+      if (Array.isArray(result.targets) && result.targets.length > 0) {
+        result.killedTargets = [];
+        result.targets.forEach((t: any) => {
+          const bu = battle ? battle.units.get(String(t.unitId)) : null;
+          if (!bu) return;
+          if (typeof t.finalDamage === 'number' && t.finalDamage > 0) {
+            // ★ 统一 HP 写回（同步顶层 hp 与 currentStats.hp，使前端棋子真实扣血）
+            applyHpDelta(bu, -t.finalDamage);
+            t.killed = ((bu.currentStats?.hp ?? 0) <= 0);
+            if (t.killed) (result.killedTargets as string[]).push(String(t.unitId));
+            // ★ 2.0B.3 防御侧：受击触发防具耐久消耗（铠甲归零自动破损并移除加成，同步回写 equipState）
+            try { getEquipmentDurabilityManager().applyDamage(bu, t.finalDamage, result.damage_kind); } catch (_) { /* 耐久不影响 HP 主流程 */ }
+          }
+          if (Array.isArray(t.statusEffects) && t.statusEffects.length) {
+            const list = bu.statusEffects || (bu.statusEffects = []);
+            t.statusEffects.forEach((se: any) => {
+              list.push({
+                status: se.status,
+                value: se.value,
+                stacks: se.stacks || 1,
+                duration: se.duration || 3,
+                appliedAt: Date.now(),
+                source: skillKey,
+              });
+            });
+          }
+        });
+        // 主目标（writeBackTarget）死亡 → 置顶层 killed
+        if (writeBackTarget && (writeBackTarget.currentStats?.hp ?? 0) <= 0) {
+          result.killed = true;
+        }
+      } else if (writeBackTarget) {
+        // 单目标写回 ★ 统一经 applyHpDelta 同步顶层
+        if (typeof result.final_damage === 'number' && result.final_damage > 0) {
+          applyHpDelta(writeBackTarget, -result.final_damage);
+        }
+        if (typeof result.heal_amount === 'number' && result.heal_amount > 0) {
+          applyHpDelta(writeBackTarget, result.heal_amount);
+        }
+        // ★ Phase 7.1：单目标击杀标记（hp 归零且造成过伤害）
+        if ((result.final_damage ?? 0) > 0 && (writeBackTarget.currentStats?.hp ?? 0) <= 0) {
+          result.killed = true;
+        }
       }
     }
+    // ★ 2.0B.3 攻击侧武器耐久消耗：每次攻击 -1（被锁定槽不可被消耗，由 isLocked 钳 0）
+    if (result && result.triggered !== false && !result.dodged) {
+      try { getEquipmentDurabilityManager().consumeWeaponDurability(casterUnit); } catch (_) { /* 耐久不影响攻击主流程 */ }
+    }
     if (casterUnit && result && result.counter_triggered && result.counter_damage > 0) {
-      const cst = casterUnit.currentStats || (casterUnit.currentStats = {});
-      cst.hp = Math.max(0, (cst.hp ?? 0) - result.counter_damage);
+      applyHpDelta(casterUnit, -result.counter_damage);
     }
 
     applyStatusEffectsWriteback(casterUnit, exeCaster, writeBackTarget, exeTarget, result);
@@ -1707,15 +2511,18 @@ function runAttackInternal(battle: any, opts: any): any {
 // D9-2/C 重放载荷校验：解析 C 自选技能并做二次射程校验（D9-3）
 function resolveSelectedSkill(battle: any, selectedSkillId: any, cUnit: any, targetUnit: any, mode: string): any {
   if (!selectedSkillId) {
-    const at = (cUnit.currentStats?.range ?? 1) > 1 ? 'ranged' : 'melee';
-    return { attack_type: at, skill_id: null, skill_key: at };
+    // 攻击必须由技能承载，不存在"普通攻击"概念：未选技能直接拒绝。
+    return { error: { status: 400, body: { success: false, error: 'SKILL_REQUIRED', message: '请先选择技能后再发起攻击' } } };
   }
   const owned = (cUnit.skills || []).find((s: any) =>
     s?.id === selectedSkillId || s?.key === selectedSkillId || s?.skill_key === selectedSkillId,
   );
   if (!owned) return { error: { status: 400, body: { success: false, error: 'SKILL_NOT_OWNED', message: 'C 不拥有所选技能' } } };
   const skillKey = owned.key || owned.skill_key || owned.name || selectedSkillId;
-  const range = Number(owned.cast_range ?? owned.range ?? (mode === 'counter' ? BASIC_MELEE_RANGE : BASIC_RANGED_RANGE));
+  // ★ 射程唯一真相源：由 getSkillRangeFields（shared-kernel）按【类型+词条】派生。
+  // 不再做"远程护栏"二次修正——射程只取决于类型(远程=3/近战=1/auto=0)与词条显式数值覆盖。
+  const rf = getSkillRangeFields(owned);
+  const range = rf.maxRange;
   if (!unitInRange(cUnit, targetUnit, range)) {
     return { error: { status: 400, body: { success: false, error: 'INVALID_CHOICE', message: '所选技能射程不足以覆盖目标（D9-3 二次校验）' } } };
   }
@@ -1819,7 +2626,10 @@ function resolveSurpriseChoice(battle: any, unitId: any, choice: string, selecte
   const lockedOwner = lockedUnit?.ownerId;
 
   // 鉴权绑定：① 合法拥有者本人响应；② GM(REFEREE/DOMINATOR) 仅可代投 AI/neutral 锁定者（D9-8）
-  const isGM = role === 'REFEREE' || role === 'DOMINATOR';
+  // 2026-08-05 安全加固：isGM 改读开战瞬间固化的身份快照，杜绝中途后台改 role 越权代投。
+  // 快照缺失时回退入参 role（兼容旧战局）。
+  const snapRole = (battle as any)?.state_snapshot?.roles?.[String(userId)]?.role || role || '';
+  const isGM = snapRole === 'REFEREE' || snapRole === 'DOMINATOR';
   const isOwner = userId != null && lockedOwner != null && String(userId) === String(lockedOwner);
   if (!isOwner && !(isGM && lockedIsAI)) {
     return { ok: false, code: 'OWNER_MISMATCH', status: 403, message: '仅锁定反应者的拥有者(或 GM 代投 AI)可响应' };
@@ -1981,6 +2791,9 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
   if (!casterUnit) { res.status(404).json({ success: false, error: 'CASTER_UNIT_NOT_FOUND' }); return; }
   const exeCaster = toExecutorUnit(casterUnit);
 
+  // 被动调度器：攻击单位开始行动时按 trigger 条件自动发动被动技能
+  const passiveLogsAttack = evaluatePassives(casterUnit, battle);
+
   let exeTarget: any = null;
   let writeBackTarget: any = null;
   if (target_id) {
@@ -2003,8 +2816,11 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
     if (owned) {
       // 优先用归属技能自身的射程定义交给引擎；保证 UI/高亮/校验/结算同源
       skillKey = owned?.key || owned?.skill_key || owned?.name || skill_id;
-      const realRange = Number(owned.cast_range ?? owned.range ?? owned.max_range ?? 1);
-      const realMin = Number(owned.min_cast_range ?? owned.min_range ?? 0);
+      // ★ 射程唯一真相源：一律由 getSkillRangeFields 派生（类型基准 + 词条显式射程）。
+      // 废除旧 `?? 1` 写死——任何缺失/误填都不应把远程炮压成 1 格。
+      const rf = getSkillRangeFields(owned);
+      const realRange = rf.maxRange;
+      const realMin = rf.minRange;
       const isRanged = /远程|ranged|射击|shot/i.test(String(owned.type || '')) || owned.damageType === 'ENERGY';
       inlineDef = {
         type: 'active',
@@ -2019,7 +2835,7 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
         min_range: realMin,
         base_damage: (isRanged ? (exeCaster.ranged || exeCaster.attack || 0) : (exeCaster.melee || exeCaster.attack || 0)) + getEquipmentAttackStat(casterUnit, (owned as any)?.slot ?? null, isRanged),
         dice_type: '1d6',
-        success_line: 4,
+        success_line: DiceService.getConfig().hitCheck?.successLine ?? 4,
         success_bonus_damage: 0,
         is_manual_roll: false,
         target_filter: 'enemy',
@@ -2041,13 +2857,14 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
         action_type: 'attack',
         attack_stat: 'ranged',
         damage_kind: /能量|energy|光束|beam|电磁|em/i.test(String(skill_key || skill_name || '')) ? 'energy' : 'kinetic',
-        cast_range: 2,
-        min_cast_range: 0,
-        max_range: 2,
-        min_range: 0,
+        // 退化兜底：category:'ranged' 经 getSkillRangeFields 派生（基准 3），不再写死 cast_range:2
+        ...(() => {
+          const rf = getSkillRangeFields({ category: 'ranged' });
+          return { cast_range: rf.maxRange, max_range: rf.maxRange, min_cast_range: rf.minRange, min_range: rf.minRange };
+        })(),
         base_damage: (exeCaster.ranged || exeCaster.attack || 0) + getEquipmentAttackStat(casterUnit, null, true),
         dice_type: '1d6',
-        success_line: 4,
+        success_line: DiceService.getConfig().hitCheck?.successLine ?? 4,
         success_bonus_damage: 0,
         is_manual_roll: false,
         target_filter: 'enemy',
@@ -2056,39 +2873,19 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
       };
     }
   } else {
-    const at = attack_type === 'ranged' ? 'ranged' : 'melee';
-    skillKey = at;
-    // 攻击距离以基础攻击技能自身属性(cast_range)为准，不再使用单位"范围" stat。
-    // 基础近战固定 1 格；基础远程取技能分类默认射程(对齐 skillExecutor.DEFAULT_RANGE_BY_CATEGORY.ranged = 6)。
-    const rangeVal = at === 'ranged' ? BASIC_RANGED_RANGE : BASIC_MELEE_RANGE;
-    // 内联基础攻击定义，驱动 .cjs executeUniversalSkill 计算伤害（base_damage 取单位近战/远程值）
-    inlineDef = {
-      type: 'active',
-      label: at === 'ranged' ? '远程攻击' : '近战攻击',
-      category: at,
-      action_type: 'attack',
-      attack_stat: at,
-      damage_kind: 'kinetic',
-      cast_range: rangeVal,
-      max_range: rangeVal,
-      min_cast_range: casterUnit?.currentStats?.min_range ?? 0,
-      min_range: casterUnit?.currentStats?.min_range ?? 0,
-      base_damage: (at === 'ranged'
-        ? (exeCaster.ranged || exeCaster.attack || 0)
-        : (exeCaster.melee || exeCaster.attack || 0)) + getEquipmentAttackStat(casterUnit, null, at === 'ranged'),
-      dice_type: '1d6',
-      success_line: 4,
-      success_bonus_damage: 0,
-      is_manual_roll: false,
-      target_filter: 'enemy',
-      requires_hit: true,
-      height_bonus_enabled: true,
-    };
+    // 攻击必须由机体携带的技能承载，不存在"普通攻击"概念。
+    // 不接受无 skill_id 的 ranged/melee 基础攻击分支。
+    res.status(400).json({
+      success: false,
+      error: 'SKILL_REQUIRED',
+      message: '攻击必须由技能承载：请提供 attack_type=skill 并携带 skill_id / skill_key / skill_name',
+    });
+    return;
   }
 
-  // 射程判定已由前端"选中目标"阶段权威完成（getSkillRange + validTargets 门控，含 min_range 内圈排除）。
-  // 结算端不再重复校验距离——两套数据源（前端 getSkillRange / 服务端 resolveSkillRange）不一致会误杀
-  // 合法目标（OUT_OF_RANGE 距离坍缩：距离1能结算、隔一格被打回）。选中即视为已通过射程判定。
+  // ★ Phase 31-RangeNormalize：射程判定由前端"选中目标"阶段权威完成（getSkillRange + validTargets 门控）。
+  // 内部 executeUniversalSkill 已用 isTargetInRange（shared-kernel 纯函数）兜底校验，
+  // 三端共用同一套函数，杜绝"前端能选后端打不出"。选中即视为已通过射程判定。
 
   // 任务 4.3 — 奇袭拦截（D9-1: 奇袭结算链内 __surpriseResolution 跳过拦截，避免套娃）
   if (!(req.body as any).__surpriseResolution) {
@@ -2171,6 +2968,9 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
     combat_result: {
       triggered: result?.triggered ?? true,
       final_damage: result?.final_damage ?? 0,
+      is_crit: !!result?.is_crit,
+      killed: !!result?.killed,
+      killed_targets: Array.isArray(result?.killedTargets) ? result.killedTargets : [],
       dodged: result?.dodged ?? false,
       counter_triggered: result?.counter_triggered ?? false,
       counter_damage: result?.counter_damage ?? 0,
@@ -2182,6 +2982,16 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
       formula: result?.formula ?? null,
       sizeBanner: result?.sizeBanner ?? null,
       sizeTactic: result?.sizeTactic ?? null,
+      // ★ Phase 32-AOE：多目标结算汇总（地图炮/AOE 命中全体）透传给前端弹窗
+      targets: Array.isArray(result?.targets) ? result.targets : null,
+      hit_count: result?.hit_count ?? 0,
+      aoe_mode: result?.aoe_mode ?? null,
+      // ── 阶段 6：机动差值与姿态数据透传（严格对齐 damagePipe.stages，禁止臆造字段） ──
+      mobility_diff: (result && result.stages) ? (result.stages.mobility_diff ?? 0) : 0,
+      sniper_mobility_reduction: (result && result.stages) ? (result.stages.sniper_mobility_reduction ?? 0) : 0,
+      height_bonus: (result && result.stages) ? (result.stages.height_bonus ?? 0) : 0,
+      attacker_stance: (casterUnit && casterUnit.stance) ? String(casterUnit.stance) : null,
+      defender_stance: (writeBackTarget && writeBackTarget.stance) ? String(writeBackTarget.stance) : null,
     },
     skill_id: skill_id ?? null,
     surprise_triggered: false,
@@ -2193,6 +3003,7 @@ router.post('/api/combat/:battleId/attack', (req: Request, res: Response) => {
     pending_reaction: pendingReaction ?? null,
     victory: victoryResult,
     interrupted: false,
+    passive_triggers: passiveLogsAttack.length ? passiveLogsAttack : undefined,
   });
 });
 
@@ -2335,6 +3146,13 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
     return;
   }
 
+  // ★ P-3+ DK4：部署锁定门控——非部署阶段（已进入 BATTLE_LOADING/COMBAT）一律 409 DEPLOY_LOCKED，
+  // 杜绝"看完站位再补放"与赛后补放。先关门后验货的关门体现。
+  if (battle.phase !== BattlePhase.DEPLOYMENT) {
+    res.status(409).json({ error: 'DEPLOY_LOCKED', message: '部署阶段已锁定，无法再放置单位' });
+    return;
+  }
+
   // 从 pendingUnits 中查找并移除；找不到时回退到请求体 unit_data
   // （覆盖：前端回退池 / pending-units 静默失败 / 重复部署场景）
   const pending: any[] = (battle as any).pendingUnits || [];
@@ -2379,6 +3197,10 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
     viewUrls,
     // 单位体型（体积）：优先取部署池，回退请求体
     size: unitData.size ?? unit_data?.size,
+    // 机体基础属性（编辑器原始值）：射击/格斗/机动，供前端单位卡片展示
+    main_射击: unitData.main_射击 ?? unit_data?.main_射击,
+    main_格斗: unitData.main_格斗 ?? unit_data?.main_格斗,
+    main_机动: unitData.main_机动 ?? unit_data?.main_机动,
     // 阶段二：传入归一化部件以构建装备耐久/独立 HP 状态
     parts: safeParseValue(unitData.attributes)?.parts ?? safeParseValue(unit_data?.attributes)?.parts,
   });
@@ -2404,8 +3226,34 @@ router.post('/api/combat/:battleId/deploy-unit', authenticate, (req: Request, re
 });
 
 /**
+ * ★ P-3+：统一点火序列（Ignition Tick）。
+ * 把"进入战斗"的全部一次性结算收敛到单一函数，保证时序可复现、与操作顺序无关：
+ *  - round=1 / 先攻阵营 / 行动序初始化
+ *  - 用已 reconcile 的 factionRoles 回填每个单位轮转角色（敌我/可见/胜负判定一致）
+ *  - 触发 ON_BATTLE_START 反应（初始 Buff / 词条到期时间统一锚定）
+ * 单一原子事务：调用方在 BATTLE_LOADING 关门后调用，随后 battleStore.set（A-5 CAS 自动覆盖）。
+ */
+function igniteBattleStart(battle: any): void {
+  battle.turn = 1;
+  battle.round = 1;
+  battle.activeFactionIndex = 0;
+  battle.activeFaction = (battle.factionTurnOrder && battle.factionTurnOrder[0]) || '';
+  ensureTurnModel(battle);
+  for (const u of battle.units.values()) {
+    (u as unknown as { role?: string }).role = resolveRole(battle.factionRoles, (u as unknown as { faction?: string }).faction);
+  }
+  // ON_BATTLE_START 统一点火：初始 Buff / 词条计时统一锚定（与操作顺序无关，可复现）
+  try {
+    fireReaction('on_battle_start', { battleState: battle, round: 1, log: () => {}, broadcast: () => {} });
+  } catch (e: any) {
+    logger.error({ msg: `[igniteBattleStart] on_battle_start 反应失败 ${ e?.message || e }` });
+  }
+}
+
+/**
  * POST /api/combat/:battleId/end-deployment
  * 结束部署阶段，切换到战斗阶段
+ * ★ P-3+：三段式门控（DEPLOYMENT → BATTLE_LOADING → COMBAT）：先关门后验货，再统一点火。
  */
 router.post('/api/combat/:battleId/end-deployment', authenticate, (req: Request, res: Response) => {
   const { battleId } = req.params;
@@ -2416,17 +3264,37 @@ router.post('/api/combat/:battleId/end-deployment', authenticate, (req: Request,
     return;
   }
 
-  battle.phase = BattlePhase.COMBAT;
-  battle.turn = 1;
-  battle.round = 1;
-  battle.activeFactionIndex = 0;
-  battle.activeFaction = (battle.factionTurnOrder && battle.factionTurnOrder[0]) || '';
-  // 部署完成后按实际单位重建 factionRoles（修复漏传/错位，保证 ambush 等角色存在）
-  ensureTurnModel(battle);
-  // 方案A：用已 reconcile 的 factionRoles 回填每个单位的轮转角色，保证敌我/可见/胜负判定正确
-  for (const u of battle.units.values()) {
-    (u as unknown as { role?: string }).role = resolveRole(battle.factionRoles, (u as unknown as { faction?: string }).faction);
+  // ★ P-3+ DK3：仅房主可点火（hostId 非空时必须匹配），否则 403
+  if (battle.hostId && battle.hostId !== (req.auth && (req.auth as any).userId)) {
+    res.status(403).json({ error: 'FORBIDDEN', message: '只有房主可结束部署并进入战斗' });
+    return;
   }
+  // ★ P-3+ DK3：幂等 + 已点火则返回 409 DEPLOY_LOCKED（杜绝重复点火/赛后补放）
+  if (battle.phase === BattlePhase.COMBAT) {
+    res.status(409).json({ error: 'DEPLOY_LOCKED', message: '战斗已在进行，部署已锁定' });
+    return;
+  }
+
+  // ★ P-3+：先关门（DEPLOYMENT → BATTLE_LOADING），进入验货态，deploy-unit 此时即 409
+  battle.phase = BattlePhase.BATTLE_LOADING;
+
+  // ★ P-3+：验货（先关门后验货）——单位数 > 0 才允许点火
+  if (!battle.units || battle.units.size === 0) {
+    battle.phase = BattlePhase.DEPLOYMENT; // 验货失败回滚
+    res.status(400).json({ error: 'NO_UNITS_DEPLOYED', message: '尚未部署任何单位，无法进入战斗' });
+    return;
+  }
+
+  // ★ P-3+：统一点火序列（Ignition Tick）——回合/先攻/角色回填/ON_BATTLE_START，单一原子事务
+  try {
+    igniteBattleStart(battle);
+  } catch (e: any) {
+    battle.phase = BattlePhase.DEPLOYMENT; // 点火失败回滚关门
+    logger.error({ msg: `[DEPLOY END] 点火失败回滚 ${ battleId } ${ e?.message || e }` });
+    res.status(500).json({ error: 'IGNITION_FAILED', message: '战斗点火失败' });
+    return;
+  }
+  battle.phase = BattlePhase.COMBAT;
 
   logger.info({ msg: `[Gateway:3006] [DEPLOY END] 战局 ${battleId} 部署阶段结束 → 进入战斗 | ${battle.units.size} 个单位` });
 
@@ -2727,6 +3595,8 @@ router.post('/api/combat/:battleId/action', authenticate, (req: Request, res: Re
     if (battle.activeFaction && !canIssueCommand(battle, u, (req as any).user)) {
       return res.status(400).json({ error: 'NOT_YOUR_TURN', message: `当前行动阵营为 ${battle.activeFaction}` });
     }
+    // 被动调度器：防御单位开始行动时按 trigger 条件自动发动被动技能
+    const passiveLogsDefend = evaluatePassives(u, battle);
     // ① 防御 = 消耗 DEFEND 行动点（属于三类之一，不再强制终结整轮）
     consumeActionPoint(u, 'DEFEND', 1);
     // ② 系统级兜底：三类行动点用满任意两类即进入待机（如已移动则本次防御后自动待机）
@@ -2762,6 +3632,7 @@ router.post('/api/combat/:battleId/action', authenticate, (req: Request, res: Re
       round: battle.round,
       turn: battle.turn,
       message: '进入防御姿态',
+      passive_triggers: passiveLogsDefend.length ? passiveLogsDefend : undefined,
     });
   }
 
@@ -2864,10 +3735,30 @@ router.post('/api/combat/:battleId/move', authenticate, (req: Request, res: Resp
     const unit = state.units.get(String(unit_id));
     if (!unit) return res.status(404).json({ error: 'UNIT_NOT_FOUND' });
 
+    // ★ 定身/移动阻断拦截（G_block_movement 消费侧闭环）：
+    // 读取施动单位 _meta.flags.block_movement 与到期回合 block_movement_until。
+    // 若处于阻断生效期（标记为真且未到期），直接拒绝移动，不进入寻路/AP 消耗。
+    const bmFlags = unit?._meta?.flags;
+    if (bmFlags && bmFlags.block_movement === true) {
+      const until = typeof bmFlags.block_movement_until === 'number' ? bmFlags.block_movement_until : Infinity;
+      const curRound = typeof state.round === 'number' ? state.round : (state.turnOrder?.round ?? 0);
+      if (curRound <= until) {
+        return res.status(400).json({
+          ok: false,
+          code: 'MOVEMENT_BLOCKED',
+          message: '单位已被定身/阻断移动',
+          until_round: until === Infinity ? null : until,
+        });
+      }
+    }
+
     // 阵营轮转门控：仅当前 activeFaction(角色) 的单位可移动
     if (state.activeFaction && resolveRole(state.factionRoles, unit.faction) !== state.activeFaction) {
       return res.status(400).json({ error: 'NOT_YOUR_TURN', message: `当前行动阵营为 ${state.activeFaction}` });
     }
+
+    // 被动调度器：本单位开始行动（移动）时按 trigger 条件自动发动被动技能
+    const passiveLogsMove = evaluatePassives(unit, state);
 
     // P0：移动行动点校验（每轮回合仅 1 次移动）
     if (!hasActionPoints(unit, 'MOVE')) {
@@ -2900,6 +3791,9 @@ router.post('/api/combat/:battleId/move', authenticate, (req: Request, res: Resp
       movementRange,
     );
     if (!path) return res.status(400).json({ error: 'OUT_OF_RANGE' });
+
+    // Phase B：on_move_path 点火（路径已确认合法、落地前）—— 供 ZOC/阻碍等反应器接管路径结算
+    fireReaction('on_move_path', { battleState: state, unit, from, to: { q: target_q, r: target_r }, path });
 
     // Batch D 任务4.2: 移动触发伏击 — 若目的地落入敌方隐身 overwatch 单位射程，
     // 复用 4.3 双段中断状态机（pendingSurprise + 10s 倒计时）发起伏击。
@@ -2967,6 +3861,7 @@ router.post('/api/combat/:battleId/move', authenticate, (req: Request, res: Resp
       from,
       to: { q: target_q, r: target_r },
       path,
+      passive_triggers: passiveLogsMove.length ? passiveLogsMove : undefined,
     });
   } catch (err: any) {
     res.status(500).json({ error: 'MOVE_FAILED', message: err?.message || String(err) });
@@ -3056,6 +3951,7 @@ router.put('/api/combat/dice-config', authenticate, (req: Request, res: Response
       critMax: incoming.critMax,
       availableDiceTypes: incoming.availableDiceTypes,
       manualRollDefault: incoming.manualRollDefault,
+      hitCheck: incoming.hitCheck,
     };
     const ok = saveGlossaryConfig(cfg);
     if (!ok) {
@@ -3064,6 +3960,34 @@ router.put('/api/combat/dice-config', authenticate, (req: Request, res: Response
     }
     DiceService.getConfig(); // 触发实时重读
     res.json({ ok: true, config: DiceService.getConfig() });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// ============================================
+// 原子注册表：语义名 → handler 真相源透传（六段式编辑器 / 方案 A 对接入口）
+// GET /api/combat/atom-registry  → 返回 atomRegistry.listMeta()（语义名 + handlerKey + kind + params + guard + desc）
+//     可选 ?resolve=<type> 直接对单个语义原子做一次 resolve 预览（翻译后的引擎 effect）
+// ============================================
+router.get('/api/combat/atom-registry', (req: Request, res: Response) => {
+  try {
+    // 刷新 entry_id 校验器：基于当前词条库 key 集合（skills/specials/factions/statuses...）
+    const glossary = getGlossaryConfig() || {};
+    const entryKeys = new Set<string>();
+    for (const bucket of ['skills', 'specials', 'factions', 'statuses', 'equipment', 'passives']) {
+      const m = glossary[bucket];
+      if (m && typeof m === 'object') for (const k of Object.keys(m)) entryKeys.add(k);
+    }
+    atomRegistry.setEntryValidator((id: string) => entryKeys.has(id));
+
+    const wantResolve = typeof req.query.resolve === 'string' ? req.query.resolve : undefined;
+    if (wantResolve) {
+      const preview = atomRegistry.resolve({ type: wantResolve });
+      res.json({ ok: true, semantic: wantResolve, resolved: preview });
+      return;
+    }
+    res.json({ ok: true, atoms: atomRegistry.listMeta() });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
@@ -3181,6 +4105,12 @@ router.post('/api/combat/:battleId/duel-check', (req: any, res: any) => {
     const casterUnit = battle.units.get(String(caster_unit_id));
     const targetUnit = battle.units.get(String(target_unit_id));
     if (!casterUnit || !targetUnit) return res.status(400).json({ error: 'UNIT_NOT_FOUND' });
+    // 批次1·1.1：on_target_selected 现由 generic_target_select 注册为通用预检（与 duel 解耦）。
+    // 先过通用闸门（目标存在/未阵亡/非自杀），失败直接拒绝发动；duel 专属门槛仍由 duelCheck 驱动。
+    const pre = fireReaction('on_target_selected', { battleState: battle, caster: casterUnit, target: targetUnit });
+    if (pre && pre.ok === false) {
+      return res.json({ canDuel: false, reason: pre.reason });
+    }
     const result = duelCheck(casterUnit, targetUnit);
     return res.json({ canDuel: result.canDuel, reason: result.reason || null });
   } catch (err: any) {
@@ -3203,6 +4133,8 @@ router.post('/api/combat/:battleId/resolve-duel', (req: any, res: any) => {
     if (!casterUnit || !targetUnit) return res.status(400).json({ error: 'UNIT_NOT_FOUND' });
     const pre = duelCheck(casterUnit, targetUnit);
     if (!pre.canDuel) return res.status(400).json({ error: 'DUEL_NOT_ALLOWED', reason: pre.reason });
+    // Phase B：决斗改事件驱动——resolve-duel 即一次攻击发起，复用 on_attack_start 反应器
+    fireReaction('on_attack_start', { caster: casterUnit, target: targetUnit, battle, skillKey: 'DUEL_RESOLUTION' });
     const ctx: any = {
       battleState: battle, caster: casterUnit, target: targetUnit,
       round: battle.round, log: () => {}, broadcast: () => {},
@@ -3245,10 +4177,10 @@ router.post('/api/combat/:battleId/resolve-snatch', (req: any, res: any) => {
         round: battle.round, log: () => {}, broadcast: () => {},
       };
       result = resolveSnatch(ctx, pending.damage);
-      // 把"本次伤害减半"回灌到已写回的目标 HP
+      // 把"本次伤害减半"回灌到已写回的目标 HP ★ 统一经 applyHpDelta 同步顶层
+      // 减半 = 实际比原伤害少扣 diff，应把少扣的部分加回（diff>0 治疗方向）
       const diff = pending.damage - (result.halvedDamage ?? pending.damage);
-      const st = targetUnit.currentStats || (targetUnit.currentStats = {} as any);
-      st.hp = Math.max(0, (st.hp ?? 0) + diff);
+      if (diff !== 0) applyHpDelta(targetUnit, diff);
       void casterUnit; void targetUnit;
     }
     (battle as any).pendingSnatch = null;

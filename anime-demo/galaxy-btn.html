@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>galaxy-btn 星云按钮 · 旋转锥形渐变边框</title>
+
+<style>
+  :root {
+    --bg: #0b0f1a; --panel: #121a2b; --line: rgba(120,140,180,0.18);
+    --txt: #e9eef7; --muted: #8294b4; --accent: #36c5f0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 28px 80px;
+    background: radial-gradient(1100px 600px at 80% -10%, #16233d 0%, var(--bg) 55%);
+    color: var(--txt); font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: 1px; }
+  .sub { font-size: 12px; color: var(--muted); margin-bottom: 26px; line-height: 1.7; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
+  .card { background: linear-gradient(180deg, var(--panel), #0f1626); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; }
+  .card h3 { font-size: 13px; color: var(--accent); margin: 0 0 4px; letter-spacing: .5px; }
+  .card p { font-size: 11.5px; color: var(--muted); line-height: 1.75; margin: 10px 0 0; }
+  .card code { background: rgba(0,0,0,.4); padding: 1px 5px; border-radius: 3px;
+    font-size: 10.5px; color: #9fd6ee; font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 20px;
+    margin-bottom: 12px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.good { color: #34c759; border-color: rgba(52,199,89,.45); background: rgba(52,199,89,.08); }
+  .tag.warn { color: #ff9500; border-color: rgba(255,149,0,.45); background: rgba(255,149,0,.08); }
+
+  /* 展示台：统一深色底，让发光可见 */
+  .stage { display: flex; align-items: center; justify-content: center;
+    gap: 26px; flex-wrap: wrap; padding: 30px 18px; border-radius: 12px;
+    background: radial-gradient(420px 260px at 50% 50%, #10182b 0%, #080b13 70%);
+    border: 1px solid var(--line); margin-bottom: 22px; }
+
+  /* ================== 以下为 galaxy-btn 原版代码（未改动） ================== */
+  .galaxy-btn {
+    /* Scoped Variables */
+    --btn-bg: #0c0c14;
+    --btn-text: #ffffff;
+    --btn-primary: #8553f4; /* Purple */
+    --btn-secondary: #3b82f6; /* Blue */
+    --btn-accent: #f43f5e; /* Pink */
+    --btn-font-size: 16px; /* Base size */
+
+    /* Layout & Sizing */
+    font-family:
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: var(--btn-font-size);
+    padding: 0.9em 2em;
+    border-radius: 0.75em;
+    border: none;
+    background: var(--btn-bg);
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    z-index: 1;
+    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+    /* Shadow */
+    box-shadow: 0 0.5em 1.5em -0.5em rgba(133, 83, 244, 0.4);
+  }
+
+  /* Accessible Focus State */
+  .galaxy-btn:focus-visible {
+    outline: 2px solid var(--btn-primary);
+    outline-offset: 4px;
+  }
+
+  /* Active Click State */
+  .galaxy-btn:active {
+    transform: scale(0.96);
+  }
+
+  /* --- Interior Content --- */
+  .galaxy-btn__content {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    position: relative;
+    z-index: 2;
+    color: var(--btn-text);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* SVG Icon Styling */
+  .galaxy-btn__icon {
+    width: 1.25em;
+    height: 1.25em;
+    transition: transform 0.3s ease;
+    fill: var(--btn-text);
+  }
+
+  /* Hover: Move Icon */
+  .galaxy-btn:hover .galaxy-btn__icon {
+    transform: translateX(0.25em) rotate(-10deg);
+  }
+
+  /* --- The Rotating Gradient Border (The Nebula) --- */
+  .galaxy-btn::before {
+    content: "";
+    position: absolute;
+    inset: -4px; /* Border width */
+    z-index: 0;
+    background: conic-gradient(
+      from 0deg,
+      var(--btn-bg) 0deg,
+      var(--btn-primary) 60deg,
+      var(--btn-secondary) 120deg,
+      var(--btn-bg) 180deg,
+      var(--btn-accent) 240deg,
+      var(--btn-primary) 300deg,
+      var(--btn-bg) 360deg
+    );
+    border-radius: 0.75em;
+    animation: rotate-nebula 4s linear infinite;
+    filter: blur(8px); /* Soften for glow effect */
+    opacity: 0.7;
+    transition: opacity 0.3s ease;
+  }
+
+  .galaxy-btn:hover::before {
+    opacity: 1;
+    animation-duration: 2s; /* Speed up on hover */
+  }
+
+  /* Mask to create the inner dark area (Simulates border) */
+  .galaxy-btn::after {
+    content: "";
+    position: absolute;
+    inset: 2px; /* Inner spacing */
+    background: var(--btn-bg);
+    border-radius: 0.6em; /* Slightly smaller radius */
+    z-index: 1;
+  }
+
+  /* --- Internal Star Animation --- */
+  .galaxy-btn__stars {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background-image: radial-gradient(
+        circle at 20% 30%,
+        white 1px,
+        transparent 1.5px
+      ),
+      radial-gradient(circle at 80% 70%, white 1px, transparent 1.5px),
+      radial-gradient(circle at 40% 80%, white 0.5px, transparent 1px);
+    background-size: 120% 120%;
+    opacity: 0.3;
+    transition:
+      opacity 0.3s ease,
+      background-position 0.3s ease;
+  }
+
+  .galaxy-btn:hover .galaxy-btn__stars {
+    opacity: 0.8;
+    animation: star-drift 5s linear infinite alternate;
+  }
+
+  /* --- Keyframes --- */
+  @keyframes rotate-nebula {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
+  @keyframes star-drift {
+    0%   { transform: scale(1); }
+    100% { transform: scale(1.1) translate(-2%, -2%); }
+  }
+  /* ================== galaxy-btn 原版代码结束 ================== */
+
+  /* ---- 变体：只覆盖 Scoped Variables，不动结构 ---- */
+  /* 青绿星云 */
+  .galaxy-btn.aurora {
+    --btn-primary: #14e0c8; --btn-secondary: #3b82f6; --btn-accent: #a855f7;
+    box-shadow: 0 0.5em 1.5em -0.5em rgba(20, 224, 200, 0.4);
+  }
+  /* 熔岩 */
+  .galaxy-btn.lava {
+    --btn-primary: #ff6b35; --btn-secondary: #f7c948; --btn-accent: #ff2d55;
+    box-shadow: 0 0.5em 1.5em -0.5em rgba(255, 107, 53, 0.45);
+  }
+  /* 尺寸：改 --btn-font-size 即整体等比缩放（padding/border-radius 全用 em） */
+  .galaxy-btn.lg { --btn-font-size: 20px; }
+  .galaxy-btn.sm { --btn-font-size: 12px; }
+
+  /* ---- 改进版：让 blur 光晕溢出到按钮外（原版被 overflow:hidden 裁掉） ---- */
+  .galaxy-btn.glow::before { filter: blur(10px); }
+  .galaxy-btn.glow { overflow: visible; }
+  /* overflow 改 visible 后，::before 会溢出，需用一层 wrapper 承接，
+     这里用 drop-shadow 在外层补一圈光晕，避免破坏内部结构 */
+  .glow-wrap { filter: drop-shadow(0 0 14px rgba(133, 83, 244, .55)); }
+
+  /* ---- 代码区 ---- */
+  details { margin-top: 22px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--accent);
+    padding: 10px 14px; background: rgba(54,197,240,.07);
+    border: 1px solid rgba(54,197,240,.28); border-radius: 10px; user-select: none; }
+  pre { background: #070a12; border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; overflow: auto; margin-top: 12px; }
+  code.src { font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px; line-height: 1.75; color: #c8d6e5; white-space: pre; }
+  .copy { float: right; font-size: 11px; color: var(--accent); cursor: pointer;
+    background: none; border: 1px solid rgba(54,197,240,.4); border-radius: 6px;
+    padding: 2px 9px; }
+  .copy:hover { background: rgba(54,197,240,.14); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>galaxy-btn 星云按钮</h1>
+  <div class="sub">
+    旋转锥形渐变（<code>conic-gradient</code>）构成的"星云描边" + 内部星点漂移。
+    纯 CSS 动画，<b>不依赖 anime.js</b>。悬停可看到描边加速旋转、星点变亮漂移、图标右移微旋。
+  </div>
+
+  <!-- ========== 主展示 ========== -->
+  <div class="stage">
+    <button class="galaxy-btn">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        启动引擎
+      </span>
+    </button>
+
+    <button class="galaxy-btn aurora">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        极光
+      </span>
+    </button>
+
+    <button class="galaxy-btn lava">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        熔岩
+      </span>
+    </button>
+  </div>
+
+  <!-- ========== 尺寸变体 ========== -->
+  <div class="stage">
+    <button class="galaxy-btn lg">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        大号 20px
+      </span>
+    </button>
+
+    <button class="galaxy-btn">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        标准 16px
+      </span>
+    </button>
+
+    <button class="galaxy-btn sm">
+      <span class="galaxy-btn__stars"></span>
+      <span class="galaxy-btn__content">
+        <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+        </svg>
+        小号 12px
+      </span>
+    </button>
+
+    <span class="glow-wrap">
+      <button class="galaxy-btn glow">
+        <span class="galaxy-btn__stars"></span>
+        <span class="galaxy-btn__content">
+          <svg class="galaxy-btn__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M13 5l7 7-7 7v-4H4v-6h9V5z"/>
+          </svg>
+          外溢光晕
+        </span>
+      </button>
+    </span>
+  </div>
+
+  <!-- ========== 技法说明 ========== -->
+  <div class="grid">
+    <div class="card">
+      <span class="tag good">核心</span>
+      <h3>三层 z-index 堆叠</h3>
+      <p>
+        <code>::before</code>（z0）= 旋转的锥形渐变；<code>::after</code>（z1）= 与背景同色的内遮罩，
+        盖住中间只留边缘 → 形成"描边"；<code>__stars</code>（z1）= 星点；<code>__content</code>（z2）= 文字与图标。
+        顺序不可乱，否则内容会被遮罩盖住。
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="tag">动画</span>
+      <h3>rotate-nebula 旋转</h3>
+      <p>
+        锥形渐变本身无法直接动画角度（除非用 <code>@property</code> 声明 <code>--ang</code>），
+        这里改用<b>整层旋转</b>：<code>transform: rotate(0→360deg)</code> 4s 线性循环。
+        悬停时 <code>animation-duration: 2s</code> 提速一倍。
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="tag">细节</span>
+      <h3>星点用多重 radial-gradient</h3>
+      <p>
+        三个 <code>radial-gradient</code> 各画一个白点（1px / 1px / 0.5px），
+        <code>background-size: 120%</code> 放大后随 <code>star-drift</code> 缓慢缩放位移，
+        制造"星空缓慢流动"的错觉。悬停时 opacity 0.3→0.8 点亮。
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="tag warn">注意</span>
+      <h3>overflow:hidden 与 blur 的冲突</h3>
+      <p>
+        按钮设了 <code>overflow: hidden</code>，而 <code>::before</code> 带 <code>filter: blur(8px)</code> ——
+        发光会被裁剪在按钮内，<b>外部看不到光晕</b>。
+        如需外溢光晕：去掉 overflow 并用外层 <code>drop-shadow</code> 补光（见上方"外溢光晕"变体），
+        代价是 <code>::before</code> 的 <code>inset:-4px</code> 会真正溢出，需要 wrapper 承接。
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="tag good">可维护</span>
+      <h3>全 em 单位 + CSS 变量</h3>
+      <p>
+        <code>padding / border-radius / gap</code> 全部 <code>em</code>，因此<b>只改 <code>--btn-font-size</code>
+        即可整体等比缩放</b>，无需重算任何像素值（见大/标准/小号三档）。
+        配色同理，只覆盖 <code>--btn-primary/secondary/accent</code> 三个变量即可换主题。
+      </p>
+    </div>
+
+    <div class="card">
+      <span class="tag">无障碍</span>
+      <h3>键盘可达</h3>
+      <p>
+        已含 <code>:focus-visible</code>（2px 描边 + 4px 偏移，仅键盘触发不干扰鼠标）与
+        <code>:active</code> 缩放反馈。图标用 <code>aria-hidden</code> 隐藏，文本即为可访问名称。
+      </p>
+    </div>
+  </div>
+
+  <details>
+    <summary><button class="copy" onclick="event.preventDefault();event.stopPropagation();copyCode()">复制代码</button>▶ 查看完整 CSS 源码</summary>
+    <pre><code class="src" id="src">/* 加载中… */</code></pre>
+  </details>
+</div>
+
+<script>
+  // 从 <style> 原文截取「原版代码」段落（CSSOM 会丢弃注释，故取 textContent 而非 cssRules）
+  // → 保证「展示的代码」= 用户给的原版代码，不含本页变体/主题样式
+  (function () {
+    var raw = document.querySelector('style').textContent;
+    var m = raw.match(/原版代码（未改动）\s*=+\s*\*\/([\s\S]*?)\/\*\s*=+\s*galaxy-btn 原版代码结束/);
+    document.getElementById('src').textContent = m ? m[1].trim() : raw;
+  })();
+
+  function copyCode() {
+    var t = document.getElementById('src').textContent;
+    navigator.clipboard.writeText(t).then(function () {
+      var b = document.querySelector('.copy');
+      b.textContent = '已复制 ✓';
+      setTimeout(function () { b.textContent = '复制代码'; }, 1600);
+    });
+  }
+</script>
+</body>
+</html>

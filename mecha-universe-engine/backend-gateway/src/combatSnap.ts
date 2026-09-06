@@ -177,15 +177,36 @@ export function reconcileBattle(battle: any): void {
 
 // ============ 持久化（全部同步，见顶部防呆纪律） ============
 
-/** 落库快照：UPDATE battles SET state_snapshot=?, snapshot_at=now WHERE id=?（同步） */
-export function saveBattleSnapshot(battleId: string, battle: any): void {
+/**
+ * 落库快照：UPDATE battles SET state_snapshot=?, version=version+1 WHERE id=?（同步）
+ * ★ A-5：支持 CAS 乐观锁。expectedVersion 提供时进行条件更新
+ *   （UPDATE ... WHERE id=? AND version=?），命中才写并自增；返回是否成功。
+ *   省略 expectedVersion 时退化为无条件写（兼容既有调用），返回 true。
+ */
+export function saveBattleSnapshot(battleId: string, battle: any, expectedVersion?: number): boolean {
   try {
     const plain = toPlainState(battle);
     const json = JSON.stringify(plain);
+    if (typeof expectedVersion === 'number') {
+      const info = dbRunCas(battleId, json, expectedVersion);
+      return info;
+    }
     run('UPDATE battles SET state_snapshot = ?, snapshot_at = datetime(\'now\') WHERE id = ?', [json, battleId]);
+    return true;
   } catch (e: any) {
     logger.error({ msg: `[combatSnap] saveBattleSnapshot 失败: ${ battleId } ${ e?.message || e }` });
+    return false;
   }
+}
+
+/** A-5 CAS：条件更新并返回是否命中（version 匹配） */
+function dbRunCas(battleId: string, json: string, expectedVersion: number): boolean {
+  // sql.js 不支持 RETURNING；用两次操作模拟：先查当前版本
+  const row = get('SELECT version FROM battles WHERE id = ?', [battleId]) as any;
+  const cur = row ? Number(row.version || 0) : 0;
+  if (cur !== expectedVersion) return false;
+  run('UPDATE battles SET state_snapshot = ?, version = ?, snapshot_at = datetime(\'now\') WHERE id = ?', [json, cur + 1, battleId]);
+  return true;
 }
 
 /** 加载快照：读 state_snapshot 并 parse，返回 plain 或 null（同步，无 Promise） */

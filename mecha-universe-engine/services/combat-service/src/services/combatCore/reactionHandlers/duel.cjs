@@ -71,9 +71,10 @@ function resolveDuel(ctx, manualCaster, manualTarget) {
     return { outcome, casterRoll: rc, targetRoll: rt };
 }
 
-register('on_target_selected', (ctx) => {
-    const { caster, target } = ctx;
-    return duelCheck(caster, target);
-});
-
+// 注意：on_target_selected 已不再在此注册（批次1·1.1 解耦）。
+// 该触发器现由 generic_target_select.cjs 注册为通用预检；duel 仍由本文件的
+// duelCheck 在决斗预检端点被直接调用驱动，互不污染。
+// ★ Phase 7.3：删除了此前残留的 register('on_target_selected', ...)（第74-77行），
+//   该残留与 generic_target_select 抢同一 trigger（last-wins 顺序不确定 → 确定性 bug）。
+//   现 on_target_selected 仅由 generic_target_select 注册，duel 预检经 duelCheck 单独驱动。
 module.exports = { duelCheck, resolveDuel, cubeDist, axialToCube };

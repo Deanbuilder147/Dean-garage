@@ -116,28 +116,72 @@ class CombatIntegrator {
       createdAt: Date.now()
     };
 
-    // 初始化单位和单位状态
-    for (const unit of config.units || []) {
-      // 添加到战斗单位Map
-      this.battle.units.set(unit.id, unit);
+      // 初始化单位和单位状态
+      for (const unit of config.units || []) {
+        // 添加到战斗单位Map
+        this.battle.units.set(unit.id, unit);
 
-      // 初始化单位状态
-      this.unitStates.set(unit.id, {
-        unit,
-        hp: unit.hp,
-        buffs: [],
-        equipment: unit.equipment || {},
-        tags: unit.equipped_tags || [],
-        extraTurns: 0,
-        canAct: true,
-        isDead: false
-      });
+        // ★ 项3：单位生成阶段注入技能寿命初始值到 unit._meta（charges/durability 按 skill_key 索引）
+        this._initUnitSkillMeta(unit);
 
-      // 添加到回合顺序
-      this.battle.turnOrder.push(unit.id);
-    }
+        // 初始化单位状态
+        this.unitStates.set(unit.id, {
+          unit,
+          hp: unit.hp,
+          buffs: [],
+          equipment: unit.equipment || {},
+          tags: unit.equipped_tags || [],
+          extraTurns: 0,
+          canAct: true,
+          isDead: false
+        });
+
+        // 添加到回合顺序
+        this.battle.turnOrder.push(unit.id);
+      }
 
     return { battleId: this.battle.id };
+  }
+
+  /**
+   * ★ 项3：单位生成阶段注入技能寿命初始值到 unit._meta
+   * 遍历单位携带的技能（unit.skills / unit.equipped_skills），从全局技能配置读取
+   * cost.charges / cost.durability 初始值，注入 unit._meta.charges[skill_key] / durability[skill_key]。
+   * 注意：combatIntegrator 已弃用，真实战斗路径的懒初始化在 skillExecutor 内完成；
+   * 此处钩子同时满足「统一初始化点」任务要求，且对未携带技能配置的单位零副作用。
+   */
+  _initUnitSkillMeta(unit) {
+    if (!unit) return;
+    const skillKeys = Array.isArray(unit.skills) ? unit.skills
+      : (Array.isArray(unit.equipped_skills) ? unit.equipped_skills : []);
+    if (!skillKeys.length) return;
+    try {
+      const configLoader = require('./configLoader.cjs');
+      const getSkillConfig = configLoader.getSkillConfig || configLoader.default && configLoader.default.getSkillConfig;
+      if (typeof getSkillConfig !== 'function') return;
+      unit._meta = unit._meta || {};
+      unit._meta.charges = unit._meta.charges || {};
+      unit._meta.durability = unit._meta.durability || {};
+      unit._meta.chargesMax = unit._meta.chargesMax || {};
+      unit._meta.durabilityMax = unit._meta.durabilityMax || {};
+      for (const key of skillKeys) {
+        const cfg = getSkillConfig(key);
+        if (!cfg || !cfg.cost) continue;
+        const norm = (v) => (typeof v === 'object' && v != null) ? Number(v.initial) || 0 : Number(v) || 0;
+        const cInit = norm(cfg.cost.charges);
+        const dInit = norm(cfg.cost.durability);
+        if (cInit > 0 && unit._meta.charges[key] == null) {
+          unit._meta.charges[key] = cInit;
+          unit._meta.chargesMax[key] = cInit;
+        }
+        if (dInit > 0 && unit._meta.durability[key] == null) {
+          unit._meta.durability[key] = dInit;
+          unit._meta.durabilityMax[key] = dInit;
+        }
+      }
+    } catch (e) {
+      // 配置不可用时静默跳过，交由 skillExecutor 懒初始化兜底
+    }
   }
 
   /**
@@ -180,6 +224,9 @@ class CombatIntegrator {
     });
 
     await this.triggerPhase('turn_start', context);
+
+    // ★ §8.9②：回合开始相位结算（递减 expiry_phase='turn_start' 的 status，避免被动 Buff 秒失效）
+    try { buffManager.tickStatusStart(currentUnit); } catch (_e) { /* 防御 */ }
 
     // 处理额外回合
     const unitState = this.unitStates.get(currentUnit.id);
@@ -236,83 +283,40 @@ class CombatIntegrator {
   }
 
   /**
+   * 合并方案 7.3（隐患2防御 · Week1 切断双结算）
+   * 纯时机广播器：仅向 HookChain / 反应系统派发阶段事件，
+   * 绝不调用 damagePipe 算伤、绝不修改 unitState.hp。
+   * 真正的算伤与扣血唯一路径已收口到 _walkPhaseTree → DO 原子 → damagePipe（仅算值）→ 统一扣血。
+   */
+  async emitPipelineEvents(timing, payload) {
+    try {
+      await this.triggerPhase(timing, payload || {});
+    } catch (e) {
+      console.warn(`[CombatIntegrator] emitPipelineEvents(${timing}) 广播异常(已吞，不影响结算):`, e.message);
+    }
+    return { broadcast: true, timing };
+  }
+
+  /**
    * 执行攻击
+   * @deprecated 合并方案 7.3：本方法已退位为纯广播，不再算伤/扣血。
+   *   线上 /attack 路由已绕过本类，改走 SkillExecutor（_walkPhaseTree）。
+   *   此处仅保留签名兼容，内部结算副作用已拔除，避免与 v2 树路径产生"双结算"数据错乱。
    */
   async executeAttack(config) {
-    const { attackerId, targetId, attackType } = config;
-
-    const attacker = this.battle.units.get(attackerId);
-    const target = this.battle.units.get(targetId);
-
-    if (!attacker || !target) {
-      throw new Error('Invalid attacker or target');
+    if (!this._executeAttackDeprecationWarned) {
+      this._executeAttackDeprecationWarned = true;
+      console.warn('[CombatIntegrator] executeAttack 已弃用：退位为纯广播，算伤/扣血由 SkillExecutor 的 v2 树路径负责。');
     }
-
-    const attackerState = this.unitStates.get(attackerId);
-    const targetState = this.unitStates.get(targetId);
-
-    // 构建攻击上下文
-    const context = this.getBaseContext({
-      attacker,
-      target,
-      attackerState,
-      targetState,
-      attackType,
-      damageType: attackType === 'melee' ? 'kinetic' : 'energy'
-    });
-
-    // 1. 攻击前阶段 (pre_attack)
-    await this.triggerPhase('pre_attack', context);
-
-    // 2. 伤害计算前 (pre_damage)
-    await this.triggerPhase('pre_damage', context);
-
-    // 3. 计算伤害
-    let damage = damagePipe.calculate({
-      attacker,
-      target,
-      attackType,
-      context
-    });
-
-    // 4. 伤害计算中 (on_damage)
-    context.damage = damage;
-    await this.triggerPhase('on_damage', context);
-    damage = context.damage; // 可能被修改
-
-    // 5. 应用伤害
-    targetState.hp -= damage;
-
-    // 6. 伤害结算后 (post_damage)
-    context.damageDealt = damage;
-    const postDamageResult = await this.triggerPhase('post_damage', context);
-
-    // 7. 检查击杀
-    if (targetState.hp <= 0) {
-      targetState.hp = 0;
-      targetState.isDead = true;
-
-      // 触发击杀钩子
-      context.killer = attacker;
-      await this.triggerPhase('on_kill', context);
-
-      // 触发死亡钩子
-      await this.triggerPhase('on_death', context);
-    }
-
-    // 8. 触发受到伤害钩子
-    await this.triggerPhase('on_damage_taken', context);
-
-    // 9. 攻击后阶段 (post_attack)
-    await this.triggerPhase('post_attack', context);
-
+    const { attackerId, targetId, attackType } = config || {};
+    // 仅广播时机事件，不动任何状态（切断死代码结算）
+    await this.emitPipelineEvents('pre_attack', config);
+    await this.emitPipelineEvents('post_attack', config);
     return {
       attackerId,
       targetId,
-      damage,
-      targetHp: targetState.hp,
-      killed: targetState.isDead,
-      postDamageEffects: postDamageResult
+      deprecated: true,
+      note: 'executeAttack 已退位，结算改走 SkillExecutor v2 树路径',
     };
   }
 
@@ -410,6 +414,12 @@ class CombatIntegrator {
    * 清理过期buff
    */
   async cleanupExpiredBuffs() {
+    // ★ §8.9②：结构化 statusEffects 回合末结算（仅 expiry_phase='turn_end'，默认）
+    if (this.battle && this.battle.units && typeof this.battle.units.values === 'function') {
+      for (const unit of this.battle.units.values()) {
+        try { buffManager.tickStatus(unit, 'turn_end'); } catch (_e) { /* 防御：statusEffects 结构异常不影响主流程 */ }
+      }
+    }
     for (const [unitId, state] of this.unitStates) {
       const beforeCount = state.buffs.length;
       state.buffs = state.buffs.filter(buff => {

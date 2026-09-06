@@ -121,11 +121,48 @@ function applyBranchEffects(effects, ctx) {
   return ctx;
 }
 
+/**
+ * C4 对抗数值（contested value）—— 通用对抗分支模型（批次1 · 1.4）
+ *
+ * 将「双方各掷/比大小」从 duel / tagProcessor 等硬编码中抽离为**配置驱动**，
+ * 复用与 evaluateBranches 同款的 6 项动作词（damage/damage_bonus/heal/
+ * apply_status/mobility_mod/accuracy_mod）。任意原子均可声明对抗分支，不再写死比大小。
+ *
+ * @param {object} cfg
+ *   mode: 'higher_wins' | 'lower_wins'          // 胜负口径（默认 higher_wins）
+ *   casterExpr / targetExpr: 掷骰表达式（dice 字符串或定值 number，默认 '6'）
+ *   branches: Array<{ when:'caster_win'|'target_win'|'tie', effects:[...] }>
+ * @param {object} [override] 可选人工骰 { caster:number, target:number }
+ * @returns { outcome:'caster_win'|'target_win'|'tie', casterRoll, targetRoll, hits, ctx }
+ */
+function evaluateContest(cfg, override) {
+  const mode = (cfg && cfg.mode) || 'higher_wins';
+  const casterRoll = override && typeof override.caster === 'number'
+    ? override.caster
+    : DiceService.roll(cfg && cfg.casterExpr != null ? cfg.casterExpr : 6);
+  const targetRoll = override && typeof override.target === 'number'
+    ? override.target
+    : DiceService.roll(cfg && cfg.targetExpr != null ? cfg.targetExpr : 6);
+
+  let outcome;
+  if (casterRoll === targetRoll) outcome = 'tie';
+  else if (mode === 'higher_wins') outcome = casterRoll > targetRoll ? 'caster_win' : 'target_win';
+  else outcome = casterRoll < targetRoll ? 'caster_win' : 'target_win';
+
+  const branches = (cfg && cfg.branches) || [];
+  const hit = branches.find((b) => b && b.when === outcome);
+  const effects = hit && Array.isArray(hit.effects) ? hit.effects : [];
+  const ctx = newEffectContext();
+  applyBranchEffects(effects, ctx);
+  return { outcome, casterRoll, targetRoll, hits: hit ? [hit] : [], ctx };
+}
+
 module.exports = {
   rollDice,
   pointMatches,
   branchMatches,
   evaluateBranches,
+  evaluateContest,
   newEffectContext,
   applyBranchEffects
 };

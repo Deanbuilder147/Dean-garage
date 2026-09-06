@@ -8,8 +8,9 @@
 import { logger } from '../utils/logger.js';
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { authenticate, requireAuth } from '../middleware/auth.js';
+import { authenticate, requireAuth, requireRole } from '../middleware/auth.js';
 import { run, get, all, persistChanges } from '../db/sqlite.js';
+import { resolveRoleFeatures } from '../services/featurePermissions.js';
 import { ErrorCode, UserRole } from '@mecha/shared-kernel';
 
 const router = Router();
@@ -18,7 +19,8 @@ const router = Router();
 // Phase 29-DataSecurity: 权限卡口 — 审核状态机
 // ========================================
 function computeMapVisibility(userRole: string, requestedPublic: boolean): { is_public: number; review_status: string } {
-  const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR;
+  // Phase 30-Perm：admin/dominator 可跳过审核直接 approved；勾选 maps.edit 的等级（如 referee，由 dominator 后台授权）亦可跳过
+  const isAdminOrAbove = userRole === UserRole.ADMIN || userRole === UserRole.DOMINATOR || resolveRoleFeatures(userRole).includes('maps.edit');
 
   if (isAdminOrAbove) {
     return { is_public: requestedPublic ? 1 : 0, review_status: 'approved' };
@@ -298,6 +300,81 @@ router.put('/api/map/battlefields/:id', authenticate, requireAuth, (req, res) =>
     logger.error({ msg: `[Maps] 更新战场失败: ${ err }` });
     res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '更新战场失败' });
   }
+});
+
+// ========================================
+// 我的投稿：当前用户全部地图（含审核状态回显），供「我的地图投稿」页面使用
+// ========================================
+router.get('/api/map/my-submissions', authenticate, requireAuth, (req, res) => {
+  try {
+    const rows = all(
+      `SELECT id, name, is_public, review_status, updated_at
+       FROM maps WHERE original_author_id = ?
+       ORDER BY CASE review_status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END, updated_at DESC`,
+      [req.auth!.userId]
+    ) as any[];
+    res.json({ maps: rows });
+  } catch (err) {
+    logger.error({ msg: `[Maps] 我的投稿查询失败: ${err}` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '我的投稿查询失败' });
+  }
+});
+
+// ========================================
+// 审核队列：待审核(pending)地图，仅管理员(admin)/主宰(dominator)可见
+// ========================================
+router.get('/api/map/review-queue', authenticate, requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+  try {
+    const rows = all(
+      `SELECT id, original_author_id, name, spawn_points, cells, attributes, is_public, review_status, created_at, updated_at
+       FROM maps WHERE review_status = 'pending' ORDER BY created_at ASC`
+    ) as any[];
+    const maps = rows.map((m) => ({
+      ...m,
+      width: 100,
+      height: 100,
+      cells: migrateCells(JSON.parse(m.cells || '[]')),
+      spawn_points: JSON.parse(m.spawn_points || '[]'),
+      attributes: JSON.parse(m.attributes || '{}'),
+    }));
+    res.json({ maps });
+  } catch (err) {
+    logger.error({ msg: `[Maps] 审核队列查询失败: ${err}` });
+    res.status(500).json({ error: ErrorCode.INTERNAL_ERROR, message: '审核队列查询失败' });
+  }
+});
+
+// ========================================
+// 审核操作：管理员(admin/dominator)对 pending 地图通过/驳回
+// approve 时 isPublic 默认 true（公开给全员使用）；reject 驳回
+// ========================================
+router.post('/api/map/:mapId/review', authenticate, requireRole(UserRole.ADMIN, UserRole.DOMINATOR), (req, res) => {
+  const map = get('SELECT * FROM maps WHERE id = ?', [req.params.mapId]) as any;
+  if (!map) {
+    res.status(404).json({ error: 'MAP_NOT_FOUND', message: '地图不存在' });
+    return;
+  }
+  const { action, isPublic } = req.body || {};
+  if (action !== 'approve' && action !== 'reject') {
+    res.status(400).json({ error: 'INVALID_ACTION', message: 'action 必须为 approve 或 reject' });
+    return;
+  }
+
+  if (action === 'reject') {
+    run(`UPDATE maps SET review_status = 'rejected', is_public = 0, is_public_copy = 0, updated_at = datetime('now') WHERE id = ?`, [req.params.mapId]);
+    persistChanges();
+    logger.info({ msg: `[Maps] 审核驳回: ${map.name}` });
+    res.json({ success: true, review_status: 'rejected' });
+    return;
+  }
+
+  // approve：默认公开（is_public=1），全员可用
+  const finalIsPublic = isPublic === false ? 0 : 1;
+  run(`UPDATE maps SET review_status = 'approved', is_public = ?, is_public_copy = ?, updated_at = datetime('now') WHERE id = ?`,
+    [finalIsPublic, finalIsPublic, req.params.mapId]);
+  persistChanges();
+  logger.info({ msg: `[Maps] 审核通过: ${map.name} (is_public=${finalIsPublic})` });
+  res.json({ success: true, is_public: finalIsPublic, review_status: 'approved' });
 });
 
 // ========================================

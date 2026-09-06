@@ -3,13 +3,14 @@
  *
  * 内嵌 skillContract 枚举副本，与 frontend/src/contracts/skillContract.js 保持同步。
  * 对 parser 产出的 skills 做全量校验，返回 { valid, errors, warnings }。
- * 注意：会对传入 skill 对象做就地归一（如 category=special → melee），便于落盘。
+ * 注意：会对传入 skill 对象做就地归一（support/automation → auto；special → melee），便于落盘。
+ * 类型真相仅三种：melee / ranged / auto。
  */
 
 import type { ParsedGlossaryExcel } from './glossary-excel-parser.js';
 
-const VALID_CATEGORIES = ['melee', 'ranged', 'automation', 'support', 'auto', 'special'];
-const VALID_TARGET_SCOPE = ['enemy', 'ally', 'self', 'enemy_equipment', 'ally_equipment'];
+const VALID_CATEGORIES = ['melee', 'ranged', 'auto'];
+const VALID_TARGET_SCOPE = ['enemy', 'ally', 'self', 'enemy_equipment', 'ally_equipment', 'both', 'all'];
 const VALID_SKILL_SHAPE = ['single', 'fan', 'linear', 'concentric'];
 const VALID_DAMAGE_KIND = ['kinetic', 'beam', 'explosive', 'corrosive', 'thermal'];
 const VALID_ACTION_TYPE = ['attack', 'heal', 'buff', 'debuff', 'passive'];
@@ -58,15 +59,17 @@ export function validateGlossaryExcel(parsed: ParsedGlossaryExcel): ValidationRe
     }
     seenKeys.add(key);
 
-    // category
+    // category（类型仅 melee/ranged/auto 三种；support/automation 为 auto 别名，special 归 melee）
     if (skill.category) {
-      if (!VALID_CATEGORIES.includes(skill.category)) {
-        if (skill.category === 'special') {
-          warnings.push({ row: rowNumber, key, field: 'category', message: 'category=special 已归为 melee' });
-          skill.category = 'melee';
-        } else {
-          errors.push({ row: rowNumber, key, field: 'category', message: `非法 category: ${skill.category}` });
-        }
+      const c = skill.category;
+      if (c === 'automation' || c === 'support') {
+        warnings.push({ row: rowNumber, key, field: 'category', message: `category=${c} 已归为 auto` });
+        skill.category = 'auto';
+      } else if (c === 'special') {
+        warnings.push({ row: rowNumber, key, field: 'category', message: 'category=special 已归为 melee（爆炸/范围伤害应由词条设定）' });
+        skill.category = 'melee';
+      } else if (!VALID_CATEGORIES.includes(c)) {
+        errors.push({ row: rowNumber, key, field: 'category', message: `非法 category: ${c}` });
       }
     }
 

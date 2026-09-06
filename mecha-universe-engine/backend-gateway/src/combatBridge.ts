@@ -22,7 +22,8 @@ const CORE_DIR = '../services/combat-service/src/services/combatCore/';
 let _SkillExecutorClass: any = null;
 let _skillExecutorInstance: any = null;
 let _skillContract: any = null;
-let _EquipmentDurability: any = null;
+// 装备耐久系统 2026-08-08 恢复：数据真相源为 unit.equipState（见 getEquipmentDurability）。
+// 实际扣减/锁定由 combat-service/equipmentDurability.cjs 在结算时调用（2.0B 接线）。
 let _effectExecutor: any = null;
 
 function loadCjs(name: string): any {
@@ -48,9 +49,45 @@ export function getSkillContract(): any {
   return _skillContract;
 }
 
-export function getEquipmentDurability(): any {
-  if (!_EquipmentDurability) _EquipmentDurability = loadCjs('equipmentDurability.cjs');
-  return _EquipmentDurability;
+// 装备耐久管理器（equipmentDurability.cjs 已导出单例，与 combat-service/effectExecutor
+// 命中同一模块缓存，共享 _state / _locks）。2.0B 接线：战斗初始化 register、
+// 结算 applyDamage / consumeWeaponDurability、K1 lockDurability 均经此单例。
+let _equipmentDurability: any = null;
+export function getEquipmentDurabilityManager(): any {
+  if (!_equipmentDurability) _equipmentDurability = loadCjs('equipmentDurability.cjs');
+  return _equipmentDurability;
+}
+
+/**
+ * ★ 2026-08-08 恢复（批次2 · 2.0A / 2.0B）：装备耐久系统重新启用。
+ *
+ * 恢复策略（安全路线，不动线上库 schema）：
+ * 装备耐久的**数据真相源**是战斗单位的 `unit.equipState`
+ * （由 battleStateFactory.buildEquipmentFromParts 从 parts 构建，
+ * 已携带 durability / maxDurability / destroyed）。
+ * 2026-08-06 P0-2 停用的是「units 表 equipment 幽灵列 + 空转的耐久计算」，
+ * 但 equipState 这条活路径从未失效（仅供武器机动/攻击叠加）。
+ * 本函数即由 equipState 派生耐久视图，无需 units.equipment 列。
+ *
+ * 真正的「扣减/破损/锁定」由 combat-service 的 equipmentDurability.cjs 承担
+ * （register 从 equipState 装载 → applyDamage/consumeWeaponDurability 结算 →
+ * lockDurability 钳 0 不可恢复），详见 2.0B 结算接线。
+ *
+ * @param unit 战斗单位（需含 equipState 数组）
+ * @returns { [slot]: { durability, maxDurability, destroyed } }
+ */
+export function getEquipmentDurability(unit: any): any {
+  const eq = Array.isArray(unit?.equipState) ? unit.equipState : [];
+  const out: any = {};
+  eq.forEach((e: any, i: number) => {
+    const key = e?.slot || e?.name || `slot_${i}`;
+    out[key] = {
+      durability: e?.durability ?? 0,
+      maxDurability: e?.maxDurability ?? e?.durability ?? 0,
+      destroyed: !!e?.destroyed,
+    };
+  });
+  return out;
 }
 
 export default {

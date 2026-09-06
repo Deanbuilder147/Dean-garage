@@ -1,0 +1,20 @@
+{
+  "name": "mecha-universe-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mecha Battle Universe Engine — 大一统规则母体 Monorepo",
+  "workspaces": [
+    "shared-kernel",
+    "backend-gateway",
+    "services/*"
+  ],
+  "scripts": {
+    "build:all": "npm run build --workspaces --if-present",
+    "dev:gateway": "npm run dev --workspace=backend-gateway",
+    "lint": "tsc --noEmit --project tsconfig.base.json"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "type": "module"
+}

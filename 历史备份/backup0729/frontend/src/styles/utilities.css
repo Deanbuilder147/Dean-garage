@@ -1,0 +1,107 @@
+/* ===== CRT扫描线 ===== */
+.scanline-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    linear-gradient(
+      rgba(18, 16, 16, 0) 50%, 
+      rgba(0, 0, 0, 0.25) 50%
+    ),
+    linear-gradient(
+      90deg, 
+      rgba(255, 0, 0, 0.03), 
+      rgba(0, 255, 0, 0.015), 
+      rgba(0, 0, 255, 0.03)
+    );
+  background-size: 100% 2px, 2px 100%;
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* ===== 像素边框 ===== */
+.pixel-border {
+  border: 3px solid;
+  border-radius: 0 !important;
+}
+
+.pixel-border-primary {
+  border-color: var(--primary);
+  box-shadow: 
+    0 -3px 0 0 var(--primary),
+    0 3px 0 0 var(--primary),
+    -3px 0 0 0 var(--primary),
+    3px 0 0 0 var(--primary);
+}
+
+/* ===== 抖动动画 ===== */
+@keyframes jitter {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(1px, 0); }
+  50% { transform: translate(0, 1px); }
+  75% { transform: translate(1px, 1px); }
+  100% { transform: translate(0, 0); }
+}
+
+.jitter-active:active {
+  animation: jitter 0.1s steps(4);
+}
+
+/* ===== 闪烁动画 ===== */
+@keyframes flicker {
+  0% { opacity: 0.98; }
+  50% { opacity: 0.92; }
+  100% { opacity: 1; }
+}
+
+.flicker {
+  animation: flicker 0.1s infinite steps(4);
+}
+
+/* ===== 点阵模式 ===== */
+.dither-pattern {
+  background-image: radial-gradient(#ffffff33 1px, transparent 0);
+  background-size: 3px 3px;
+}
+
+/* ===== 无边框规则 - 使用色调层级 ===== */
+.no-border {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.panel-stack {
+  background: var(--surface-container);
+  box-shadow: 
+    inset 0 1px 0 0 var(--surface-container-low),
+    0 -1px 0 0 var(--surface-container-high);
+}
+
+/* ===== 滚动条样式 ===== */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-container-low);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-container-highest);
+  border: 1px solid var(--outline-variant);
+}
+
+/* ===== 工具类 ===== */
+.uppercase {
+  text-transform: uppercase;
+}
+
+.font-space {
+  font-family: var(--font-space);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}

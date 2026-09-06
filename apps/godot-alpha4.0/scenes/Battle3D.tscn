@@ -1,0 +1,236 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/Battle3D.gd" id="1_battle3d"]
+[ext_resource type="Script" path="res://net/api_client.gd" id="2_api_client"]
+
+[sub_resource type="Environment" id="Environment_3d_bg"]
+background_mode = 1
+background_color = Color(0.08, 0.10, 0.16, 1)
+
+[node name="root" type="Node3D"]
+script = ExtResource("1_battle3d")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_3d_bg")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+# 等距正交机位：正交投影无透视畸变，最符合战棋 2.5D 需求
+# 位置会在 _ready 里相对地图中心动态计算并 look_at(中心)
+projection = 1
+position = Vector3(600, 900, 600)
+rotation_degrees = Vector3(-55, 45, 0)
+size = 1200.0
+near = 0.1
+far = 8000.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+position = Vector3(0, 500, 0)
+rotation_degrees = Vector3(-60, 30, 0)
+light_energy = 1.4
+shadow_enabled = true
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+position = Vector3(0, 600, 0)
+light_energy = 0.5
+omni_range = 4000.0
+
+[node name="UILayer" type="CanvasLayer" parent="."]
+
+[node name="TurnHUD" type="Control" parent="UILayer"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -150.0
+offset_top = 12.0
+offset_right = 150.0
+offset_bottom = 64.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="RoundLabel" type="Label" parent="UILayer/TurnHUD"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -140.0
+offset_top = 0.0
+offset_right = -10.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+text = "回合 1"
+horizontal_alignment = 1
+
+[node name="TurnLabel" type="Label" parent="UILayer/TurnHUD"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = 10.0
+offset_top = 0.0
+offset_right = 140.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+text = "行动方：--"
+horizontal_alignment = 2
+
+[node name="TurnHint" type="Label" parent="UILayer/TurnHUD"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -140.0
+offset_top = 32.0
+offset_right = 140.0
+offset_bottom = 52.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="GlossaryButton" type="Button" parent="UILayer"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -132.0
+offset_right = -18.0
+offset_bottom = -78.0
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+text = "词条库中枢"
+
+[node name="EndTurnButton" type="Button" parent="UILayer"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -72.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 0
+grow_vertical = 2
+mouse_filter = 2
+text = "结束回合"
+
+[node name="StatusLabel" type="Label" parent="UILayer"]
+offset_right = 900.0
+offset_bottom = 60.0
+text = "3D视角启动中…"
+mouse_filter = 2
+
+[node name="SkillMenu" type="Control" parent="UILayer"]
+visible = false
+offset_left = 820.0
+offset_top = 70.0
+offset_right = 1140.0
+offset_bottom = 600.0
+mouse_filter = 2
+
+[node name="SkillList" type="VBoxContainer" parent="UILayer/SkillMenu"]
+offset_right = 320.0
+offset_bottom = 530.0
+
+[node name="UnitPanel" type="PanelContainer" parent="UILayer"]
+visible = false
+offset_left = 16.0
+offset_top = 386.0
+offset_right = 316.0
+offset_bottom = 760.0
+mouse_filter = 2
+
+[node name="UnitVBox" type="VBoxContainer" parent="UILayer/UnitPanel"]
+offset_right = 300.0
+offset_bottom = 374.0
+
+[node name="UnitTitle" type="Label" parent="UILayer/UnitPanel/UnitVBox"]
+layout_mode = 2
+offset_right = 300.0
+offset_bottom = 34.0
+text = "单位详情"
+
+[node name="UnitStats" type="Label" parent="UILayer/UnitPanel/UnitVBox"]
+layout_mode = 2
+offset_right = 300.0
+offset_bottom = 200.0
+text = ""
+
+[node name="UnitSkills" type="Label" parent="UILayer/UnitPanel/UnitVBox"]
+layout_mode = 2
+offset_right = 300.0
+offset_bottom = 120.0
+text = ""
+
+[node name="LogPanel" type="PanelContainer" parent="UILayer"]
+offset_left = 1200.0
+offset_top = 386.0
+offset_right = 1500.0
+offset_bottom = 760.0
+mouse_filter = 2
+
+[node name="LogVBox" type="VBoxContainer" parent="UILayer/LogPanel"]
+offset_right = 300.0
+offset_bottom = 374.0
+
+[node name="LogTitle" type="Label" parent="UILayer/LogPanel/LogVBox"]
+layout_mode = 2
+offset_right = 300.0
+offset_bottom = 30.0
+text = "战斗日志"
+
+[node name="EnemyTurnBanner" type="Control" parent="UILayer"]
+visible = false
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -160.0
+offset_top = 16.0
+offset_right = 160.0
+offset_bottom = 64.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="BannerLabel" type="Label" parent="UILayer/EnemyTurnBanner"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -150.0
+offset_top = 0.0
+offset_right = 150.0
+offset_bottom = 48.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+text = "敌方行动中…"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+

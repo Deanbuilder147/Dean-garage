@@ -8,8 +8,6 @@
 #   mecha-frontend (80)  — Vue.js SPA + Nginx 反代
 # ============================================================
 
-version: '3.8'
-
 services:
   # ========================================
   # Phase 29-DataSecurity: PostgreSQL 双源桥接 (旧库复活)

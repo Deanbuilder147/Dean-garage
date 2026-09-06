@@ -43,8 +43,10 @@ export interface UserProfile {
   email: string;
   faction: string;
   permission: PermissionLevel;
-  /** Phase 29-P1: 四级角色（guest/user/referee/admin/dominator） */
+  /** Phase 29-P1: 五级角色（guest/user/referee/admin/dominator） */
   role: UserRole;
+  /** 等级-功能权限矩阵：当前账号等级被授权启用的功能键列表 */
+  features?: string[];
   /** Phase 29-P1: 每日 AI 形象生成积分 */
   credits: number;
   /** 续接战局：最近一次创建/加入的房间 id（跨浏览器，存于 DB，登录时下发） */
@@ -94,6 +96,8 @@ export interface UnitStats {
   defense: number;
   speed: number;
   mobility: number;
+  /** ⚠️ 仅作"远程/近战分类"展示信号；已废除其射程判定用途（2026-08-02 归拢改造）。
+   *  战斗射程一律由技能定义经 getSkillRangeFields（shared-kernel 真相源）决定。 */
   range: number;
   min_range?: number;
 }
@@ -107,6 +111,8 @@ export interface UnitSkill {
   currentCooldown: number;
   energyCost: number;
   damageType: DamageType;
+  /** T5 强引用锚点：绑定全局词条时的 skill_key（英文）；未绑定则留空（降级为软关联副本） */
+  skill_key?: string;
 }
 
 /** 实体矩阵 — 通用 Schema（大一统战棋实体核心） */
@@ -280,7 +286,8 @@ export interface BattleUnit {
   moveRange?: number;
   /** 阶段二：基准机动（仅机体机动，机动差额基准） */
   mobility?: number;
-  /** 攻击射程（= 1 + floor(射击/25)）：提升为顶层字段，供前端直接读取普通攻击射程（否则默认 1） */
+  /** ⚠️ 仅作"远程/近战分类"展示信号（= 1 + floor(射击/25)）；已废除其射程判定用途（2026-08-02 归拢改造）。
+   *  战斗射程一律由技能定义经 getSkillRangeFields 决定。 */
   range?: number;
   /** A5-hold_position 契约对齐：与 position 同源暴露顶层坐标，供 victoryChecker 读取占位（部署/移动同步更新） */
   q?: number;
@@ -291,6 +298,10 @@ export interface BattleUnit {
   parts?: any;
   /** 单位体型（体积）：s / m / l / xl，影响 HP/机动/渲染缩放/战斗尺寸修正 */
   size?: string;
+  /** 机体基础属性（编辑器原始值）：射击值 / 格斗值 / 机动值，供前端单位卡片展示 */
+  main_射击?: number;
+  main_格斗?: number;
+  main_机动?: number;
   /** 顶层 HP 快照（= currentStats.hp 同源，applySizeHp 修正后）：供前端 dead 判定/渲染直接读取，避免 (unit.hp ?? 0) 误判阵亡 */
   hp?: number;
   /** 顶层最大 HP 快照（= currentStats.maxHp 同源） */
@@ -356,6 +367,47 @@ export interface BattleState {
   activeFactionIndex: number;
   /** 战斗回合（一轮 = 所有活跃阵营各行动一次） */
   round: number;
+  /**
+   * Phase 6：AI 控制的角色键集合（'attack' | 'defense' | 'ambush'）。
+   * 这些角色在 end-turn 切到其行动时，由服务端异步驱动 AI 自动行动；
+   * 不在集合内的角色视为人类玩家操控。缺省为空数组（无 AI）。
+   */
+  aiRoles?: string[];
+  /**
+   * Phase 6：AI 回合期间累积的增量行动序列，随每步全量快照推送，
+   * 供客户端逐步平滑播放（移动补间 / 受击飘字）。结构见 AiActionEntry。
+   */
+  aiActions?: AiActionEntry[];
+}
+
+/** Phase 6：AI 单步行动增量（随全量快照推送，客户端用于播放） */
+export interface AiActionEntry {
+  type: 'move' | 'attack' | 'skill' | 'end_turn';
+  unitId: EntityId;
+  from?: { q: number; r: number };
+  to?: { q: number; r: number };
+  targetId?: EntityId;
+  skillKey?: string;
+  // 阶段 6：combat_result 除既有任意字段外，显式承载机动/姿态分阶段数据（来自 damagePipe.stages）
+  combat_result?: Record<string, any> & Partial<MobilityBreakdown>;
+}
+
+/**
+ * 阶段 6·机动差值与姿态数据透传契约
+ * 由 damagePipe.cjs 阶段 2/3/6 真实产出，combat.ts 在 /attack 与 aiActions 注入，
+ * Godot Battle3D.gd 消费并在 BattleLog 结构化输出。
+ * 字段名严格对齐 damagePipe.stages，禁止臆造：
+ *  - mobility_diff: 攻方有效机动 - 守方有效机动（封顶 +5，下限不限）；每点 +1 攻击力（temp_attack = base + diff）
+ *  - sniper_mobility_reduction: 狙击技能对目标机动的减免（0 表示无）
+ *  - height_bonus: 高地优势加成（地形姿态类）
+ *  - attacker_stance / defender_stance: 攻防姿态（'defensive' | 'aggressive' | ...），来自 unit.stance
+ */
+export interface MobilityBreakdown {
+  mobility_diff?: number;
+  sniper_mobility_reduction?: number;
+  height_bonus?: number;
+  attacker_stance?: string;
+  defender_stance?: string;
 }
 
 export interface BattleLogEntry {

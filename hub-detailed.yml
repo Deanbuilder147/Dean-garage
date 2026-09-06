@@ -1,0 +1,124 @@
+- generic [ref=e4]:
+  - complementary [ref=e6]:
+    - complementary [ref=e7]:
+      - button "收起侧边栏" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+      - generic [ref=e11]:
+        - generic "点击查看 / 修改账号信息" [ref=e12] [cursor=pointer]:
+          - generic [ref=e14]:
+            - paragraph [ref=e15]: "[ deantest ]"
+            - paragraph [ref=e16]: "军衔: Earth"
+          - button "↩ 退出" [ref=e17]
+        - navigation [ref=e18]:
+          - link "首页" [ref=e19] [cursor=pointer]:
+            - /url: /home
+            - img [ref=e20]
+            - generic [ref=e23]: 首页
+          - link "单位编辑器" [ref=e24] [cursor=pointer]:
+            - /url: /units
+            - img [ref=e25]
+            - generic [ref=e27]: 单位编辑器
+          - link "地图编辑器" [ref=e28] [cursor=pointer]:
+            - /url: /battlefield-edit
+            - img [ref=e29]
+            - generic [ref=e34]: 地图编辑器
+          - link "战术部署" [ref=e35] [cursor=pointer]:
+            - /url: /battlefields
+            - img [ref=e36]
+            - generic [ref=e40]: 战术部署
+          - link "词条库" [ref=e41] [cursor=pointer]:
+            - /url: /glossary-hub
+            - img [ref=e42]
+            - generic [ref=e44]: 词条库
+          - link "AI 素材工坊" [ref=e45] [cursor=pointer]:
+            - /url: /asset-gen
+            - img [ref=e46]
+            - generic [ref=e49]: AI 素材工坊
+          - link "问题反馈" [ref=e50] [cursor=pointer]:
+            - /url: /bug-report
+            - img [ref=e51]
+            - generic [ref=e55]: 问题反馈
+          - link "棋子库" [ref=e56] [cursor=pointer]:
+            - /url: /unit-library
+            - img [ref=e57]
+            - generic [ref=e59]: 棋子库
+          - link "我的投稿" [ref=e60] [cursor=pointer]:
+            - /url: /my-units
+            - img [ref=e61]
+            - generic [ref=e63]: 我的投稿
+  - main [ref=e5]:
+    - generic [ref=e64]:
+      - generic [ref=e66]:
+        - generic [ref=e67]:
+          - generic [ref=e68]: 词条列表
+          - button "＋ 新建技能" [ref=e69] [cursor=pointer]
+        - generic [ref=e70]:
+          - button "全部" [ref=e71] [cursor=pointer]:
+            - generic [ref=e72]: 全部
+          - button "技能" [ref=e73] [cursor=pointer]:
+            - generic [ref=e74]: 技能
+          - button "特殊" [ref=e75] [cursor=pointer]:
+            - generic [ref=e76]: 特殊
+          - button "阵营" [ref=e77] [cursor=pointer]:
+            - generic [ref=e78]: 阵营
+        - textbox "搜索词条名 / key…" [ref=e80]
+        - generic [ref=e81]:
+          - generic [ref=e82] [cursor=pointer]:
+            - generic [ref=e83]: 格挡
+            - generic [ref=e84]: block
+          - generic [ref=e85] [cursor=pointer]:
+            - generic [ref=e86]: 扫射
+            - generic [ref=e87]: sweep
+          - generic [ref=e88] [cursor=pointer]:
+            - generic [ref=e89]: 投掷
+            - generic [ref=e90]: throw
+          - generic [ref=e91] [cursor=pointer]:
+            - generic [ref=e92]: 斩杀
+            - generic [ref=e93]: execute
+          - generic [ref=e94] [cursor=pointer]:
+            - generic [ref=e95]: 决斗
+            - generic [ref=e96]: duel
+          - generic [ref=e97] [cursor=pointer]:
+            - generic [ref=e98]: 抢夺
+            - generic [ref=e99]: snatch
+          - generic [ref=e100] [cursor=pointer]:
+            - generic [ref=e101]: 专注射击
+            - generic [ref=e102]: focused_fire
+          - generic [ref=e103] [cursor=pointer]:
+            - generic [ref=e104]: 幸运
+            - generic [ref=e105]: lucky
+          - generic [ref=e106] [cursor=pointer]:
+            - generic [ref=e107]: 再动
+            - generic [ref=e108]: reactivate
+          - generic [ref=e109] [cursor=pointer]:
+            - generic [ref=e110]: 近战打击
+            - generic [ref=e111]: melee_strike
+            - generic "核心技能：受保护，不可删改" [ref=e113]: 🔒
+          - generic [ref=e114] [cursor=pointer]:
+            - generic [ref=e115]: 远程射击
+            - generic [ref=e116]: ranged_shot
+            - generic "核心技能：受保护，不可删改" [ref=e118]: 🔒
+          - generic [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]: 护盾壁垒
+            - generic [ref=e121]: shield_wall
+            - generic "核心技能：受保护，不可删改" [ref=e123]: 🔒
+          - generic [ref=e124] [cursor=pointer]:
+            - generic [ref=e125]: 紧急修复
+            - generic [ref=e126]: repair
+            - generic "核心技能：受保护，不可删改" [ref=e128]: 🔒
+          - generic [ref=e129] [cursor=pointer]:
+            - generic [ref=e130]: 超载驱动
+            - generic [ref=e131]: overdrive
+            - generic "核心技能：受保护，不可删改" [ref=e133]: 🔒
+          - generic [ref=e134] [cursor=pointer]:
+            - generic [ref=e135]: 光束加农炮
+            - generic [ref=e136]: beam_cannon
+            - generic "核心技能：受保护，不可删改" [ref=e138]: 🔒
+      - generic [ref=e141]: 👁 只读预览
+      - generic [ref=e144]: ← 从左侧选择一个词条
+      - generic [ref=e146]:
+        - generic [ref=e147]:
+          - generic [ref=e148]: 🎯 靶场测试
+          - generic [ref=e149]: 技能：—
+          - button "🎯 触发测试（真实引擎）" [disabled] [ref=e150]
+        - generic [ref=e152]: 选择区域1中的词条后，点击「触发测试」运行真实战斗引擎单回合结算。

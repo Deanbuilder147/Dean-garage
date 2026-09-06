@@ -73,6 +73,17 @@ export default defineConfig({
       '/api/units': { target: PROXY_TARGET || `http://${SERVICE_HOSTS.online}:3006`, changeOrigin: true }
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vue: ['vue', 'vue-router', 'pinia'],
+          pixi: ['pixi.js'],
+          net: ['axios', 'socket.io-client'],
+        },
+      },
+    },
+  },
   preview: {
     host: '0.0.0.0',
     port: 8081

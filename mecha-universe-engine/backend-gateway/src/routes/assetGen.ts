@@ -171,7 +171,7 @@ router.post('/generate', upload.single('reference'), authenticate, async (req: a
       fs.existsSync(path.join(TERRAINS_DIR, `${terrainId}.png`))
 
     // —— 积分校验 ——
-    const user = await get('SELECT id, credits FROM users WHERE id = ?', [req.user.id])
+    const user = await get('SELECT id, credits FROM users WHERE id = ?', [req.user.userId])
     const cost = COST[type]
     const balance = user ? Number(user.credits ?? 0) : 0
     if (balance < cost) {
@@ -252,7 +252,7 @@ router.post('/generate', upload.single('reference'), authenticate, async (req: a
 
     // —— 扣积分（仅未命中缓存时；命中复用不烧积分）——
     if (!cached) {
-      await run('UPDATE users SET credits = credits - ? WHERE id = ?', [cost, req.user.id])
+      await run('UPDATE users SET credits = credits - ? WHERE id = ?', [cost, req.user.userId])
       await persistChanges()
     }
 
@@ -266,7 +266,7 @@ router.post('/generate', upload.single('reference'), authenticate, async (req: a
 // 查询当前用户积分（前端展示用）
 router.get('/credits', authenticate, async (req: any, res) => {
   try {
-    const user = await get('SELECT credits FROM users WHERE id = ?', [req.user.id])
+    const user = await get('SELECT credits FROM users WHERE id = ?', [req.user.userId])
     res.json({ credits: user ? Number(user.credits ?? 0) : 0, cost: COST })
   } catch (e: any) {
     res.status(500).json({ error: e?.message || '查询失败' })

@@ -1,0 +1,63 @@
+[gd_scene format=3 uid="uid://mapselect01"]
+
+[ext_resource type="Script" path="res://net/api_client.gd" id="1_api"]
+[ext_resource type="Script" path="res://scenes/nav/MapSelect.gd" id="2_map"]
+
+[node name="MapSelect" type="Control"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("2_map")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="VBox"]
+layout_mode = 2
+text = "选择地图"
+
+[node name="ListPanel" type="PanelContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="MapList" type="ItemList" parent="VBox/ListPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 320)
+
+[node name="NameRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NameLabel" type="Label" parent="VBox/NameRow"]
+layout_mode = 2
+text = "房名:"
+
+[node name="NameEdit" type="LineEdit" parent="VBox/NameRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "房间名称"
+
+[node name="BtnRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CreateBtn" type="Button" parent="VBox/BtnRow"]
+layout_mode = 2
+text = "创建并进入"
+
+[node name="BackBtn" type="Button" parent="VBox/BtnRow"]
+layout_mode = 2
+text = "返回"
+
+[node name="Hint" type="Label" parent="VBox"]
+layout_mode = 2
+text = ""

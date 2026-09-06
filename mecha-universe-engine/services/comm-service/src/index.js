@@ -17,6 +17,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { setupSocketHandlers, roomStates, emitBattleState } from './services/socketService.js';
+import { setupNativeWs } from './services/wsNativeService.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -633,6 +634,10 @@ app.get('/api/comm/rooms/:roomId', authenticate, async (req, res) => {
 
 // Socket.io 实时通讯
 setupSocketHandlers(io);
+
+// 原生 WebSocket (RFC 6455) 支持层（Godot 等标准 WS 客户端）
+// 与 Socket.io 共享同一 httpServer，挂载在 /ws-native 路径，互不干扰
+setupNativeWs(httpServer, '/ws-native');
 
 // 错误处理
 app.use((err, req, res, next) => {

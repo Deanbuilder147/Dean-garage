@@ -1,0 +1,67 @@
+[gd_scene format=3 uid="uid://roomlobby01"]
+
+[ext_resource type="Script" path="res://net/api_client.gd" id="1_api"]
+[ext_resource type="Script" path="res://scenes/nav/RoomLobby.gd" id="2_lobby"]
+
+[node name="RoomLobby" type="Control"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("2_lobby")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="VBox"]
+layout_mode = 2
+text = "房间大厅"
+
+[node name="ListPanel" type="PanelContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="RoomList" type="ItemList" parent="VBox/ListPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 320)
+
+[node name="CodeRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CodeLabel" type="Label" parent="VBox/CodeRow"]
+layout_mode = 2
+text = "房号:"
+
+[node name="CodeEdit" type="LineEdit" parent="VBox/CodeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "输入 6 位房号加入"
+
+[node name="BtnRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CreateBtn" type="Button" parent="VBox/BtnRow"]
+layout_mode = 2
+text = "创建房间"
+
+[node name="JoinBtn" type="Button" parent="VBox/BtnRow"]
+layout_mode = 2
+text = "加入"
+
+[node name="RefreshBtn" type="Button" parent="VBox/BtnRow"]
+layout_mode = 2
+text = "刷新"
+
+[node name="Hint" type="Label" parent="VBox"]
+layout_mode = 2
+text = ""

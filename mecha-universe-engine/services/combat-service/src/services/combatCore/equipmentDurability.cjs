@@ -26,6 +26,20 @@ class EquipmentDurability {
     constructor() {
         // 存储各单位装备耐久度快照 { unit_id: { equipment_slots } }
         this._state = {};
+        // K1：本局锁定的装备槽 { unit_id: { slot: true } }（锁定后钳 0 且不可恢复）
+        this._locks = {};
+        // K1：恢复上限快照 { unit_id: { slot: max } }
+        this._maxDurability = {};
+    }
+
+    /**
+     * 2.0B 鲁棒性守卫：若单位尚未注册（战斗初始化漏调 register），按 equipState 即时装载，
+     * 避免耐久逻辑因 _state 缺失而空转。
+     */
+    _ensureRegistered(unit) {
+        if (!unit) return;
+        const uid = unit.id || unit.unit_id;
+        if (uid && !this._state[uid]) this.register(unit);
     }
 
     /**
@@ -35,6 +49,10 @@ class EquipmentDurability {
     register(unit) {
         if (!unit || !(unit.id || unit.unit_id)) return;
         const uid = unit.id || unit.unit_id;
+        // 2.0B：战斗初始化重载——清除上局残留的 K1 锁定与本局最大耐久快照，
+        // 保证每局从干净状态装载（避免跨局锁定残留导致装备永久不可用）。
+        if (this._locks[uid]) delete this._locks[uid];
+        if (this._maxDurability && this._maxDurability[uid]) delete this._maxDurability[uid];
 
         const slots = ['left_hand', 'right_hand', 'extra'];
         const state = {
@@ -53,8 +71,13 @@ class EquipmentDurability {
         if (eq) {
             const TYPE_MAP = { '武器': 'weapon', '防具': 'armor', '载具': 'thruster', '背包': 'support' };
             eq.forEach((e, i) => {
-                const slot = slots[i % slots.length];
+                // 优先用装备自身声明的 slot（来自 buildEquipmentFromParts），
+                // 仅在缺失时退回数组下标，避免 equipState 顺序与 slots 错位导致错配。
+                const slot = e.slot || e.name || slots[i % slots.length];
                 const t = TYPE_MAP[e.type] || 'weapon';
+                // 记录恢复上限快照（供 E 组恢复计算真实上限，而非无限回满）
+                this._maxDurability[uid] = this._maxDurability[uid] || {};
+                this._maxDurability[uid][slot] = e.maxDurability ?? e.durability ?? 0;
                 state[slot] = {
                     type: t,
                     durability: e.durability ?? 0,
@@ -62,6 +85,8 @@ class EquipmentDurability {
                     melee: e.melee || 0,
                     ranged: e.ranged || 0,
                     defense: e.defense || 0,
+                    attack: e.attack || 0,
+                    mobility: e.mobility || 0,
                     resistance: e.resistance || null,
                     hp: e.hp ?? 0,
                     maxHp: e.maxHp ?? e.hp ?? 0,
@@ -90,6 +115,14 @@ class EquipmentDurability {
         }
 
         this._state[uid] = state;
+        // K1：记录各槽恢复上限（用于 restoreDurability 钳制）
+        this._maxDurability[uid] = {};
+        Object.keys(state).forEach((slot) => {
+            const v = state[slot];
+            this._maxDurability[uid][slot] = (v && typeof v === 'object')
+                ? (v.maxDurability ?? v.durability ?? 0)
+                : (typeof v === 'number' ? v : 0);
+        });
     }
 
     /**
@@ -106,6 +139,7 @@ class EquipmentDurability {
         if (!unit || incomingDamage <= 0) {
             return { remaining_damage: incomingDamage || 0, absorbed: 0, changes: [] };
         }
+        this._ensureRegistered(unit); // 2.0B 鲁棒性守卫
 
         // P0-2: 武器类型归一为权威伤害种类（energy/laser/em 等别名统一映射为 beam）
         const dk = normalizeDamageKind(weaponType);
@@ -122,7 +156,7 @@ class EquipmentDurability {
 
         // 阶段二：防具/背包作为独立伤害吸收槽，每次分担 3 点（扣减独立 HP 与耐久）
         const armorSlots = ['left_hand', 'right_hand', 'extra'].filter(
-            slot => state[slot].type === 'armor' && !state[slot].broken
+            slot => state[slot] && state[slot].type === 'armor' && !state[slot].broken
         );
 
         for (const slot of armorSlots) {
@@ -133,6 +167,11 @@ class EquipmentDurability {
             absorbed += absorbAmount;
             armor.durability -= 1;
             armor.hp -= absorbAmount; // 扣减独立 HP（规则3）
+            // 2.0B.3：同步回写 equipState（使前端与属性拦截读到渐变耐久，而非仅在破损时回写）
+            if (armor._idx != null && unit.equipState && unit.equipState[armor._idx]) {
+                unit.equipState[armor._idx].durability = Math.max(0, armor.durability);
+                unit.equipState[armor._idx].hp = Math.max(0, armor.hp);
+            }
 
             changes.push({
                 type: 'armor_absorb',
@@ -207,21 +246,22 @@ class EquipmentDurability {
      */
     consumeDurability(unit, slot, amount = 1) {
         if (!unit) return { consumed: 0, broken: false };
+        this._ensureRegistered(unit); // 2.0B 鲁棒性守卫
         const uid = unit.id || unit.unit_id;
         if (!this._state[uid]) return { consumed: 0, broken: false };
-        const cur = this._state[uid][slot];
-        if (typeof cur !== 'number') return { consumed: 0, broken: false };
+        // K1：锁定槽不可被消耗（钳死为 0，任何路径不得解锁）
+        if (this.isLocked(unit, slot)) return { consumed: 0, broken: true };
+        const eq = this._state[uid][slot];
+        if (!eq || typeof eq !== 'object') return { consumed: 0, broken: false };
 
-        const before = cur;
-        const after = Math.max(0, cur - amount);
-        this._state[uid][slot] = after;
+        const before = eq.durability ?? 0;
+        const after = Math.max(0, before - amount);
+        eq.durability = after;
 
-        // 耐久归零 → 关闭对应装备开关
-        if (after <= 0 && unit.equipment) {
-            const flag = slot.startsWith('special_') ? slot.slice('special_'.length) : slot;
-            if (Object.prototype.hasOwnProperty.call(unit.equipment, flag)) {
-                unit.equipment[flag] = false;
-            }
+        // 耐久归零 → 标记损坏并移除加成（回写 equipState）
+        if (after <= 0) {
+            eq.broken = true;
+            this._onEquipmentBroken(unit, slot, eq);
         }
         return { consumed: before - after, broken: after <= 0 };
     }
@@ -231,6 +271,7 @@ class EquipmentDurability {
      */
     consumeWeaponDurability(unit) {
         if (!unit) return;
+        this._ensureRegistered(unit); // 2.0B 鲁棒性守卫
         const uid = unit.id || unit.unit_id;
         if (!this._state[uid]) return;
 
@@ -241,6 +282,11 @@ class EquipmentDurability {
         for (const slot of weaponSlots) {
             const weapon = this._state[uid][slot];
             weapon.durability -= 1;
+            // 2.0B.3：同步回写 equipState（武器渐变磨损即时反映到前端/属性拦截）
+            if (weapon._idx != null && unit.equipState && unit.equipState[weapon._idx]) {
+                unit.equipState[weapon._idx].durability = Math.max(0, weapon.durability);
+                unit.equipState[weapon._idx].destroyed = weapon.durability <= 0;
+            }
 
             if (weapon.durability <= 0) {
                 this._onEquipmentBroken(unit, slot, weapon);
@@ -255,6 +301,16 @@ class EquipmentDurability {
      */
     _onEquipmentBroken(unit, slot, equipData) {
         equipData.broken = true;
+        // ★ 同步 _state 对象自身的耐久/HP 为 0（_state[slot] 与 unit.equipState[idx] 是两份独立对象，
+        //    仅写回 equipState 会导致 _state 耐久停留在破损瞬间旧值，getDurability 误报非 0）
+        equipData.durability = 0;
+        equipData.hp = 0;
+
+        // 2.0B：同步移除聚合属性加成（unit.attack/defense/mobility），
+        // 与网关 computeWeaponMobilityBonus / getEquipmentAttackStat 的 equipState 守卫双保险。
+        if (equipData.attack) unit.attack = Math.max(0, (unit.attack || 0) - (equipData.attack || 0));
+        if (equipData.defense) unit.defense = Math.max(0, (unit.defense || 0) - (equipData.defense || 0));
+        if (equipData.mobility) unit.mobility = Math.max(0, (unit.mobility || 0) - (equipData.mobility || 0));
 
         // 阶段二：同步回写新模型 unit.equipState（供序列化/HUD 展示损坏状态）
         if (equipData._idx != null && equipData._idx >= 0 && unit.equipState && unit.equipState[equipData._idx]) {
@@ -292,10 +348,76 @@ class EquipmentDurability {
         if (!unit) return 0;
         const uid = unit.id || unit.unit_id;
         if (!this._state[uid]) return 0;
+        // K1：锁定槽恒返回 0
+        if (this.isLocked(unit, slot)) return 0;
         if (slot.startsWith('special_')) {
             return this._state[uid][slot] || 0;
         }
         return this._state[uid][slot] ? this._state[uid][slot].durability : 0;
+    }
+
+    // K1：判断某装备槽是否被本局锁定
+    isLocked(unit, slot) {
+        if (!unit) return false;
+        const uid = unit.id || unit.unit_id;
+        return !!(uid && this._locks[uid] && this._locks[uid][slot]);
+    }
+
+    // K1：锁定某装备槽（钳 0 + 关闭开关 + 移除加成），本局不可恢复
+    lockDurability(unit, slot) {
+        if (!unit) return { locked: false };
+        this._ensureRegistered(unit); // 2.0B 鲁棒性守卫
+        const uid = unit.id || unit.unit_id;
+        if (!this._state[uid]) return { locked: false };
+        if (!this._locks[uid]) this._locks[uid] = {};
+
+        const flag = slot.startsWith('special_') ? slot.slice('special_'.length) : slot;
+        // 钳为 0
+        if (typeof this._state[uid][slot] === 'number') {
+            this._state[uid][slot] = 0;
+        }
+        // 关闭装备开关
+        if (unit.equipment && Object.prototype.hasOwnProperty.call(unit.equipment, flag)) {
+            unit.equipment[flag] = false;
+        }
+        // 若是 equipState 对象槽，标记 destroyed 并移除加成
+        const eq = this._state[uid][slot];
+        if (eq && typeof eq === 'object') {
+            eq.durability = 0; eq.hp = 0; eq.broken = true;
+            if (eq._idx != null && eq._idx >= 0 && Array.isArray(unit.equipState) && unit.equipState[eq._idx]) {
+                unit.equipState[eq._idx].destroyed = true;
+                unit.equipState[eq._idx].hp = 0;
+                unit.equipState[eq._idx].durability = 0;
+            }
+            this._onEquipmentBroken(unit, slot, eq);
+        }
+        this._locks[uid][slot] = true;
+        return { locked: true, slot };
+    }
+
+    // K1：耐久恢复（供 E 组原子）；命中锁定则跳过，不允许恢复锁定的装备
+    restoreDurability(unit, slot, amount = 1) {
+        if (!unit) return { restored: 0 };
+        this._ensureRegistered(unit); // 2.0B 鲁棒性守卫
+        const uid = unit.id || unit.unit_id;
+        if (!this._state[uid]) return { restored: 0 };
+        if (this.isLocked(unit, slot)) return { restored: 0, locked: true };
+        const eq = this._state[uid][slot];
+        if (!eq || typeof eq !== 'object') return { restored: 0 };
+        const cur = eq.durability ?? 0;
+        const max = this._maxDurability && this._maxDurability[uid] && typeof this._maxDurability[uid][slot] === 'number'
+            ? this._maxDurability[uid][slot] : cur;
+        const after = Math.min(max, cur + amount);
+        eq.durability = after;
+        if (after > 0) {
+            eq.broken = false;
+            if (eq._idx != null && eq._idx >= 0 && Array.isArray(unit.equipState) && unit.equipState[eq._idx]) {
+                unit.equipState[eq._idx].durability = after;
+                unit.equipState[eq._idx].destroyed = false;
+                unit.equipState[eq._idx].hp = eq.hp ?? after;
+            }
+        }
+        return { restored: after - cur };
     }
 
     /**
@@ -303,7 +425,11 @@ class EquipmentDurability {
      */
     reset() {
         this._state = {};
+        this._locks = {};
     }
 }
 
-module.exports = EquipmentDurability;
+// ★ 2.0B：改为单例导出。gateway（combatBridge 经 createRequire）与 combat-service
+// （effectExecutor 经 require）命中同一模块缓存，共享 _state / _locks 字典，
+// 保证「战斗初始化 register」与「结算/锁定接线」读写同一份耐久状态。
+module.exports = new EquipmentDurability();

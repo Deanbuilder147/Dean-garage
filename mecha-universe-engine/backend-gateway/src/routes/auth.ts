@@ -14,6 +14,7 @@ import { run, get, all, persistChanges } from '../db/sqlite.js';
 import { pgGetOne, pgQuery } from '../db/postgres.js';
 import { authenticate, requireAuth } from '../middleware/auth.js';
 import { ErrorCode, UserRole } from '@mecha/shared-kernel';
+import { resolveRoleFeatures } from '../services/featurePermissions.js';
 import type { LoginRequest, RegisterRequest, AuthResponse, UserProfile } from '@mecha/shared-kernel';
 
 const router = Router();
@@ -186,6 +187,7 @@ router.get('/api/auth/me', authenticate, requireAuth, (req, res) => {
     id: row.id, username: row.username, email: row.email,
     faction: row.faction, permission: row.permission,
     role: (row.role || UserRole.USER) as UserRole,
+    features: resolveRoleFeatures((row.role || UserRole.USER) as UserRole),
     credits: typeof row.credits === 'number' ? row.credits : 10,
     lastRoomId: row.last_room_id || null,
     createdAt: row.created_at, updatedAt: row.updated_at,
@@ -242,6 +244,7 @@ router.put('/api/auth/profile', authenticate, requireAuth, (req, res) => {
     id: row.id, username: row.username, email: row.email,
     faction: row.faction, permission: row.permission,
     role: (row.role || UserRole.USER) as UserRole,
+    features: resolveRoleFeatures((row.role || UserRole.USER) as UserRole),
     credits: typeof row.credits === 'number' ? row.credits : 10,
     lastRoomId: row.last_room_id || null,
     createdAt: row.created_at, updatedAt: row.updated_at,

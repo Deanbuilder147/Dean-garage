@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>按钮样式设计规范 · Retro-Futurism</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Space+Mono:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* ===== 基础取自 variables.css 语义色，升级为霓虹辉光 ===== */
+    --amber:#ffb000; --amber-lit:#ffc840; --amber-deep:#ff8a00;
+    --cyan:#00e5ff; --cyan-soft:#7fb3d5; --ice:#c1e8ff;
+    --red:#ff4d6d; --red-soft:#ff8e9b;
+    --purple:#c77dff; --purple-deep:#8e2de2;
+    --sky:#7fdcff; --green:#13ff43;
+    --bg:#04141a; --bg-2:#001620; --panel:rgba(0,35,49,.72);
+    --line:rgba(255,176,0,.22); --line-cyan:rgba(0,229,255,.22);
+    --txt:#c1e8ff; --txt-dim:#9f8e78;
+    --mono:'Fira Code','Space Mono','Share Tech Mono',monospace;
+    --glow-a:0 0 calc(6px*var(--glow-scale)) rgba(255,176,0,.7),0 0 calc(14px*var(--glow-scale)) rgba(255,176,0,.35);
+    --glow-c:0 0 calc(6px*var(--glow-scale)) rgba(0,229,255,.7),0 0 calc(14px*var(--glow-scale)) rgba(0,229,255,.35);
+    --glow-r:0 0 calc(6px*var(--glow-scale)) rgba(255,77,109,.7),0 0 calc(14px*var(--glow-scale)) rgba(255,77,109,.35);
+    --glow-p:0 0 calc(6px*var(--glow-scale)) rgba(199,125,255,.7),0 0 calc(14px*var(--glow-scale)) rgba(199,125,255,.35);
+    /* ===== 六边形导航可调参数（控制面板实时改） ===== */
+    --hx-size:96px;            /* 六边形宽 */
+    --hx-ratio:1.125;          /* 高宽比（默认72/64） */
+    --hx-offset:52px;          /* 蜂巢错位：偶数项右移 */
+    --hx-gap:10px;             /* 纵向间距 */
+    --hx-stroke-w:2.2;         /* 描边宽 */
+    --hx-stroke:#4A9EFF;       /* 常态描边色 */
+    --hx-font:15px;            /* 文字大小 */
+    --hx-ls:1px;               /* 文字字间距 */
+    --hx-tit-a:#ffe0a0;        /* 文字渐变上端 */
+    --hx-tit-b:#ff8c00;        /* 文字渐变下端 */
+    --hx-hover:#7ec0ff;        /* hover 描边 */
+    --hx-on:#00ff88;           /* 选中描边 */
+    --hx-on-scale:1.1;         /* 选中放大 */
+    --hx-glow:6px;             /* 光晕 blur */
+    --hx-opacity:1;            /* 所有六边形组件全局透明度 */
+    --hexpat-opacity:1;        /* 六边形花纹纹理层强度 */
+    /* ===== 全局主题可调参数（各段落面板共用） ===== */
+    --hx-c1:#88f7df;           /* 母题渐变① */
+    --hx-c2:#008675;           /* 母题渐变② */
+    --hx-c3:#005045;           /* 母题渐变③ */
+    --hx-msize:54px;           /* 二章基础六边形尺寸 */
+    --txt-scale:1;             /* 全局字号缩放 */
+    --line-h:1.7;              /* 正文行距 */
+    --glow-scale:1;            /* 辉光强度倍率 */
+    --radius:0px;              /* 圆角 */
+    --anim:0.2s;               /* 动画/过渡时长 */
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);color:var(--txt);font-family:var(--mono);
+    font-size:calc(13px * var(--txt-scale,1));line-height:var(--line-h,1.7);}
+  /* 背景母题（桌面 background.svg：底图 + 网格单元格层，格子层也是背景之一，铺底氛围层） */
+  .bg-home{position:fixed;inset:0;z-index:-2;pointer-events:none;
+    background:url(./docs/background.svg) center/cover no-repeat;
+    opacity:.5;}
+  /* 六边形花纹纹理层（桌面 资源 2.svg：六角形集合花纹，平铺铺底） */
+  .bg-hexpat{position:fixed;inset:0;z-index:1;pointer-events:none;
+    background:url(./docs/hex-pattern.svg) center/cover no-repeat;
+    opacity:var(--hexpat-opacity);
+    filter:brightness(2.4) contrast(1.4);}
+  /* CRT 背景：网格 + 扫描线 + 暗角 */
+  body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      linear-gradient(rgba(0,229,255,.035) 1px,transparent 1px) 0 0/100% 26px,
+      linear-gradient(90deg,rgba(255,176,0,.035) 1px,transparent 1px) 0 0/26px 100%,
+      radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%);
+  }
+  body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px);
+    mix-blend-mode:overlay;opacity:.5;animation:scan 8s linear infinite;}
+  @keyframes scan{from{background-position:0 0}to{background-position:0 100px}}
+
+  .wrap{position:relative;z-index:2;max-width:1180px;margin:0 auto;padding:28px 24px 80px;}
+
+  /* ===== 通用：硬边切角卡片（Retro UI） ===== */
+  .rf{border:1px solid var(--line);background:var(--panel);
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));
+    box-shadow:6px 6px 0 rgba(0,0,0,.4),0 0 0 1px rgba(0,0,0,.3);}
+  .rf-h{display:flex;align-items:center;gap:10px;padding:10px 14px;
+    border-bottom:1px solid var(--line);color:var(--amber);font-weight:700;letter-spacing:2px;
+    text-transform:uppercase;font-size:12px;text-shadow:var(--glow-a);}
+  .rf-h .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .rf-b{padding:16px 14px;}
+  /* 圆角变量作用于非硬边切角元素（硬边 .rf/.btn 保留 clip-path 设计语言） */
+  .statusbar,.acc,.acc-h,.tag,.inp{border-radius:var(--radius,0);}
+  /* ===== 素材上传预览器 ===== */
+  .up-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .up-item{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px dashed rgba(0,229,255,.3);
+    background:rgba(0,35,49,.4);font-size:11px;color:var(--ice);letter-spacing:.5px;cursor:pointer;}
+  .up-item:hover{border-color:var(--amber);color:var(--amber-lit);}
+  .up-item input[type=file]{font-size:10px;color:var(--cyan-soft);}
+  .up-actions{margin-top:12px;display:flex;gap:10px;}
+  /* 上传态：用 <img> 层覆盖对应组件（导航三态分层） */
+  .nav-hex .hex-asset-layer{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;z-index:1;}
+  .nav-hex.has-asset .hx, .nav-hex.has-asset .nav-tit{z-index:2;} /* 保持文字在图上方 */
+  .nav-hex.has-asset .hex-idle{display:block;}
+  .nav-hex.has-asset:hover .hex-idle{display:none;}
+  .nav-hex.has-asset:hover .hex-hover{display:block;}
+  .nav-hex.has-asset.on .hex-idle,.nav-hex.has-asset.on .hex-hover{display:none;}
+  .nav-hex.has-asset.on .hex-on{display:block;}
+  .hex-banner{position:relative;}
+  .hex-banner .banner-asset{position:absolute;inset:0;width:100%;height:auto;display:none;z-index:1;}
+  .hex-banner.has-asset svg{z-index:0;}
+  .bg-home.bg-asset{opacity:1;}
+
+  header.top{margin-bottom:26px;}
+  .top h1{font-size:26px;letter-spacing:.12em;color:var(--ice);text-shadow:var(--glow-c);font-weight:700;}
+  .top .sub{margin-top:6px;color:var(--txt-dim);font-size:12px;letter-spacing:1px;}
+  .statusbar{margin-top:14px;display:flex;flex-wrap:wrap;gap:14px;font-size:10px;color:var(--txt-dim);
+    border:1px solid var(--line-cyan);padding:8px 12px;background:rgba(0,35,49,.4);}
+  .statusbar b{color:var(--amber);} .statusbar .ok{color:var(--cyan);} .statusbar .sep{color:var(--txt-dim);}
+
+  h2.sec{margin:34px 0 14px;font-size:15px;letter-spacing:3px;color:var(--amber);text-transform:uppercase;
+    border-left:4px solid var(--amber);padding-left:10px;text-shadow:var(--glow-a);}
+
+  /* ===== 设计 DNA 卡片 ===== */
+  .dna{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+  .dna .rf-b{font-size:12px;line-height:1.7;color:var(--ice);}
+  .dna .tag{display:inline-block;font-size:10px;color:var(--amber);border:1px solid var(--line);
+    padding:1px 7px;margin-right:6px;margin-bottom:6px;}
+  .dna b{color:var(--amber);}
+
+  /* ===== 规范卡（按钮 + 规格表） ===== */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
+  .spec .demo{display:flex;flex-wrap:wrap;gap:14px;align-items:center;min-height:64px;
+    padding:14px;border:1px dashed rgba(0,229,255,.18);background:rgba(0,0,0,.25);margin-bottom:12px;}
+  .spec table{width:100%;border-collapse:collapse;font-size:11px;}
+  .spec th,.spec td{border:1px solid rgba(159,142,120,.18);padding:4px 8px;text-align:left;}
+  .spec th{color:var(--amber);background:rgba(255,176,0,.06);width:34%;letter-spacing:1px;}
+  .spec td{color:var(--ice);}
+  .spec .note{margin-top:8px;font-size:11px;color:var(--cyan-soft);line-height:1.6;}
+  .spec .note b{color:var(--amber);}
+
+  /* ===== Retro-Futurism 按钮本体 ===== */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    padding:8px 18px;font:700 11px/1 var(--mono);letter-spacing:1px;cursor:pointer;
+    border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ice);
+    text-transform:uppercase;transition:var(--anim,0.2s);clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));}
+  .btn:hover{border-color:var(--amber);color:var(--amber-lit);box-shadow:var(--glow-a);}
+  .btn:active{transform:translate(1px,1px);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
+  .btn.active{background:rgba(255,176,0,.18);color:var(--amber-lit);border-color:var(--amber);box-shadow:var(--glow-a);}
+
+  .btn-save{background:linear-gradient(135deg,var(--amber),var(--amber-deep));border:none;color:#0a0f14;
+    box-shadow:var(--glow-a);} .btn-save:hover{background:linear-gradient(135deg,var(--amber-lit),var(--amber));}
+  .btn-delete{background:rgba(255,77,109,.14);border-color:rgba(255,77,109,.5);color:var(--red-soft);}
+  .btn-delete:hover{background:rgba(255,77,109,.24);color:var(--red);box-shadow:var(--glow-r);border-color:var(--red);}
+  .btn-ai{background:linear-gradient(135deg,var(--purple),var(--purple-deep));border:none;color:#fff;box-shadow:var(--glow-p);}
+  .btn-ai:hover{filter:brightness(1.15);}
+  .btn-upload{background:rgba(0,180,255,.16);border-color:rgba(0,229,255,.5);color:var(--cyan);}
+  .btn-upload:hover{background:rgba(0,229,255,.26);box-shadow:var(--glow-c);border-color:var(--cyan);}
+  .btn-ghost{background:transparent;}
+  .btn-mini{padding:4px 11px;font-size:10px;}
+  .btn-hero{padding:14px 38px;font-size:13px;background:linear-gradient(135deg,var(--amber),var(--amber-deep));border:none;color:#0a0f14;box-shadow:var(--glow-a);}
+  .btn-login{display:block;width:100%;padding:14px;background:linear-gradient(135deg,var(--amber),var(--amber-deep));border:none;color:#0a0f14;font:700 13px/1 var(--mono);letter-spacing:2px;text-transform:uppercase;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));}
+  .card-btn{background:rgba(0,0,0,.25);border:1px solid var(--line);color:var(--ice);padding:8px 18px;font:700 11px/1 var(--mono);letter-spacing:1px;cursor:pointer;text-transform:uppercase;clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));}
+  .card-btn:hover{border-color:var(--amber);color:var(--amber-lit);box-shadow:var(--glow-a);}
+
+  /* ===== 选择类：Tab（互斥单激活） ===== */
+  .tabs{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);width:fit-content;background:rgba(0,0,0,.25);}
+  .tab{padding:8px 14px;font:700 11px/1 var(--mono);letter-spacing:1px;color:var(--ice);cursor:pointer;
+    border-right:1px solid var(--line);text-transform:uppercase;transition:.15s;}
+  .tab:last-child{border-right:none;}
+  .tab:hover{color:var(--amber-lit);}
+  .tab.on{background:rgba(255,176,0,.2);color:var(--amber-lit);box-shadow:inset 0 -2px 0 var(--amber);}
+
+  /* ===== 原子系统展开逻辑：折叠树 ===== */
+  .acc{border:1px solid var(--line);background:rgba(0,0,0,.25);}
+  .acc-h{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;color:var(--ice);font-size:12px;letter-spacing:1px;}
+  .acc-h:hover{color:var(--amber-lit);}
+  .acc-h .chev{color:var(--amber);transition:var(--anim,0.2s);font-family:var(--mono);}
+  .acc.open .acc-h .chev{transform:rotate(90deg);}
+  .acc-body{display:none;padding:10px 16px 14px;border-top:1px solid var(--line);}
+  .acc.open .acc-body{display:block;}
+  .leaf{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:11px;color:var(--cyan-soft);}
+  .leaf .pin{width:6px;height:6px;background:var(--cyan);box-shadow:var(--glow-c);}
+
+  /* ===== 输入/下拉 ===== */
+  .param{padding:8px 10px;font:400 12px/1 var(--mono);background:rgba(0,0,0,.35);
+    border:1px solid var(--line);color:var(--amber-lit);border-radius:0;outline:none;}
+  .param:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(255,176,0,.18),var(--glow-a);}
+
+  /* ===== 弹窗演示 ===== */
+  .modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:50;}
+  .modal-mask.show{display:flex;}
+  .modal{width:90%;max-width:460px;background:rgba(0,16,25,.96);border:1px solid var(--amber);
+    box-shadow:var(--glow-a),8px 8px 0 rgba(0,0,0,.4);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px));}
+  .modal h3{color:var(--amber);letter-spacing:1px;padding:14px 18px;border-bottom:1px solid var(--line);font-size:15px;text-shadow:var(--glow-a);}
+  .modal p{color:var(--ice);font-size:13px;line-height:1.6;padding:16px 18px;}
+  .modal .acts{display:flex;justify-content:flex-end;gap:12px;padding:0 18px 18px;}
+
+  /* ===== 六边形母题（核心视觉语言，来自六段式画布） ===== */
+  .hex{width:var(--hx-msize,54px);height:calc(var(--hx-msize,54px) * 10 / 9);display:inline-flex;align-items:center;justify-content:center;
+    font:700 10px/1 var(--mono);text-align:center;color:#eafff8;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+    /* 同步首页.svg 同款双径向渐变（青绿核 + 青白晕），由母题渐变变量驱动 */
+    background:radial-gradient(circle at 50% 45%,var(--hx-c1) 0%,var(--hx-c2) 62%,var(--hx-c3) 100%);
+    box-shadow:0 0 8px rgba(0,229,255,.4);opacity:var(--hx-opacity);}
+  /* 同步首页.svg 双径向渐变：统一底，语义色用边框/文字区分 */
+  .hex-core{width:74px;height:82px;font-size:13px;color:var(--amber);background:radial-gradient(circle at 50% 45%,#ffe6a0 0%,#ff9d00 60%,#b85c00 100%);
+    box-shadow:var(--glow-a);}
+  .hex-when{color:#eafff8;box-shadow:0 0 10px rgba(0,229,255,.5);border:1px solid rgba(0,229,255,.7);}
+  .hex-if{color:#cfe9ff;box-shadow:0 0 10px rgba(0,170,255,.4);border:1px solid rgba(0,170,255,.6);}
+  .hex-roll{color:var(--cyan);box-shadow:var(--glow-c);border:1.5px solid var(--cyan);}
+  .hex-do{color:#eafff8;box-shadow:0 0 10px rgba(0,229,255,.5);border:1px solid rgba(0,229,255,.7);}
+  .hex-after{color:#bda;box-shadow:0 0 10px rgba(180,200,160,.4);border:1px solid rgba(180,200,160,.6);}
+  .hex-cost{color:#eafff8;box-shadow:0 0 10px rgba(0,229,255,.5);border:1px solid rgba(0,229,255,.7);}
+  .hex-seg{color:#ffc486;box-shadow:0 0 10px rgba(255,140,40,.5);border:1.5px solid var(--amber-deep);}
+  .hex-sub{color:#9fd0ff;box-shadow:0 0 10px rgba(0,150,255,.5);border:1.5px solid #2f8fff;}
+  .hex-empty{color:#ff8e9b;box-shadow:0 0 10px rgba(255,77,109,.5);border:1.5px solid #ff4d6d;}
+  .hex-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;}
+
+  /* ===== 六边形导航组合（蜂巢错位 + 光晕尾巴 + 弯曲标题框） ===== */
+  .hex-cluster{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+    padding:20px 22px;min-width:280px;max-width:340px;}
+
+  /* 顶部标题：严格复刻桌面 title.svg（六边形蜂窝 + 橙线 + 73px 橙标题 + 英文副标题） */
+  .hex-banner{position:relative;margin-bottom:18px;width:100%;max-width:662px;}
+  .hex-banner svg{display:block;width:100%;height:auto;overflow:visible;}
+  /* banner 六边形组：原基准 0.69 × 全局透明度 */
+  .hex-banner .banner-hex{opacity:calc(.69 * var(--hx-opacity));}
+
+  /* 蜂巢错位列表（六边形用内联 SVG 渲染，取自首页.svg 真源 · 参数由控制面板驱动） */
+  .hex-list{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:var(--hx-gap);padding-left:8px;}
+  /* 容器高由六边形真实高度决定（viewBox 64x72，宽:高=64:72），gap=0 时六边形真正紧挨 */
+  .hex-list .nav-hex{position:relative;width:var(--hx-size);height:calc(var(--hx-size) * var(--hx-ratio));
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;text-decoration:none;transition:transform .22s cubic-bezier(.2,.8,.2,1);
+    opacity:var(--hx-opacity);}
+  .hex-list .nav-hex:nth-child(even){margin-left:var(--hx-offset);}
+  /* 真实六边形 SVG（顶点取自首页真源平顶六边形，viewBox 紧致为 64x72） */
+  .hx{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+  /* 填充套用首页.svg 同款双径向渐变（青绿核 + 青白晕），应用到所有六边形 */
+  .hx-fill{fill:url(#hx-core);}
+  .hx-halo{fill:url(#hx-halo);opacity:.55;pointer-events:none;}
+  .hx-stroke{fill:none;stroke:var(--hx-stroke);stroke-width:var(--hx-stroke-w);opacity:.85;
+    filter:drop-shadow(0 0 var(--hx-glow) rgba(74,158,255,.5));transition:.22s;}
+  .hex-list .nav-hex:hover{transform:scale(1.05);z-index:2;}
+  .hex-list .nav-hex:hover .hx-stroke{stroke:var(--hx-hover);opacity:1;filter:drop-shadow(0 0 calc(var(--hx-glow)*2) rgba(74,158,255,.8));}
+  /* 选中态：套用 hex-selected.svg 绿光定义（径向绿光填充 + #00ff88 描边） */
+  .hex-list .nav-hex.on .hx-fill{fill:url(#hx-oncore);}
+  .hex-list .nav-hex.on .hx-halo{opacity:.35;}
+  .hex-list .nav-hex.on .hx-stroke{stroke:var(--hx-on);stroke-width:calc(var(--hx-stroke-w) + .8);opacity:.95;
+    filter:drop-shadow(0 0 10px rgba(0,255,136,.7));}
+  .hex-list .nav-hex.on{transform:scale(var(--hx-on-scale));z-index:2;}
+  /* 文字：绝对定位到六边形几何中心；字号/字距单独声明避免 font 简写 var 失效 */
+  .hex-list .nav-tit{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+    font-weight:700;font-size:var(--hx-font);font-family:var(--sans);letter-spacing:var(--hx-ls);
+    color:transparent;background:linear-gradient(180deg,var(--hx-tit-a) 0%,#ffb700 55%,var(--hx-tit-b) 100%);
+    -webkit-background-clip:text;background-clip:text;
+    text-shadow:0 0 12px rgba(255,160,0,.4);pointer-events:none;white-space:nowrap;}
+  .hex-list .nav-hex.on .nav-tit{text-shadow:0 0 16px rgba(0,255,136,.5);}
+  /* 后台管理：紫描边变体 */
+  .hex-list .nav-hex.admin .hx-stroke{stroke:#c77dff;}
+  .hex-list .nav-hex.admin:hover .hx-stroke{stroke:#e0b0ff;filter:drop-shadow(0 0 12px rgba(199,125,255,.8));}
+  .hex-list .nav-hex.admin.on .hx-stroke{stroke:#b06bff;filter:drop-shadow(0 0 10px rgba(176,107,255,.7));}
+
+  /* ===== 六边形导航调参面板 ===== */
+  .hx-panel{margin-top:16px;border:1px solid var(--line-cyan);background:rgba(0,20,32,.6);
+    clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));padding:14px;}
+  .hx-panel-h{color:var(--cyan);font:700 11px/1 var(--mono);letter-spacing:2px;margin-bottom:12px;text-shadow:var(--glow-c);text-transform:uppercase;}
+  .hx-ctrl{display:grid;grid-template-columns:repeat(5,1fr);gap:12px 16px;margin-bottom:12px;}
+  .hx-field{display:flex;flex-direction:column;gap:6px;min-width:0;}
+  .hx-field label{display:block;font:9px/1.2 var(--mono);color:var(--txt-dim);letter-spacing:1px;white-space:nowrap;}
+  .hx-field label b{color:var(--amber-lit);font-weight:700;}
+  .hx-field input[type=range]{width:100%;accent-color:var(--cyan);cursor:pointer;}
+  .hx-field input[type=color]{width:100%;height:28px;background:transparent;border:1px solid var(--line-cyan);cursor:pointer;padding:0;}
+  .hx-reset-field{grid-column:1/-1;justify-self:start;}
+  .hx-reset{padding:6px 14px;background:rgba(0,229,255,.08);
+    border:1px solid var(--line-cyan);color:var(--cyan);font:700 10px/1 var(--mono);letter-spacing:1px;cursor:pointer;
+    clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));transition:.15s;}
+  .hx-reset:hover{background:rgba(0,229,255,.18);color:var(--ice);}
+
+  /* 六边形 Tab（六段母题替代条形 Tab） */
+  .hex-tabs{display:flex;flex-wrap:wrap;gap:10px;}
+  .hex-tab{position:relative;width:58px;height:64px;display:inline-flex;align-items:center;justify-content:center;
+    font:700 9px/1.1 var(--mono);text-align:center;color:var(--ice);cursor:pointer;
+    clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+    background:rgba(0,0,0,.3);border:1px solid var(--line);transition:.15s;}
+  .hex-tab:hover{color:var(--amber-lit);border-color:var(--amber);}
+  .hex-tab.on{background:linear-gradient(135deg,rgba(255,176,0,.3),rgba(255,138,0,.18));color:var(--amber-lit);
+    box-shadow:var(--glow-a);border-color:var(--amber);}
+
+  /* 六边形原子分类（替代圆点 leaf） */
+  .hex-leaf{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:11px;color:var(--cyan-soft);}
+  .hex-leaf .hpin{width:30px;height:34px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+    font:700 8px/1 var(--mono);color:#0a0f14;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:var(--cyan);box-shadow:var(--glow-c);}
+
+  /* 关联图 */
+  .rel{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}
+  .rel .rf-b{font-size:12px;line-height:1.8;color:var(--ice);}
+  .rel .k{color:var(--cyan);} .rel .v{color:var(--amber);}
+  .rel code{background:rgba(0,229,255,.1);padding:1px 6px;color:var(--cyan);border:1px solid var(--line-cyan);}
+
+  footer{margin-top:40px;border-top:1px solid var(--line);padding-top:14px;font-size:10px;color:var(--txt-dim);letter-spacing:1px;}
+  @media(max-width:880px){.dna,.grid,.rel{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<div class="bg-home"></div>
+<div class="bg-hexpat"></div>
+<!-- 全局六边形渐变定义（objectBoundingBox，供所有导航六边形复用，坐标系无关） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="hx-core" cx="0.5" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#006c5d"/><stop offset="0.51" stop-color="#006e5f"/>
+      <stop offset="0.77" stop-color="#007666"/><stop offset="0.97" stop-color="#008373"/>
+      <stop offset="1" stop-color="#008675"/>
+    </radialGradient>
+    <radialGradient id="hx-halo" cx="0.5" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#88f7df"/><stop offset="1" stop-color="#005045"/>
+    </radialGradient>
+    <radialGradient id="hx-oncore" cx="0.5" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#00dd77"/><stop offset="0.6" stop-color="#009966"/>
+      <stop offset="1" stop-color="#003a2a"/>
+    </radialGradient>
+  </defs>
+</svg>
+<div class="wrap">
+
+  <!-- ===== 素材上传预览器（纯前端 · 不上服务器 · 选本地/ assets 内 SVG 即时替换预览） ===== -->
+  <div class="rf spec" style="margin-bottom:18px;">
+    <div class="rf-h"><span class="dot"></span> 素材上传预览器 · 对照设计稿</div>
+    <div class="rf-b">
+      <p style="font-size:12px;color:var(--ice);line-height:1.7;margin-bottom:12px;">
+        选本地 SVG（或浏览器打开本页后从 <b style="color:var(--amber)">assets/</b> 目录选取），即时替换下方对应组件预览。
+        <b style="color:var(--amber)">仅当前会话生效，刷新还原</b>；确认满意后请把文件放入 <code>assets/</code> 并告知落地。
+      </p>
+      <div class="up-grid">
+        <label class="up-item">导航六边形 · 常态<input type="file" accept=".svg" data-asset="nav-idle"></label>
+        <label class="up-item">导航六边形 · 悬停<input type="file" accept=".svg" data-asset="nav-hover"></label>
+        <label class="up-item">导航六边形 · 选中<input type="file" accept=".svg" data-asset="nav-selected"></label>
+        <label class="up-item">页面标题横幅<input type="file" accept=".svg" data-asset="title"></label>
+        <label class="up-item">背景底图<input type="file" accept=".svg,image/*" data-asset="bg-base"></label>
+        <label class="up-item">背景网格层<input type="file" accept=".svg,image/*" data-asset="bg-grid"></label>
+      </div>
+      <div class="hx-field" style="margin-top:10px">
+        <label>六边形花纹纹理强度 <b data-out>1.00</b></label>
+        <input type="range" data-var="hexpat-opacity" min="0" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)">
+      </div>
+      <div class="up-actions">
+        <button class="btn" id="up-clear">清除上传预览</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="top rf">
+    <div class="rf-h"><span class="dot"></span> UI 规范 · BUTTON SYSTEM</div>
+    <div class="rf-b">
+      <h1>按钮样式设计规范</h1>
+      <div class="sub">RETRO-FUTURISM EDITION · 基于《前端尺寸与按钮规格说明》 · 复用首页 / 词条库 / 原子系统 设计语言</div>
+      <div class="statusbar">
+        <span><b>系统:</b> 在线</span><span class="sep">::</span>
+        <span class="ok">霓虹辉光协议 v2</span><span class="sep">::</span>
+        <span>风格: 硬边切角 + CRT 扫描线</span><span class="sep">::</span>
+        <span>字体: Fira Code / Space Mono</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ 设计 DNA ============ -->
+  <h2 class="sec">一、复用设计语言 (排版 & 展开逻辑)</h2>
+  <div class="dna">
+    <div class="rf"><div class="rf-h">首页</div><div class="rf-b">
+      <span class="tag">硬阴影</span><span class="tag">扫描线</span><span class="tag">状态点</span>
+      <b>排版：</b>左侧 4px 琥珀竖条 + 卡片式；<code>box-shadow:6px 6px 0</code> 硬投影，底部 scanline，标题用青色 <code>#c1e8ff</code>。<br>
+      <b>展开逻辑：</b>卡片整体可点 → 进入对应系统（点击即跳转）。
+    </div></div>
+    <div class="rf"><div class="rf-h">词条库系统</div><div class="rf-b">
+      <span class="tag">三栏</span><span class="tag">框中框</span><span class="tag">徽标</span>
+      <b>排版：</b>左列表 / 中编排 / 右原子面板；<code>.edit-block &gt; .block-title &gt; .block-body</code> 框中框层级；胶囊 <code>panel-badge</code>。<br>
+      <b>展开逻辑：</b>选中词条 → 联动中栏编排 + 画布高亮（单选）。
+    </div></div>
+    <div class="rf"><div class="rf-h">原子系统</div><div class="rf-b">
+      <span class="tag">折叠树</span><span class="tag">分类</span><span class="tag">拖入</span>
+      <b>排版：</b>右栏分类列表，每项可折叠/展开（accordion）。<br>
+      <b>展开逻辑：</b>点击分类标题 → 展开子原子项 → 点击/拖拽原子进入六段编排区（见下方交互演示）。
+    </div></div>
+  </div>
+  <!-- 一、复用设计语言 调参面板 -->
+  <div class="hx-panel">
+    <div class="hx-panel-h">⟐ 一、复用设计语言参数 · 实时调参</div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>主色(琥珀)</label><input type="color" data-var="amber" value="#ffb000"></div>
+      <div class="hx-field"><label>次色(青)</label><input type="color" data-var="cyan" value="#00e5ff"></div>
+      <div class="hx-field"><label>字号缩放 <b data-out>1.00</b></label><input type="range" data-var="txt-scale" min="0.8" max="1.4" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+      <div class="hx-field"><label>行距 <b data-out>1.7</b></label><input type="range" data-var="line-h" min="1.2" max="2.2" step="0.1" value="1.7" data-fmt="v=>(+v).toFixed(1)"></div>
+    </div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>辉光强度 <b data-out>1.0</b></label><input type="range" data-var="glow-scale" min="0" max="2" step="0.1" value="1" data-fmt="v=>(+v).toFixed(1)"></div>
+      <div class="hx-field"><label>圆角 <b data-out>0</b>px</label><input type="range" data-var="radius" data-unit="px" min="0" max="14" step="1" value="0"></div>
+      <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+      <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+    </div>
+  </div>
+
+  <!-- ============ 六边形视觉语言（核心） ============ -->
+  <h2 class="sec">二、六边形视觉语言 (CORE MOTIF)</h2>
+  <div class="rf"><div class="rf-h">六段式辐射结构 · 配色取自画布组件</div><div class="rf-b">
+    <p style="font-size:12px;color:var(--ice);margin-bottom:12px;line-height:1.7;">
+      全系统设计语言以<b style="color:var(--amber)">六边形</b>为母题：中心「技能」节点 + 六段格辐射 + ROLL 裂变橙/蓝分段树。
+      下方色板与真实 <code>HexCanvasEditor.vue</code> 配色一致，按钮/卡片/Tab/分类均沿用此母题，确保 UI 与画布同源。
+    </p>
+    <div class="hex-row" style="margin-bottom:14px;">
+      <div class="hex hex-core">技能</div>
+      <div class="hex hex-when">WHEN</div>
+      <div class="hex hex-if">IF</div>
+      <div class="hex hex-roll">ROLL</div>
+      <div class="hex hex-do">DO</div>
+      <div class="hex hex-after">AFTER</div>
+      <div class="hex hex-cost">COST</div>
+    </div>
+    <div class="hex-row" style="margin-bottom:6px;">
+      <div class="hex hex-seg" style="width:64px;height:72px;">一级分段<br>(橙)</div>
+      <div class="hex hex-sub" style="width:64px;height:72px;">二级子段<br>(蓝)</div>
+      <div class="hex hex-empty">空段</div>
+      <div class="hex hex-when" style="background:rgba(150,150,150,.25);color:#dcdcdc;box-shadow:0 0 8px rgba(200,200,200,.4);">选中</div>
+    </div>
+    <div class="note" style="margin-top:10px;">
+      <b>规格：</b>六边形用 <code>clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)</code> 切角（平顶尖底经典蜂窝向）；
+      填充已<b style="color:var(--amber)">同步首页.svg 同款双径向渐变</b>（青绿核 <code>#88f7df→#008675→#005045</code>）作为统一母题；
+      六段语义颜色（核心琥珀 / WHEN·IF·DO·COST 青边 / ROLL 青 / AFTER 灰绿 / 一级橙 / 二级蓝 / 空段红 / 选中灰）改用<b>边框 + 文字色</b>区分，确保与第三章导航六边形同源。
+      所有六边形（含本章与第三章）均受调参面板「全局透明度」控制。
+    </div>
+    <!-- 二、六边形视觉语言 调参面板 -->
+    <div class="hx-panel">
+      <div class="hx-panel-h">⟐ 二、六边形母题参数 · 实时调参</div>
+      <div class="hx-ctrl">
+        <div class="hx-field"><label>母题渐变①</label><input type="color" data-var="hx-c1" value="#88f7df"></div>
+        <div class="hx-field"><label>母题渐变②</label><input type="color" data-var="hx-c2" value="#008675"></div>
+        <div class="hx-field"><label>母题渐变③</label><input type="color" data-var="hx-c3" value="#005045"></div>
+        <div class="hx-field"><label>六边形宽 <b data-out>54</b>px</label><input type="range" data-var="hx-msize" data-unit="px" min="40" max="90" step="2" value="54"></div>
+        <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+      </div>
+      <div class="hx-ctrl">
+        <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- ============ 六边形导航组合（取自首页.svg + hex-selected.svg 真源） ============ -->
+  <h2 class="sec">三、六边形导航组合 (取自首页.svg 真源 · 蜂巢错位)</h2>
+  <div class="rf"><div class="rf-h">Hex Nav · 源自 首页.svg / hex-selected.svg</div><div class="rf-b">
+    <p style="font-size:12px;color:var(--ice);line-height:1.7;margin-bottom:14px;">
+      本章节六边形<b style="color:var(--amber)">直接取自首页设计稿</b>：平顶六边形顶点 <code>32,0 64,18 64,54 32,72 0,54 0,18</code>（宽64高72），
+      填充套用首页.svg 同款<b>双径向渐变</b>（青绿核 <code>#006c5d→#008675</code> + 青白晕 <code>#88f7df→#005045</code>），应用到所有六边形；
+      选中态用 <code>hex-selected.svg</code> 的绿光（径向绿光填充 <code>#00dd77→#003a2a</code> + <code>#00ff88</code> 描边）。
+      导航五项取自首页文字：首页 / 格纳库 / 地图档案 / 词条库 / 后台管理，按蜂巢错位排列。
+    </p>
+    <div class="hex-cluster" id="hexCluster">
+      <div class="hex-banner">
+        <svg viewBox="0 0 662.16 171.7" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="tb-core" cx="400.8" cy="122.55" r="45.78" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#006c5d"/><stop offset="0.51" stop-color="#006e5f"/>
+              <stop offset="0.77" stop-color="#007666"/><stop offset="0.97" stop-color="#008373"/>
+              <stop offset="1" stop-color="#008675"/>
+            </radialGradient>
+            <radialGradient id="tb-halo" cx="400.8" cy="122.55" r="46.07" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#88f7df"/><stop offset="1" stop-color="#005045"/>
+            </radialGradient>
+          </defs>
+          <g class="banner-hex" opacity="0.69">
+            <polygon points="314.02 74.16 357.04 98.36 357.04 146.75 314.02 170.95 271 146.75 271 98.36" fill="url(#tb-core)"/>
+            <polygon points="314.02 74.16 357.04 98.36 357.04 146.75 314.02 170.95 271 146.75 271 98.36" fill="url(#tb-halo)" opacity="0.55"/>
+            <polygon points="400.8 74.16 443.81 98.36 443.81 146.75 400.8 170.95 357.78 146.75 357.78 98.36" fill="url(#tb-core)"/>
+            <polygon points="400.8 74.16 443.81 98.36 443.81 146.75 400.8 170.95 357.78 146.75 357.78 98.36" fill="url(#tb-halo)" opacity="0.55"/>
+            <polygon points="488.12 74.16 531.13 98.36 531.13 146.75 488.12 170.95 445.1 146.75 445.1 98.36" fill="url(#tb-core)"/>
+            <polygon points="488.12 74.16 531.13 98.36 531.13 146.75 488.12 170.95 445.1 146.75 445.1 98.36" fill="url(#tb-halo)" opacity="0.55"/>
+            <polygon points="531.68 0.65 574.7 24.85 574.7 73.24 531.68 97.44 488.67 73.24 488.67 24.85" fill="url(#tb-core)"/>
+            <polygon points="531.68 0.65 574.7 24.85 574.7 73.24 531.68 97.44 488.67 73.24 488.67 24.85" fill="url(#tb-halo)" opacity="0.55"/>
+            <polygon points="575.01 74.26 618.03 98.46 618.03 146.85 575.01 171.05 532 146.85 532 98.46" fill="url(#tb-core)"/>
+            <polygon points="575.01 74.26 618.03 98.46 618.03 146.85 575.01 171.05 532 146.85 532 98.46" fill="url(#tb-halo)" opacity="0.55"/>
+            <polygon points="618.58 0.76 661.6 24.95 661.6 73.35 618.58 97.55 575.56 73.35 575.56 24.95" fill="url(#tb-core)"/>
+            <polygon points="618.58 0.76 661.6 24.95 661.6 73.35 618.58 97.55 575.56 73.35 575.56 24.95" fill="url(#tb-halo)" opacity="0.55"/>
+          </g>
+          <g stroke="#f90" stroke-width="3" stroke-miterlimit="10" fill="none">
+            <line x1="0.52" y1="104.16" x2="638.18" y2="103.96"/>
+            <line x1="0" y1="114.75" x2="349.71" y2="114.75"/>
+            <line x1="382.35" y1="95.69" x2="638.26" y2="96.12"/>
+          </g>
+          <text x="2.24" y="86.71" font-size="73" font-weight="700" fill="#f90" font-family="'Source Han Sans HW K','Source Han Sans',sans-serif">战术模拟系统 AI</text>
+          <text x="368.07" y="135.9" font-size="26.73" font-weight="700" fill="#f90" font-family="'Source Han Sans HW K','Source Han Sans',sans-serif">Tactical Simulation System</text>
+        </svg>
+      </div>
+      <div class="hex-list">
+        <a class="nav-hex on" data-n="首页"><svg viewBox="0 0 64 72" class="hx"><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-fill"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-halo"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-stroke"/></svg><span class="nav-tit">首页</span></a>
+        <a class="nav-hex" data-n="格纳库"><svg viewBox="0 0 64 72" class="hx"><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-fill"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-halo"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-stroke"/></svg><span class="nav-tit">格纳库</span></a>
+        <a class="nav-hex" data-n="地图档案"><svg viewBox="0 0 64 72" class="hx"><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-fill"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-halo"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-stroke"/></svg><span class="nav-tit">地图档案</span></a>
+        <a class="nav-hex" data-n="词条库"><svg viewBox="0 0 64 72" class="hx"><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-fill"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-halo"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-stroke"/></svg><span class="nav-tit">词条库</span></a>
+        <a class="nav-hex admin" data-n="后台管理"><svg viewBox="0 0 64 72" class="hx"><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-fill"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-halo"/><polygon points="32,0 64,18 64,54 32,72 0,54 0,18" class="hx-stroke"/></svg><span class="nav-tit">后台管理</span></a>
+      </div>
+    </div>
+    <!-- ===== 六边形导航调参面板（通用引擎：data-var 自动绑定 :root，可保存） ===== -->
+    <div class="hx-panel">
+      <div class="hx-panel-h">⟐ 三、六边形导航参数 · 实时调参</div>
+      <div class="hx-ctrl">
+        <div class="hx-field"><label>六边形宽 <b data-out>96</b>px</label><input type="range" data-var="hx-size" data-unit="px" min="64" max="160" step="2" value="96"></div>
+        <div class="hx-field"><label>高宽比 <b data-out>1.13</b></label><input type="range" data-var="hx-ratio" min="0.8" max="1.4" step="0.05" value="1.125" data-fmt="v=>(+v).toFixed(2)"></div>
+        <div class="hx-field"><label>蜂巢错位 <b data-out>52</b>px</label><input type="range" data-var="hx-offset" data-unit="px" min="0" max="120" step="2" value="52"></div>
+        <div class="hx-field"><label>纵向间距 <b data-out>10</b>px</label><input type="range" data-var="hx-gap" data-unit="px" min="0" max="40" step="1" value="10"></div>
+      </div>
+      <div class="hx-ctrl">
+        <div class="hx-field"><label>描边宽 <b data-out>2.2</b></label><input type="range" data-var="hx-stroke-w" data-unit="px" min="0.5" max="6" step="0.2" value="2.2"></div>
+        <div class="hx-field"><label>光晕强度 <b data-out>6</b>px</label><input type="range" data-var="hx-glow" data-unit="px" min="0" max="20" step="1" value="6"></div>
+        <div class="hx-field"><label>文字大小 <b data-out>15</b>px</label><input type="range" data-var="hx-font" data-unit="px" min="10" max="26" step="1" value="15"></div>
+        <div class="hx-field"><label>字间距 <b data-out>1</b>px</label><input type="range" data-var="hx-ls" data-unit="px" min="0" max="6" step="0.5" value="1"></div>
+        <div class="hx-field"><label>选中放大 <b data-out>1.10</b></label><input type="range" data-var="hx-on-scale" min="1" max="1.4" step="0.05" value="1.1" data-fmt="v=>(+v).toFixed(2)"></div>
+        <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+      </div>
+      <div class="hx-ctrl">
+        <div class="hx-field"><label>常态描边</label><input type="color" data-var="hx-stroke" value="#4a9eff"></div>
+        <div class="hx-field"><label>hover描边</label><input type="color" data-var="hx-hover" value="#7ec0ff"></div>
+        <div class="hx-field"><label>选中描边</label><input type="color" data-var="hx-on" value="#00ff88"></div>
+        <div class="hx-field"><label>文字渐变上</label><input type="color" data-var="hx-tit-a" value="#ffe0a0"></div>
+        <div class="hx-field"><label>文字渐变下</label><input type="color" data-var="hx-tit-b" value="#ff8c00"></div>
+        <div class="hx-field"><label>母题渐变①</label><input type="color" data-var="hx-c1" value="#88f7df"></div>
+        <div class="hx-field"><label>母题渐变②</label><input type="color" data-var="hx-c2" value="#008675"></div>
+        <div class="hx-field"><label>母题渐变③</label><input type="color" data-var="hx-c3" value="#005045"></div>
+        <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px;">
+      <b>六边形源：</b><code>hex-selected.svg</code> 顶点（平顶，宽64高72）。<b>常态</b>：青色描边 + 深青填充；<b>选中(.on)</b>：套用 <code>hex-selected.svg</code> 绿光（<code>#00ff88</code> 外描边 + 黄<code>#ffd700</code>/绿<code>#00dd77</code>虚线内描边 + 顶点光斑 + 径向绿光填充）。<br>
+      <b>蜂巢错位：</b>偶数项 <code>margin-left</code> 向右偏移（取自首页文字 x 摆动）。<b>字体：</b>PingFangSC（与 SVG 源一致）。<br>
+      <b>落地：</b>真实组件将直接用这两个 SVG 文件（内联/import），不再手写 clip-path，确保 1:1 还原设计稿。
+    </div>
+  </div></div>
+
+  <!-- ============ 按钮规范 ============ -->
+  <h2 class="sec">四、按钮样式规范 (Retro-Futurism)</h2>
+  <div class="grid">
+
+    <!-- 基础 -->
+    <div class="rf spec"><div class="rf-h">基础 / 通用</div><div class="rf-b">
+      <div class="demo"><button class="btn">基础操作</button><button class="btn active">激活态</button><button class="btn" disabled>禁用</button></div>
+      <table>
+        <tr><th>Padding</th><td>8px 18px</td></tr>
+        <tr><th>字号</th><td>11px / 700</td></tr>
+        <tr><th>圆角</th><td>0（硬边切角）</td></tr>
+        <tr><th>配色</th><td>青字 #c1e8ff · 暖灰描边 · hover 转琥珀辉光</td></tr>
+      </table>
+      <div class="note">用途：通用操作。<b>关联：</b>单选态（.active）用于当前选中对象（如六段某段头）。</div>
+    </div></div>
+
+    <!-- 主/保存 -->
+    <div class="rf spec"><div class="rf-h">主操作 / 保存</div><div class="rf-b">
+      <div class="demo"><button class="btn btn-save">SAVE 保存</button><button class="btn btn-save" disabled>保存</button></div>
+      <table>
+        <tr><th>Padding</th><td>8px 18px</td></tr>
+        <tr><th>视觉</th><td>琥珀渐变 #ffb000→#ff8a00 · 全大写 · 霓虹辉光</td></tr>
+        <tr><th>用途</th><td>提交、确认、写回词条</td></tr>
+      </table>
+      <div class="note"><b>关联：</b>编辑链路末端闭环（选词条→编排→保存）。禁用态需先有有效编辑才可点。</div>
+    </div></div>
+
+    <!-- 危险 -->
+    <div class="rf spec"><div class="rf-h">危险 / 删除</div><div class="rf-b">
+      <div class="demo"><button class="btn btn-delete">DELETE 删除</button></div>
+      <table>
+        <tr><th>配色</th><td>红 #ff4d6d 霓虹 · 淡红底</td></tr>
+        <tr><th>用途</th><td>删除词条 / 地图 / 解除</td></tr>
+      </table>
+      <div class="note"><b>关联：</b>危险操作需二次确认弹窗后才生效（见弹窗演示）。</div>
+    </div></div>
+
+    <!-- AI / 上传 -->
+    <div class="rf spec"><div class="rf-h">AI 导入 / 上传</div><div class="rf-b">
+      <div class="demo"><button class="btn btn-ai">AI 生成</button><button class="btn btn-upload">UPLOAD</button></div>
+      <table>
+        <tr><th>AI</th><td>深紫渐变 #c77dff→#8e2de2 · 霓虹紫</td></tr>
+        <tr><th>上传</th><td>天蓝 #00e5ff 描边辉光</td></tr>
+      </table>
+      <div class="note"><b>关联：</b>AI 导入 → 生成草稿 → 用户复查 → 再「保存」落地（前后置依赖）。</div>
+    </div></div>
+
+    <!-- 幽灵/次要/小型 -->
+    <div class="rf spec"><div class="rf-h">幽灵 / 次要 / 迷你</div><div class="rf-b">
+      <div class="demo"><button class="btn btn-ghost">幽灵</button><button class="btn">次要</button><button class="btn btn-mini">MINI</button></div>
+      <table>
+        <tr><th>幽灵</th><td>透明描边，低密度操作</td></tr>
+        <tr><th>迷你</th><td>4px 11px / 10px，紧凑处</td></tr>
+      </table>
+      <div class="note">用途：取消、次级动作、列表内小操作。</div>
+    </div></div>
+
+    <!-- 卡片/首页大/登录 -->
+    <div class="rf spec"><div class="rf-h">卡片 / 首页大 / 登录</div><div class="rf-b">
+      <div class="demo"><button class="card-btn">卡片按钮</button><button class="btn btn-hero">启动</button></div>
+      <div class="demo"><button class="btn-login">登录系统 LOGIN</button></div>
+      <table>
+        <tr><th>卡片按钮</th><td>卡片内嵌操作（首页卡片右下）</td></tr>
+        <tr><th>首页大</th><td>14px 38px 琥珀辉光，主行动</td></tr>
+        <tr><th>登录</th><td>全宽 100%，13px/700</td></tr>
+      </table>
+    </div></div>
+
+  </div>
+  <!-- 四、按钮样式 调参面板 -->
+  <div class="hx-panel">
+    <div class="hx-panel-h">⟐ 四、按钮样式参数 · 实时调参</div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>主色(琥珀)</label><input type="color" data-var="amber" value="#ffb000"></div>
+      <div class="hx-field"><label>次色(青)</label><input type="color" data-var="cyan" value="#00e5ff"></div>
+      <div class="hx-field"><label>圆角 <b data-out>0</b>px</label><input type="range" data-var="radius" data-unit="px" min="0" max="14" step="1" value="0"></div>
+      <div class="hx-field"><label>辉光强度 <b data-out>1.0</b></label><input type="range" data-var="glow-scale" min="0" max="2" step="0.1" value="1" data-fmt="v=>(+v).toFixed(1)"></div>
+    </div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+      <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+    </div>
+  </div>
+
+  <!-- ============ 选择类 ============ -->
+  <h2 class="sec">五、选择类控件 (展开 / 互斥逻辑)</h2>
+  <div class="grid">
+
+    <!-- Tab 互斥（六边形母题） -->
+    <div class="rf spec"><div class="rf-h">Tab 切换 · 六边形 (互斥单激活)</div><div class="rf-b">
+      <div class="demo"><div class="hex-tabs" id="tabs">
+        <div class="hex-tab on" data-t="六段式">六段式</div>
+        <div class="hex-tab" data-t="射程">射程</div>
+        <div class="hex-tab" data-t="AOE">AOE</div>
+        <div class="hex-tab" data-t="地图炮">地图炮</div>
+        <div class="hex-tab" data-t="战场模拟">战场模拟</div>
+      </div></div>
+      <div class="note"><b>排版：</b>词条库画布区顶部，用六边形 Tab 替代条形，呼应六段式母题。<b>关联(互斥)：</b>五选一，仅一个 <code>.on</code> 高亮，对应切换画布视图（同组不能同时激活）。</div>
+    </div></div>
+
+    <!-- 原子折叠 -->
+    <div class="rf spec"><div class="rf-h">原子系统 · 折叠展开</div><div class="rf-b">
+      <div class="demo" style="align-items:stretch;width:100%;">
+        <div class="acc open" style="flex:1;">
+          <div class="acc-h" onclick="this.parentElement.classList.toggle('open')"><span>⟐ 原子分类：条件 (CONDITION)</span><span class="chev">▶</span></div>
+          <div class="acc-body">
+            <div class="hex-leaf"><span class="hpin">WH</span>WHEN · 触发条件</div>
+            <div class="hex-leaf"><span class="hpin">IF</span>IF · 前置判定</div>
+          </div>
+        </div>
+      </div>
+      <div class="demo" style="align-items:stretch;width:100%;">
+        <div class="acc" style="flex:1;">
+          <div class="acc-h" onclick="this.parentElement.classList.toggle('open')"><span>⟐ 原子分类：行动 (ACTION)</span><span class="chev">▶</span></div>
+          <div class="acc-body">
+            <div class="hex-leaf"><span class="hpin">DO</span>DO · 执行动作</div>
+            <div class="hex-leaf"><span class="hpin">RO</span>ROLL · 随机性</div>
+            <div class="hex-leaf"><span class="hpin">AF</span>AFTER · 收尾</div>
+            <div class="hex-leaf"><span class="hpin">CO</span>COST · 代价</div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><b>展开逻辑(原子系统)：</b>点击分类标题 → accordion 展开子原子项 → 点击/拖拽原子进入六段编排区。多分类可同时展开（非互斥）。</div>
+    </div></div>
+
+    <!-- 输入/下拉 -->
+    <div class="rf spec"><div class="rf-h">输入 / 下拉</div><div class="rf-b">
+      <div class="demo"><input class="param" placeholder="参数输入…" /><select class="param"><option>枚举 A</option><option>枚举 B</option></select></div>
+      <div class="note">规格：12px / focus 琥珀描边 + 外发光。用于词条参数编辑、战场面版数值。</div>
+    </div></div>
+
+    <!-- 弹窗 -->
+    <div class="rf spec"><div class="rf-h">模态弹窗 (确认)</div><div class="rf-b">
+      <div class="demo"><button class="btn btn-delete" onclick="document.getElementById('m').classList.add('show')">触发删除确认</button></div>
+      <div class="note">规格：宽 90% / max 460px，硬边切角 + 琥珀辉光。<b>关联：</b>危险操作二次确认（关闭后回到原态）。</div>
+    </div></div>
+
+  </div>
+  <!-- 五、选择控件 调参面板 -->
+  <div class="hx-panel">
+    <div class="hx-panel-h">⟐ 五、选择控件参数 · 实时调参</div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>展开动画 <b data-out>0.2</b>s</label><input type="range" data-var="anim" min="0" max="0.8" step="0.05" value="0.2" data-fmt="v=>(+v).toFixed(2)"></div>
+      <div class="hx-field"><label>选中色(琥珀)</label><input type="color" data-var="amber" value="#ffb000"></div>
+      <div class="hx-field"><label>次色(青)</label><input type="color" data-var="cyan" value="#00e5ff"></div>
+      <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+    </div>
+    <div class="hx-ctrl">
+      <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+    </div>
+  </div>
+
+  <!-- ============ 关联 ============ -->
+  <h2 class="sec">六、按键关联与联动 (对应文档第八节)</h2>
+  <div class="rf" style="margin-bottom:16px;"><div class="rf-h">六边形联动示意 · 单选驱动</div><div class="rf-b">
+    <p style="font-size:12px;color:var(--ice);line-height:1.7;margin-bottom:14px;">
+      点击 <b style="color:var(--amber)">六段中任一段六边形</b>（单选）→ 画布该段高亮（灰） + 右栏对应编排卡片滚动定位 + 下方裂变树展开。
+      下图示意「选中 ROLL」时的联动：中心技能六边形 + 六段辐射，ROLL 段亮起并向外裂变橙/蓝分段。
+    </p>
+    <div class="hex-row" style="justify-content:center;gap:18px;">
+      <div class="hex hex-when">WHEN</div>
+      <div class="hex hex-if">IF</div>
+      <div class="hex hex-core">技能</div>
+      <div class="hex hex-after">AFTER</div>
+      <div class="hex hex-roll" style="transform:scale(1.12);">ROLL★</div>
+      <div class="hex hex-do">DO</div>
+      <div class="hex hex-cost">COST</div>
+    </div>
+    <div class="hex-row" style="justify-content:center;gap:14px;margin-top:14px;">
+      <div class="hex hex-seg" style="width:60px;height:68px;">分段①<br>掷1~3</div>
+      <div class="hex hex-sub" style="width:60px;height:68px;">子段<br>命中+1</div>
+      <div class="hex hex-sub" style="width:60px;height:68px;">子段<br>穿透</div>
+    </div>
+    <div class="note" style="margin-top:10px;"><b>关联类型：</b>单选(互斥单激活) + 触发(展开裂变) + 前后置(选段→联动卡片/画布)。</div>
+  </div></div>
+  <div class="rel">
+    <div class="rf"><div class="rf-h">触发 / 弹出</div><div class="rf-b">
+      <p><span class="k">头像</span> → 弹出 <span class="v">账号弹窗</span></p>
+      <p><span class="k">掷骰按钮</span> → 弹出 <span class="v">骰子面板(roll/确认/取消)</span></p>
+      <p><span class="k">汉堡</span> → 弹出 <span class="v">侧边栏抽屉+遮罩</span></p>
+      <p><span class="k">原子分类</span> → 展开 <span class="v">子原子项</span></p>
+      <p><span class="k">＋子段</span> → 挂 <span class="v">子树输入框</span></p>
+    </div></div>
+    <div class="rf"><div class="rf-h">互斥 / 单激活</div><div class="rf-b">
+      <p>侧边栏三态：展开 / 折叠 / 抽屉（屏宽决定）</p>
+      <p>画布 Tab：<span class="v">六段式 / 射程 / AOE / 地图炮 / 战场模拟</span> 五选一</p>
+      <p>六段选中：<span class="v">单选</span>，联动画布高亮 + 右栏卡片滚动</p>
+    </div></div>
+    <div class="rf"><div class="rf-h">前后置依赖</div><div class="rf-b">
+      <p><span class="k">选词条</span> → 才能编辑六段 / 画布</p>
+      <p><span class="k">编辑六段</span> → 才能「保存」有效结果</p>
+      <p><span class="k">选技能卡</span> → 才能进入「选目标」</p>
+      <p><span class="k">掷骰</span> → 才能「确认」结算</p>
+    </div></div>
+    <div class="rf"><div class="rf-h">提交闭环</div><div class="rf-b">
+      <p>编辑链路：选词条 → 编排 → <span class="v">保存</span></p>
+      <p>AI 链路：AI 导入 → 复查 → <span class="v">保存</span></p>
+      <p>战斗链路：选技能 → 选目标/方向 → 掷骰 → 确认 → 结束回合</p>
+      <p>危险保护：删除 → <span class="v">二次确认弹窗</span></p>
+    </div></div>
+  </div>
+  <!-- 六、按键关联与联动 调参面板 -->
+  <div class="hx-panel">
+    <div class="hx-panel-h">⟐ 六、联动参数 · 实时调参</div>
+    <div class="hx-ctrl">
+      <div class="hx-field"><label>高亮色</label><input type="color" data-var="amber" value="#ffb000"></div>
+      <div class="hx-field"><label>连线/次色(青)</label><input type="color" data-var="cyan" value="#00e5ff"></div>
+      <div class="hx-field"><label>联动动画 <b data-out>0.2</b>s</label><input type="range" data-var="anim" min="0" max="0.8" step="0.05" value="0.2" data-fmt="v=>(+v).toFixed(2)"></div>
+      <div class="hx-field"><label>全局透明度 <b data-out>1.00</b></label><input type="range" data-var="hx-opacity" min="0.1" max="1" step="0.05" value="1" data-fmt="v=>(+v).toFixed(2)"></div>
+    </div>
+    <div class="hx-ctrl">
+      <div class="hx-field hx-reset-field"><button class="hx-reset" data-reset>↺ 复位默认值</button><button class="hx-save" data-save data-saved>💾 保存调整</button></div>
+    </div>
+  </div>
+
+  <footer>
+    RETRO-FUTURISM BUTTON SPEC · 设计语言取自 首页(硬边/扫描线/状态点) · 词条库(框中框/徽标/三栏) · 原子系统(折叠树) · 配色沿用 琥珀#ffb000 / 青#00e5ff / 红#ff4d6d / 紫#c77dff，并升级为霓虹辉光。
+  </footer>
+</div>
+
+<!-- 弹窗演示 -->
+<div class="modal-mask" id="m">
+  <div class="modal">
+    <h3>⚠ 确认删除</h3>
+    <p>此操作将永久删除该词条，且不可恢复。确认继续？</p>
+    <div class="acts"><button class="btn btn-ghost" onclick="document.getElementById('m').classList.remove('show')">取消</button><button class="btn btn-delete" onclick="document.getElementById('m').classList.remove('show')">确认删除</button></div>
+  </div>
+</div>
+
+<script>
+  // Tab 互斥切换（六边形）
+  document.getElementById('tabs').addEventListener('click', e=>{
+    const t=e.target.closest('.hex-tab'); if(!t)return;
+    document.querySelectorAll('#tabs .hex-tab').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');
+  });
+
+  // 蜂巢六边形导航（互斥单选 + 放大发光）
+  const cluster=document.getElementById('hexCluster');
+  cluster.addEventListener('click', e=>{
+    const t=e.target.closest('.nav-hex'); if(!t)return;
+    cluster.querySelectorAll('.nav-hex').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');
+  });
+
+  // ===== 通用调参面板引擎（每段一个 .hx-panel，控件用 data-var 声明，统一保存/复位/恢复） =====
+  const root=document.documentElement;
+  const LS_KEY='retro_params_v1';
+  // 默认值（复位用）——覆盖所有面板涉及的变量
+  const defs={
+    // 六边形导航 / 母题
+    'hx-size':'96px','hx-ratio':'1.125','hx-offset':'52px','hx-gap':'10px','hx-stroke-w':'2.2',
+    'hx-glow':'6px','hx-font':'15px','hx-ls':'1px','hx-on-scale':'1.1',
+    'hx-stroke':'#4a9eff','hx-hover':'#7ec0ff','hx-on':'#00ff88','hx-tit-a':'#ffe0a0','hx-tit-b':'#ff8c00',
+    'hx-opacity':'1',
+    'hx-c1':'#88f7df','hx-c2':'#008675','hx-c3':'#005045',
+    // 全局主题
+    'amber':'#ffb000','cyan':'#00e5ff','mono':'Fira Code','txt-scale':'1','line-h':'1.7','radius':'0px',
+    'glow-scale':'1','anim':'0.2s','link':'#ffb000'
+  };
+  // 把硬编码初始值同步进 defs（若 :root 已定义则用其值）
+  const initDefs=()=>{ for(const k in defs){ const v=getComputedStyle(root).getPropertyValue('--'+k).trim(); if(v) defs[k]=v; } };
+  initDefs();
+
+  // 绑定所有 data-var 控件（range/color/text）
+  const controls=[...document.querySelectorAll('[data-var]')];
+  const applyCtrl=(el)=>{
+    const vn='--'+el.dataset.var, raw=el.value;
+    let val=raw;
+    if(el.dataset.unit) val=raw+(el.dataset.unit);
+    root.style.setProperty(vn,val);
+    const out=el.parentElement.querySelector('[data-out]');
+    if(out) out.textContent=el.dataset.fmt?Function(el.dataset.fmt)(raw):raw;
+  };
+  controls.forEach(el=>{ el.addEventListener('input',()=>applyCtrl(el)); applyCtrl(el); });
+
+  // 保存 / 复位 / 恢复
+  const persist=()=>{
+    const saved={}; controls.forEach(el=>{ saved[el.dataset.var]=el.value+(el.dataset.unit||''); });
+    localStorage.setItem(LS_KEY,JSON.stringify(saved));
+    flashSaved();
+  };
+  const restore=()=>{
+    try{ const s=JSON.parse(localStorage.getItem(LS_KEY)||'{}');
+      controls.forEach(el=>{ if(s[el.dataset.var]!==undefined){ el.value=s[el.dataset.var].replace(el.dataset.unit||'',''); applyCtrl(el);} });
+    }catch(e){}
+  };
+  const resetAll=()=>{
+    controls.forEach(el=>{ const d=defs[el.dataset.var]; if(d!==undefined){ el.value=d.replace(el.dataset.unit||'',''); applyCtrl(el);} });
+  };
+  const flashSaved=()=>{ document.querySelectorAll('[data-saved]').forEach(b=>{ const t=b.textContent; b.textContent='✔ 已保存'; b.disabled=true;
+    setTimeout(()=>{ b.textContent=t; b.disabled=false; },1200); }); };
+  document.querySelectorAll('[data-save]').forEach(b=>b.addEventListener('click',persist));
+  document.querySelectorAll('[data-reset]').forEach(b=>b.addEventListener('click',resetAll));
+  restore(); // 页面加载自动恢复上次保存
+
+  // 兼容旧 id 绑定（段落三已有的 p-* 控件也带 data-var，无需重复）
+
+  // ===== 素材上传预览器（纯前端 objectURL，会话内生效） =====
+  const assetTargets={
+    'nav-idle':()=>document.querySelectorAll('.hex-list .nav-hex'),          // 应用到所有导航六边形（常态层）
+    'nav-hover':()=>document.querySelectorAll('.hex-list .nav-hex'),
+    'nav-selected':()=>document.querySelectorAll('.hex-list .nav-hex.on'),
+    'title':()=>document.querySelectorAll('.hex-banner'),
+    'bg-base':()=>document.querySelectorAll('.bg-home'),
+    'bg-grid':()=>document.querySelectorAll('.bg-home')
+  };
+  const applyAsset=(kind,url)=>{
+    const nodes=assetTargets[kind]&&assetTargets[kind](); if(!nodes)return;
+    nodes.forEach(node=>{
+      if(kind==='nav-idle'||kind==='nav-hover'||kind==='nav-selected'){
+        const cls={ 'nav-idle':'hex-idle','nav-hover':'hex-hover','nav-selected':'hex-on' }[kind];
+        let img=node.querySelector('.'+cls); if(!img){img=document.createElement('img');img.className=cls+' hex-asset-layer';node.appendChild(img);}
+        img.src=url;
+        node.classList.add('has-asset');
+      } else if(kind==='title'){
+        let img=node.querySelector('.banner-asset'); if(!img){img=document.createElement('img');img.className='banner-asset';node.appendChild(img);}
+        img.src=url; img.style.display='block';
+      } else if(kind==='bg-base'||kind==='bg-grid'){
+        node.style.backgroundImage=`url(${url})`;
+        node.classList.add('bg-asset');
+      }
+    });
+  };
+  document.querySelectorAll('input[data-asset]').forEach(inp=>{
+    inp.addEventListener('change',e=>{
+      const f=e.target.files[0]; if(!f)return;
+      const url=URL.createObjectURL(f);
+      applyAsset(inp.dataset.asset,url);
+    });
+  });
+  document.getElementById('up-clear').addEventListener('click',()=>{
+    document.querySelectorAll('.hex-asset-layer,.banner-asset').forEach(i=>{i.style.display='none';i.remove();});
+    document.querySelectorAll('.nav-hex').forEach(n=>n.classList.remove('has-asset'));
+    document.querySelectorAll('.hex-banner').forEach(n=>{n.classList.remove('has-asset');});
+    document.querySelectorAll('.bg-home').forEach(n=>{n.style.backgroundImage='';n.classList.remove('bg-asset');});
+    document.querySelectorAll('input[data-asset]').forEach(i=>i.value='');
+  });
+
+  // 点击遮罩关闭弹窗
+  document.getElementById('m').addEventListener('click',e=>{if(e.target.id==='m')e.target.classList.remove('show');});
+</script>
+</body>
+</html>

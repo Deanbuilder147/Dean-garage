@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>战场 Canvas 图层架构说明</title>
+<style>
+  :root{
+    --bg:#0a1628; --panel:rgba(14,22,34,.92); --line:rgba(90,200,255,.35);
+    --cyan:#5ad0ff; --amber:#ffb000; --green:#13ff43; --txt:#cfe6ff; --dim:#8fb4d6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#13243f,#0a1628 60%);
+    color:var(--txt);font-family:'Fira Code','Space Grotesk',monospace;line-height:1.6;padding:32px 18px}
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px;color:#fff;letter-spacing:1px}
+  .sub{color:var(--dim);margin:0 0 24px;font-size:13px}
+  .note{background:rgba(255,176,0,.08);border:1px solid rgba(255,176,0,.3);border-radius:8px;
+    padding:10px 14px;font-size:13px;color:#ffd597;margin:0 0 28px}
+  h2{font-size:16px;color:var(--cyan);border-left:3px solid var(--cyan);padding-left:10px;margin:34px 0 14px}
+  /* z-stack */
+  .stack{position:relative;display:flex;flex-direction:column-reverse;gap:10px}
+  .layer{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--panel);
+    box-shadow:0 6px 24px rgba(0,0,0,.4);backdrop-filter:blur(4px)}
+  .layer .z{float:right;font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:20px;padding:1px 9px}
+  .layer h3{margin:0 0 4px;font-size:15px;color:#fff}
+  .layer .tag{display:inline-block;font-size:10px;padding:1px 7px;border-radius:5px;margin-right:6px;vertical-align:middle}
+  .t-dom{background:rgba(90,200,255,.15);border:1px solid rgba(90,200,255,.4);color:#bfe9ff}
+  .t-canvas{background:rgba(255,176,0,.15);border:1px solid rgba(255,176,0,.4);color:#ffe1a6}
+  .t-svg{background:rgba(19,255,67,.12);border:1px solid rgba(19,255,67,.4);color:#9bffb4}
+  .layer p{margin:6px 0 0;font-size:13px;color:var(--dim)}
+  .layer b{color:var(--cyan)}
+  .layer .ctrl{font-size:12px;color:#ffd597;margin-top:6px}
+  /* single canvas inner order */
+  .inner{border:1px dashed rgba(90,200,255,.4);border-radius:10px;padding:14px 16px;background:rgba(8,18,34,.5)}
+  .inner ol{margin:8px 0 0;padding-left:0;list-style:none;counter-reset:l}
+  .inner li{counter-increment:l;position:relative;padding:8px 8px 8px 40px;border-bottom:1px solid rgba(90,200,255,.12);font-size:13px}
+  .inner li:last-child{border-bottom:none}
+  .inner li::before{content:counter(l);position:absolute;left:8px;top:8px;width:22px;height:22px;border-radius:50%;
+    background:rgba(255,176,0,.18);border:1px solid var(--amber);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:12px}
+  .inner li b{color:#fff}
+  /* relationship */
+  .rel{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .rel .card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel);font-size:13px}
+  .rel .card h4{margin:0 0 6px;color:var(--amber);font-size:13px}
+  .rel .card p{margin:0;color:var(--dim)}
+  code{background:rgba(90,200,255,.1);padding:1px 5px;border-radius:4px;color:#bfe9ff;font-size:12px}
+  .foot{margin-top:30px;color:var(--dim);font-size:12px;text-align:center}
+  @media(max-width:640px){.rel{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚙ 战场 Canvas 图层架构说明</h1>
+  <p class="sub">NewBattleView · HexGridCanvasEngine · ShapedCanvas　|　梳理于 2026-09-01</p>
+
+  <div class="note">
+    <b>核心结论：</b>战场上的 <code>&lt;canvas&gt;</code> 实际只有 <b>1 个</b>（<code>HexGridCanvasEngine</code> 的 <code>mainCanvas</code>），
+    外加一个独立的小地图 canvas（<code>BattleMinimap</code>，另算）。地图视图设置面板里那串开关
+    （背景 / 地形 / 网格 / 间距 / 4 边 / 外框SVG / 单位层 / 坐标 / 透明度）并<b>不是 7、8 个独立 canvas</b>，
+    而是这 1 个 canvas 的<b>不同绘制层</b> + 几个 DOM / SVG 层。
+  </div>
+
+  <h2>① 从底到顶的图层堆叠（z 序，后绘制的盖在上面）</h2>
+  <div class="stack">
+
+    <div class="layer">
+      <span class="z">z 最高</span>
+      <span class="tag t-dom">DOM</span>
+      <h3>4 · DOM 浮层（UI / 提示）</h3>
+      <p>地图图例 <code>map-legend</code> · 地图视图设置面板 <code>MapViewSettingsPanel</code> · 小地图 <code>BattleMinimap</code> ·
+        骰子 / 胜利 / 伏击 / 反应奇袭遮罩 · 部署过场控制条 · 单位详情卡。</p>
+      <div class="ctrl">受 z-index 控制，永远压在最上做交互与提示。</div>
+    </div>
+
+    <div class="layer">
+      <span class="tag t-svg">SVG</span>
+      <h3>3 · 外框 SVG 层（ShapedCanvas）</h3>
+      <p><code>&lt;polygon&gt;</code> 用同一份 <code>rawPoints</code> 描边 + <code>drop-shadow</code> 发光，即「地形外框 / 4 边长度」可视化。</p>
+      <div class="ctrl">pointer-events:<b>none</b>（不挡交互）；交互命中由 <code>.sc-hit</code> 的 <code>clip-path</code> 限制在异形内（异形外不触发点击）。</div>
+    </div>
+
+    <div class="layer">
+      <span class="tag t-canvas">CANVAS</span>
+      <h3>2 · mainCanvas 单画布（3 个绘制层，见下节）</h3>
+      <p>每帧 <code>draw()</code> 按 L1 地形 → L2 高亮 → L3 战斗叠加的顺序绘制；坐标标签 / 悬停高亮属引擎（L1 内），<code>drawFn</code>（L3）只画战斗专用叠加。</p>
+      <div class="ctrl">这是唯一真正画像素的 <code>&lt;canvas&gt;</code> 元素（透明），下方背景透过它显示。</div>
+    </div>
+
+    <div class="layer">
+      <span class="z">z 最低</span>
+      <span class="tag t-dom">DOM</span>
+      <h3>1 · 背景层（DOM，不是 canvas）</h3>
+      <p><code>HexGridCanvasEngine</code> 的 <code>.hex-engine-sandbox</code> 容器用 CSS <code>background-color</code>(背景色) + <code>background-image</code>(背景图) 铺底；
+        mainCanvas 自身 <code>clearRect</code> 透明，背景透过显示，受 ShapedCanvas 的 <code>clip-path</code> 自动裁成异形。</p>
+      <div class="ctrl">地图视图设置「<b>背景</b>」开关控制的就是它。</div>
+    </div>
+
+  </div>
+
+  <h2>② mainCanvas 内部每帧绘制顺序（L1→L3）</h2>
+  <div class="inner">
+    <ol>
+      <li><b>L1 地形层</b>（<code>renderTerrainCache</code> / <code>renderTerrainInline</code>）：地形填充 + 网格线。
+        地形色 / 不透明度由「地形」设置项控制；间距 H/V 来自 <code>spacingHScale</code> / <code>spacingVScale</code>；
+        地形缓存内还含坐标标签与悬停高亮（引擎职责，对应「坐标」「网格」开关）。</li>
+      <li><b>L2 高亮格子层</b>（<code>renderHighlights</code>）：通用 <code>highlightCells</code>（move / attack / select / warning）覆盖在地形上，指示可走 / 可点格。</li>
+      <li><b>L3 战斗叠加层</b>（<code>drawFn → drawBattleScene</code>）：经 <code>ctx.transform(ISO…)</code> 绘制移动 / 技能 / AOE 范围、合法目标、
+        单位精灵、HP 条、选中环、部署动画等。<code>unitOpacity</code> 经参数传入控制「单位层」透明度。盖在最上，保证单位清晰。</li>
+    </ol>
+  </div>
+
+  <h2>③ 各层互相作用关系</h2>
+  <div class="rel">
+    <div class="card"><h4>上下遮挡</h4><p>背景在最底、透过透明 canvas 显形；地形是基底；L2 高亮压在地形上；L3 单位与范围盖在地形之上；外框 SVG 只做边框装饰；DOM 浮层永远最上。</p></div>
+    <div class="card"><h4>职责边界</h4><p>坐标标签 / 悬停属引擎 L1 职责，<code>drawFn</code>(L3) 只画战斗专用叠加。二者不冲突——这是「渲染管线」宪法红线（引擎无状态，只收 props / drawFn，不读 Vue 状态）。</p></div>
+    <div class="card"><h4>命中与裁切</h4><p>异形框由 ShapedCanvas 的 <code>clip-path</code> 在 DOM 层裁切；SVG 边框 <code>pointer-events:none</code> 不挡交互；点击命中被限制在异形内（异形外不触发）。</p></div>
+    <div class="card"><h4>缩放与单位</h4><p>4 边长度滑块改 <code>rawPoints</code> 实时重算外框；间距 H/V 改地形排布；单位透明度只影响 L3。所有改动都映射到同 1 个 canvas 的不同绘制层。</p></div>
+  </div>
+
+  <p class="foot">— 该架构已记入项目长期记忆，供后续改动对照 —</p>
+</div>
+</body>
+</html>

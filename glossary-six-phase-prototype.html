@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>词条库 · 六段三层 + 原子组合 编辑器</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --line:#2b3340;
+    --amber:#ffb000; --amber-soft:rgba(255,176,0,.10);
+    --cyan:#7fe7ff; --txt:#e6edf3; --txt-dim:#9fb0c4;
+    --green:#5dd47f; --violet:#c08cff; --pink:#ff8ab3; --red:#ff8a80; --blue:#4aa3ff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:13px;line-height:1.5;
+    height:100vh;display:flex;flex-direction:column;}
+
+  /* ===== TOP BAR ===== */
+  .topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0;}
+  .topbar .title{font-size:15px;font-weight:700;color:var(--amber);border:1px solid var(--line);padding:4px 12px;border-radius:6px;background:transparent;}
+  .topbar input.subtitle{font-size:13px;color:var(--cyan);border:1px solid var(--line);padding:5px 10px;border-radius:6px;background:transparent;width:200px;}
+  .topbar .actions{margin-left:auto;display:flex;gap:8px;}
+  .topbar button{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:5px 14px;cursor:pointer;}
+  .btn-search{color:var(--txt-dim);background:var(--panel-2);}
+  .btn-save{color:var(--amber);border-color:var(--amber);background:var(--amber-soft);}
+
+  /* ===== MAIN LAYOUT ===== */
+  .main{display:flex;flex:1;overflow:hidden;}
+
+  /* 全局侧边栏（所有界面共用导航） */
+  .sidebar{width:64px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;flex-shrink:0;}
+  .sidebar .nav-logo{height:48px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--amber);border-bottom:1px solid var(--line);}
+  .nav-list{display:flex;flex-direction:column;gap:2px;padding:8px 0;}
+  .nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;cursor:pointer;color:var(--txt-dim);font-size:10px;border-left:3px solid transparent;transition:.15s;}
+  .nav-item .ni-ico{font-size:17px;line-height:1;}
+  .nav-item:hover{background:rgba(255,176,0,.06);color:var(--txt);}
+  .nav-item.active{color:var(--amber);border-left-color:var(--amber);background:var(--amber-soft);}
+  .sidebar .nav-spacer{margin-top:auto;}
+  .sidebar .nav-bottom{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px;color:var(--txt-dim);font-size:10px;cursor:pointer;border-top:1px solid var(--line);}
+  .sidebar .nav-bottom .ni-ico{font-size:16px;}
+
+  /* ===== CENTER AREA (B/C/D/E) ===== */
+  /* ===== 上下结构：CENTER 容器（row：技能面板 + 主体） ===== */
+  .center{flex:1;display:flex;flex-direction:row;min-width:0;overflow:hidden;}
+  .center-body{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;}
+
+  /* 上半区：技能列表 | A | B | E = 比例 1:7:2 */
+  .upper-row{display:flex;gap:10px;padding:12px;flex-shrink:0;border-bottom:1px solid var(--line);min-height:540px;}
+
+  /* 词条库内部：技能列表（属于本界面，非全局导航；仅上半区，收窄 1/3 并纵向滚动） */
+  .skill-panel{width:113px;flex-shrink:0;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;align-self:stretch;}
+  .skill-panel h2{font-size:11px;color:var(--txt-dim);padding:8px 8px 4px;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;}
+  .skill-list{overflow-y:auto;flex:1;padding:4px;}
+  .skill-item{padding:8px 10px;margin-bottom:4px;border-radius:6px;cursor:pointer;font-size:12px;border:1px solid transparent;transition:.15s;}
+  .skill-item:hover{background:rgba(255,176,0,.06);}
+  .skill-item.active{border-color:var(--amber);background:var(--amber-soft);color:var(--amber);font-weight:600;}
+  .skill-item .sk-name{margin-bottom:2px;}
+  .skill-item .sk-cat{font-size:10px;color:var(--txt-dim);}
+
+  /* 上半区：A | B | E = 比例 1:7:2 */
+  /* a. 画布选项按钮（竖条，占 1 份） */
+  .zone-a{width:48px;flex:0 0 6%;display:flex;flex-direction:column;gap:6px;align-items:center;padding-top:4px;}
+  .zone-a button{writing-mode:vertical-lr;font-size:11px;padding:10px 4px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:var(--panel-2);color:var(--txt-dim);letter-spacing:1px;height:80px;}
+  .zone-a button.active{color:var(--amber);border-color:var(--amber);background:var(--amber-soft);font-weight:700;}
+
+  /* b. 射程/攻击范围画布（占 7 份，固定 400×400） */
+  .zone-b{flex:1 1 70%;display:flex;flex-direction:column;min-width:0;}
+  /* 凯库勒式视图（化学分子结构式） */
+  #kekuleView{width:100%;}
+  .kekule-stage{display:flex;justify-content:center;background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:8px;padding:12px;}
+  #kekuleSvg{display:block;background:#faf8f0;border-radius:6px;} /* 米白底色模拟化学纸 */
+  /* 键线：单键细灰、双键主+副蓝 */
+  #kekuleSvg .k-bond{stroke:#333;stroke-width:2.5;stroke-linecap:round;}
+  #kekuleSvg .k-bond.single{stroke:#666;stroke-width:2;}
+  #kekuleSvg .k-bond.double-inner{stroke:#2980b9;stroke-width:2;opacity:.85;}
+  /* 碳原子顶点 */
+  #kekuleSvg .k-carbon{fill:#222;stroke:none;}
+  #kekuleSvg .k-carbon.empty{fill:#bbb;opacity:.35;}
+  /* 段名标签 */
+  #kekuleSvg .k-phase-label{fill:#c0392b;font-size:11px;font-weight:700;text-anchor:middle;font-family:'Georgia','Times New Roman',serif;}
+  /* 取代基（原子卡片 = 化学基团） */
+  #kekuleSvg .k-sub-bond{stroke:#444;stroke-width:1.5;}
+  #kekuleSvg .k-group{fill:#fff8e1;stroke:#d4a017;stroke-width:1.2;}
+  #kekuleSvg .k-group.ghost{fill:none;stroke:#aaa;stroke-dasharray:3 3;opacity:.45;}
+  #kekuleSvg .k-group-t{fill:#5a3e00;font-size:9px;text-anchor:middle;font-family:'Georgia','Courier New',monospace;font-weight:600;}
+  #kekuleSvg .k-group-t.ghost-t{fill:#999;font-size:8px;}
+  /* 支链（二段/嵌套分支 = 子结构环） */
+  #kekuleSvg .k-chain{stroke:#c0392b;stroke-width:2.5;stroke-dasharray:7 4;stroke-linecap:round;}
+  #kekuleSvg .k-chain-ring{stroke:#c0392b;stroke-width:1.5;opacity:.65;}
+  #kekuleSvg .k-chain-lbl{fill:#900;font-size:9px;text-anchor:middle;font-family:'Georgia','Courier New',monospace;font-style:italic;}
+  .zone-b .zb-head{font-size:12px;color:var(--cyan);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
+  .zone-b .zb-range{display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:11px;flex-wrap:wrap;}
+  .zone-b .zb-range label{color:var(--txt-dim);}
+  .zone-b .zb-range input,.zone-b .zb-range select{width:52px;background:var(--panel-2);color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:2px 4px;font-size:11px;}
+  .zb-stage{position:relative;width:600px;height:400px;flex-shrink:0;}
+  .canvas-wrap{position:absolute;inset:0;width:600px;height:400px;background:#0f131c;border:1px solid rgba(159,142,120,.18);border-radius:8px;overflow:hidden;}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair;}
+  .zb-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--txt-dim);margin-top:4px;}
+  .dot{width:10px;height:10px;border-radius:2px;display:inline-block;}
+
+  /* 战场模拟视图（B 区切换显示） */
+  .bs-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;}
+  .bs-controls label{font-size:10px;color:var(--txt-dim);display:inline-flex;align-items:center;gap:4px;}
+  .bs-controls input[type=number]{width:44px;background:rgba(0,0,0,.35);color:var(--txt);border:1px solid rgba(255,176,0,.22);border-radius:4px;padding:2px 4px;font-size:11px;}
+  .bs-controls select{background:rgba(0,0,0,.35);color:var(--txt);border:1px solid rgba(255,176,0,.22);border-radius:4px;padding:2px 5px;font-size:11px;}
+  .bs-controls .sim-btn{margin-left:auto;font-size:11px;font-weight:700;border:1px solid var(--pink);color:var(--pink);background:rgba(255,138,179,.1);border-radius:5px;padding:3px 10px;cursor:pointer;}
+  .bs-canvas-wrap{position:relative;width:600px;height:400px;background:#0f131c;border:1px solid rgba(255,138,179,.18);border-radius:8px;overflow:hidden;}
+  canvas.battle-canvas{display:block;width:100%;height:100%;}
+
+  /* e. 词条框（占 2 份）：只读浮层，半透明覆盖在画布上 */
+  .zone-e{flex:0 0 18%;position:relative;min-width:160px;}
+  .entry-float{position:absolute;top:0;right:0;width:100%;max-height:100%;overflow-y:auto;
+    background:rgba(22,27,34,.72);backdrop-filter:blur(4px);border:1px solid rgba(255,176,0,.25);
+    border-radius:8px;padding:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);}
+  .entry-float h3{font-size:12px;color:var(--amber);margin-bottom:6px;}
+  .entry-card{background:transparent;}
+  .entry-card .ec-row{display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;}
+  .entry-card .ec-row label{color:var(--txt-dim);font-size:11px;min-width:54px;flex-shrink:0;}
+  .entry-card .ec-val{font-size:12px;color:var(--txt);font-weight:600;line-height:1.5;}
+  .entry-card .ec-phase{font-size:11px;color:var(--cyan);margin:4px 0 2px;font-weight:600;}
+  .entry-card .ec-chip{display:inline-block;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin:2px 3px 2px 0;font-size:10px;}
+
+  /* 下半区：D | C = 比例 8:2 */
+  .lower-row{display:flex;flex:1;min-height:0;}
+
+  /* d. 六段编排画布（占 8 份，可横向滚动） */
+  .zone-d{flex:1 1 80%;display:flex;flex-direction:column;padding:12px;border-right:1px solid var(--line);min-width:0;}
+  .zone-d h3{font-size:13px;color:var(--amber);margin-bottom:4px;}
+  .zone-d .hint{color:var(--txt-dim);font-size:11px;margin-bottom:10px;}
+  .lanes-scroll{flex:1;overflow-x:auto;overflow-y:auto;padding-bottom:6px;}
+  .lanes-h{display:flex;gap:10px;min-width:max-content;}
+  .lane-col{width:240px;flex-shrink:0;display:flex;flex-direction:column;}
+
+  .lane{border:1.5px solid var(--line);border-radius:10px;margin-bottom:8px;background:var(--panel-2);transition:.15s;}
+  .lane.drag-over{border-color:var(--amber);background:var(--amber-soft);}
+  .lane.selected{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan);}
+  .lane-head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);cursor:grab;}
+  .lane-head .ord{width:20px;height:20px;border-radius:50%;background:var(--amber);color:#1a1300;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
+  .lane-head .name{font-weight:600;font-size:12px;}
+  .lane-head .desc{color:var(--txt-dim);font-size:10px;}
+  .lane-head .nest-btn{margin-left:auto;font-size:10px;color:var(--cyan);background:none;border:1px solid rgba(0,206,209,.4);border-radius:4px;padding:2px 6px;cursor:pointer;}
+  .lane-body{padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;min-height:36px;}
+  .lane-body .empty-tip{color:var(--txt-dim);font-size:11px;font-style:italic;}
+
+  /* ---- 原子卡片（已拖入泳道）：头部 + 参数表单 ---- */
+  .atom-card{background:#0e1824;border:1px solid #2b3a4a;border-left:3px solid var(--cyan);border-radius:6px;
+    padding:0;font-size:11px;width:100%;cursor:grab;display:block;overflow:hidden;}
+  .atom-card .ac-head{display:flex;align-items:center;gap:6px;padding:5px 7px;background:rgba(255,255,255,.03);}
+  .atom-card .ac-title{font-weight:600;color:var(--cyan);flex:1;min-width:0;}
+  .atom-card .ac-meta{color:var(--txt-dim);font-size:9px;font-family:monospace;}
+  .atom-card .ac-del{color:var(--red);cursor:pointer;font-size:11px;border:none;background:none;padding:0 2px;line-height:1;}
+  /* 参数区：每行 = 中文标签 + 控件 */
+  .ac-params{padding:5px 7px 6px;display:flex;flex-direction:column;gap:4px;border-top:1px dashed rgba(255,255,255,.07);}
+  .ac-field{display:flex;align-items:center;gap:5px;}
+  .ac-field > label{color:var(--txt-dim);font-size:10px;width:74px;flex-shrink:0;line-height:1.25;}
+  .ac-field input,.ac-field select{flex:1;min-width:0;background:rgba(0,0,0,.35);color:var(--txt);
+    border:1px solid var(--line);border-radius:4px;padding:2px 5px;font-size:10px;}
+  .ac-field input:focus,.ac-field select:focus{outline:none;border-color:var(--amber);}
+  .ac-field .unit{font-size:9px;color:var(--txt-dim);flex-shrink:0;}
+  /* 数值双模：固定值 / 公式 切换 */
+  .numwrap{flex:1;display:flex;gap:3px;align-items:center;min-width:0;}
+  .num-mode{flex:0 0 auto;font-size:9px;padding:2px 4px;border-radius:3px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--txt-dim);}
+  .num-mode.formula{border-color:var(--violet);color:var(--violet);background:rgba(192,140,255,.1);}
+  .atom-card[data-grp="A"]{border-left-color:var(--amber);} .atom-card[data-grp="A"] .ac-title{color:var(--amber);}
+  .atom-card[data-grp="B"]{border-left-color:var(--violet);} .atom-card[data-grp="B"] .ac-title{color:var(--violet);}
+  .atom-card[data-grp="C"]{border-left-color:var(--green);} .atom-card[data-grp="C"] .ac-title{color:var(--green);}
+  .atom-card[data-grp="D"]{border-left-color:var(--blue);} .atom-card[data-grp="D"] .ac-title{color:var(--blue);}
+  .atom-card[data-grp="E"]{border-left-color:var(--pink);} .atom-card[data-grp="E"] .ac-title{color:var(--pink);}
+  .atom-card[data-grp="F"]{border-left-color:var(--cyan);} .atom-card[data-grp="F"] .ac-title{color:var(--cyan);}
+  .atom-card[data-grp="G"]{border-left-color:#ffa657;} .atom-card[data-grp="G"] .ac-title{color:#ffa657;}
+  .atom-card[data-grp="H"]{border-left-color:var(--green);} .atom-card[data-grp="H"] .ac-title{color:var(--green);}
+  .atom-card[data-grp="I"]{border-left-color:#7fe7ff;} .atom-card[data-grp="I"] .ac-title{color:#7fe7ff;}
+  .atom-card[data-grp="J"]{border-left-color:var(--pink);} .atom-card[data-grp="J"] .ac-title{color:var(--pink);}
+  .atom-card[data-grp="K"]{border-left-color:var(--amber);} .atom-card[data-grp="K"] .ac-title{color:var(--amber);}
+
+  /* ---- 分支容器（IF / ROLL 非空必分叉） ---- */
+  .branches{margin-top:7px;padding-left:9px;border-left:2px solid rgba(255,176,0,.4);display:flex;flex-direction:column;gap:7px;}
+  .branch-hint{font-size:9px;color:var(--amber);opacity:.85;margin-bottom:2px;display:flex;align-items:center;gap:5px;}
+  .branch-hint .bh-tag{border:1px solid rgba(255,176,0,.45);border-radius:3px;padding:0 4px;}
+  .branch{border:1px solid rgba(255,176,0,.28);border-radius:7px;background:rgba(255,176,0,.035);}
+  .branch.drag-over{border-color:var(--amber);background:var(--amber-soft);}
+  .branch-head{display:flex;align-items:center;gap:5px;padding:4px 7px;border-bottom:1px dashed rgba(255,176,0,.22);}
+  .branch-head .br-cond{font-size:10px;color:var(--amber);font-weight:600;}
+  .branch-head input.br-range{width:26px;background:rgba(0,0,0,.35);color:var(--amber);border:1px solid var(--line);
+    border-radius:3px;padding:1px 3px;font-size:10px;text-align:center;}
+  .branch-head input.br-label{flex:1;min-width:0;background:transparent;border:none;color:var(--txt-dim);font-size:10px;}
+  .branch-head input.br-label:focus{outline:none;color:var(--txt);}
+  .branch-head .br-del{color:var(--red);border:none;background:none;cursor:pointer;font-size:10px;padding:0 2px;}
+  .branch-body{padding:5px 7px;display:flex;flex-direction:column;gap:5px;min-height:26px;}
+  .branch-body.drag-over{border:1.5px dashed var(--amber);border-radius:6px;background:var(--amber-soft);}
+  .branch-body .empty-tip{color:var(--txt-dim);font-size:10px;font-style:italic;}
+  .br-subphase{font-size:9px;color:var(--txt-dim);letter-spacing:.5px;margin-top:2px;}
+  .add-branch{font-size:10px;color:var(--amber);background:none;border:1px dashed rgba(255,176,0,.45);
+    border-radius:5px;padding:3px 0;cursor:pointer;width:100%;}
+  .add-branch:hover{background:var(--amber-soft);}
+
+  /* c. 原子面板（下半区右侧，占 2 份，纵向滚动） */
+  .zone-c{flex:0 0 20%;overflow-y:auto;padding:10px 8px;border-left:1px solid var(--line);min-width:186px;}
+  .zone-c h3{font-size:12px;color:var(--cyan);margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+  .zone-c h3 .cnt{font-size:9px;color:var(--txt-dim);border:1px solid var(--line);border-radius:3px;padding:0 4px;font-weight:400;}
+  .atom-search{width:100%;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:5px;
+    color:var(--txt);font-size:11px;padding:4px 7px;margin-bottom:8px;}
+  .atom-search:focus{outline:none;border-color:var(--amber);}
+  .atom-group{margin-bottom:7px;}
+  .atom-group .grp-title{font-size:10px;color:var(--txt-dim);margin-bottom:3px;letter-spacing:.5px;
+    display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
+  .atom-group .grp-title:hover{color:var(--txt);}
+  .atom-group .grp-title .caret{font-size:8px;transition:.15s;}
+  .atom-group.collapsed .caret{transform:rotate(-90deg);}
+  .atom-group.collapsed .grp-items{display:none;}
+  .grp-items{display:flex;flex-direction:column;gap:2px;}
+  .atom-chip{display:flex;align-items:center;gap:5px;background:var(--panel-2);border:1px dashed var(--line);
+    border-radius:5px;padding:3px 6px;font-size:11px;cursor:grab;user-select:none;transition:.15s;}
+  .atom-chip:hover{border-color:var(--amber);color:var(--amber);transform:translateX(2px);}
+  .atom-chip .chip-id{font-size:9px;font-family:monospace;color:var(--txt-dim);flex-shrink:0;min-width:20px;}
+  .atom-chip .chip-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* 引擎支持状态点：绿=handler已就绪 / 琥珀=需补别名 / 红=需新建 */
+  .atom-chip .chip-st{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+  .st-ok{background:var(--green);} .st-alias{background:var(--amber);} .st-new{background:var(--red);}
+  .atom-chip[data-grp="A"]{border-color:rgba(255,176,0,.35);} .atom-chip[data-grp="B"]{border-color:rgba(192,140,255,.35);}
+  .atom-chip[data-grp="C"]{border-color:rgba(93,212,127,.35);} .atom-chip[data-grp="D"]{border-color:rgba(74,163,255,.35);}
+  .atom-chip[data-grp="E"]{border-color:rgba(255,138,179,.35);} .atom-chip[data-grp="F"]{border-color:rgba(127,231,255,.35);}
+  .atom-chip[data-grp="G"]{border-color:rgba(255,166,87,.35);} .atom-chip[data-grp="H"]{border-color:rgba(93,212,127,.3);}
+  .atom-chip[data-grp="I"]{border-color:rgba(127,231,255,.3);} .atom-chip[data-grp="J"]{border-color:rgba(255,138,179,.3);}
+  .atom-chip[data-grp="K"]{border-color:rgba(255,176,0,.3);}
+  .zone-c .legend{font-size:9px;color:var(--txt-dim);border-top:1px solid var(--line);padding-top:6px;margin-top:6px;line-height:1.7;}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <span class="title">[ TITLE ]</span>
+  <input class="subtitle" placeholder="[ SUB TITLE ]" value="隐匿 · stealth skill" />
+  <div class="actions">
+    <button class="btn-search" id="kekuleToggle" onclick="toggleKekule()">⭪ 凯库勒式</button>
+    <button class="btn-search">[ SEARCH ]</button>
+    <button class="btn-save">[ SAVE ]</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- 全局侧边栏（所有界面共用） -->
+  <aside class="sidebar">
+    <div class="nav-logo">⚙</div>
+    <div class="nav-list">
+      <div class="nav-item" onclick="navTo(this)"><span class="ni-ico">🗺</span>战场</div>
+      <div class="nav-item active" onclick="navTo(this)"><span class="ni-ico">📖</span>词条库</div>
+      <div class="nav-item" onclick="navTo(this)"><span class="ni-ico">⚔</span>战斗</div>
+      <div class="nav-item" onclick="navTo(this)"><span class="ni-ico">🎯</span>靶场</div>
+      <div class="nav-item" onclick="navTo(this)"><span class="ni-ico">📊</span>数据</div>
+    </div>
+    <div class="nav-spacer"></div>
+    <div class="nav-bottom"><span class="ni-ico">⚙️</span>设置</div>
+  </aside>
+
+  <!-- CENTER：词条库界面主体 -->
+  <div class="center">
+
+    <div class="center-body">
+
+    <!-- 上半区：技能列表 | A(1) | B(7) | E(2) -->
+    <div class="upper-row">
+
+      <!-- 词条库内部：技能列表（本界面独有，非全局导航；仅上半区，纵向滚动） -->
+      <aside class="skill-panel">
+        <h2>技能列表</h2>
+        <div class="skill-list" id="skillList"></div>
+      </aside>
+
+      <!-- a. 画布选项按钮（竖条） -->
+      <div class="zone-a">
+        <button data-layer="range" class="active" onclick="setLayer('range')">射程</button>
+        <button data-layer="aoe" onclick="setLayer('aoe')">AOE</button>
+        <button data-layer="mapcannon" onclick="setLayer('mapcannon')">地图炮</button>
+        <button data-layer="battle" onclick="setLayer('battle')">战场模拟</button>
+      </div>
+
+      <!-- b. 射程/攻击范围画布（600×400） -->
+      <div class="zone-b">
+        <!-- 六角格画布视图（射程/AOE/地图炮） -->
+        <div id="hexView">
+          <div class="zb-head"><span>射程 / 攻击范围画布</span><span style="font-size:10px;color:var(--txt-dim)">600×400</span></div>
+          <div class="zb-range">
+            <label>起点<input type="number" id="rStart" min="0" max="10" value="1" onchange="drawCanvas()"></label>
+            <label>终点<input type="number" id="rEnd" min="1" max="10" value="3" onchange="drawCanvas()"></label>
+            <label>形态<select id="shape" onchange="drawCanvas()"><option value="circle">圆形</option><option value="line">线性射线</option></select></label>
+            <label>AOE扩散<input type="number" id="aoeSpread" min="0" max="5" value="1" onchange="drawCanvas()"></label>
+          </div>
+          <div class="zb-stage">
+            <div class="canvas-wrap"><canvas id="hexCanvas" width="600" height="400"></canvas></div>
+          </div>
+          <div class="zb-legend">
+            <span><i class="dot" style="background:#f5c542"></i>自身</span>
+            <span><i class="dot" style="background:rgba(80,200,120,.6)"></i>可命中</span>
+            <span><i class="dot" style="background:rgba(120,40,40,.6)"></i>盲区</span>
+            <span><i class="dot" style="background:rgba(74,163,255,.7)"></i>AOE</span>
+            <span><i class="dot" style="background:rgba(214,69,60,.7)"></i>地图炮</span>
+          </div>
+        </div>
+        <!-- 战场模拟视图 -->
+        <div id="battleView" style="display:none;">
+          <div class="zb-head"><span>战场模拟</span><span class="tag" style="font-size:9px;color:var(--txt-dim);border:1px solid var(--line);border-radius:3px;padding:0 5px;">前端战场效果</span></div>
+          <div class="bs-controls">
+            <label>靶子<input type="number" id="targetCount" min="0" max="12" value="3" onchange="genTargets();drawBattle()"></label>
+            <label>射手<select id="shooterPos" onchange="genTargets();drawBattle()">
+              <option value="left">左</option><option value="right">右</option><option value="top">上</option><option value="center">中</option>
+            </select></label>
+            <button class="sim-btn" id="placeBtn" onclick="placeMode=!placeMode;this.style.background=placeMode?'rgba(255,176,0,.25)':'';this.textContent=placeMode?'✓ 放置中':'手动放置'">手动放置</button>
+            <button class="sim-btn" onclick="runTest()">▶ 模拟使用技能</button>
+          </div>
+          <div class="bs-canvas-wrap" style="width:600px;height:400px;"><canvas class="battle-canvas" id="battleCanvas"></canvas></div>
+          <div class="zb-legend">
+            <span><i class="dot" style="background:#5dd47f"></i>射手</span>
+            <span><i class="dot" style="background:#ff8a80"></i>靶子</span>
+            <span><i class="dot" style="background:#f5c542"></i>命中</span>
+          </div>
+        </div>
+        <!-- 凯库勒式六段编排视图（苯环骨架 + 顶点原子 + 支链分支） -->
+        <div id="kekuleView" style="display:none;">
+          <div class="zb-head">
+            <span>凯库勒式 · 六段分子</span>
+            <span style="font-size:10px;color:var(--txt-dim)">WHEN→IF→ROLL→DO→AFTER→COST 环</span>
+          </div>
+          <div class="kekule-stage">
+            <svg id="kekuleSvg" viewBox="0 0 640 560" width="640" height="560" xmlns="http://www.w3.org/2000/svg">
+              <!-- 静态兜底：凯库勒式苯环骨架（交替单双键 + 碳原子点 + 段名） -->
+              <g id="kekuleStatic">
+                <!-- 单键 (边1,3,5) -->
+                <line class="k-bond single" x1="320" y1="110" x2="467.2" y2="198.6"/>
+                <line class="k-bond single" x1="467.2" y2="361.4" x2="320" y2="450"/>
+                <line class="k-bond single" x1="172.8" y2="361.4" x2="172.8" y2="198.6"/>
+                <!-- 双键 (边0,2,4) 主+副 -->
+                <line class="k-bond" x1="172.8" y1="198.6" x2="320" y2="110"/>
+                <line class="k-bond double-inner" x1="176.8" y1="203.2" x2="320" y2="117.5"/>
+                <line class="k-bond" x1="467.2" y1="198.6" x2="467.2" y2="361.4"/>
+                <line class="k-bond double-inner" x1="461.7" y1="201.6" x2="461.7" y2="358.4"/>
+                <line class="k-bond" x1="320" y1="450" x2="172.8" y2="361.4"/>
+                <line class="k-bond double-inner" x1="315" y1="442.5" x2="176.8" y2="356.8"/>
+                <!-- 碳原子 -->
+                <circle class="k-carbon" cx="320" cy="110" r="7"/><circle class="k-carbon" cx="467.2" cy="198.6" r="7"/>
+                <circle class="k-carbon" cx="467.2" cy="361.4" r="7"/><circle class="k-carbon" cx="320" cy="450" r="7"/>
+                <circle class="k-carbon" cx="172.8" cy="361.4" r="7"/><circle class="k-carbon" cx="172.8" cy="198.6" r="7"/>
+                <!-- 段名 -->
+                <text class="k-phase-label" x="320" y="97">WHEN</text>
+                <text class="k-phase-label" x="467.2" y="185.6">IF</text>
+                <text class="k-phase-label" x="467.2" y="378.4">ROLL</text>
+                <text class="k-phase-label" x="320" y="467">DO</text>
+                <text class="k-phase-label" x="172.8" y="378.4">AFTER</text>
+                <text class="k-phase-label" x="172.8" y="185.6">COST</text>
+              </g>
+            </svg>
+          </div>
+          <div class="zb-legend">
+            <span><i class="dot" style="background:rgba(255,176,0,.8)"></i>顶点=六段</span>
+            <span><i class="dot" style="background:rgba(88,200,120,.8)"></i>单键=顺序流</span>
+            <span><i class="dot" style="background:rgba(74,163,255,.9)"></i>双键=带分支</span>
+            <span><i class="dot" style="background:rgba(214,69,60,.9)"></i>支链=二段/嵌套</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- e. 词条框（只读浮层，半透明覆盖画布） -->
+      <div class="zone-e">
+        <div class="entry-float" id="entryFloat">
+          <h3>E · 当前词条属性（只读）</h3>
+          <div class="entry-card" id="entryCard"></div>
+        </div>
+      </div>
+    </div><!-- /UPPER ROW -->
+
+    <!-- 下半区：D(8) | C(2) -->
+    <div class="lower-row">
+
+      <!-- d. 六段编排画布（可横向滚动） -->
+      <div class="zone-d">
+        <h3>D · 六段编排画布</h3>
+        <div class="hint">拖原子入泳道 · 拖泳道标题重排 · 点标题选中联动 B 区画布 · 「+ 嵌套」挂层≤3 · 横向滚动浏览六段</div>
+        <div class="lanes-scroll"><div class="lanes-h" id="lanes"></div></div>
+      </div>
+
+      <!-- c. 原子面板（纵向滚动） -->
+      <div class="zone-c">
+        <h3>C · 原子面板 <span class="cnt" id="atomCnt">0</span></h3>
+        <input class="atom-search" id="atomSearch" placeholder="🔍 搜索原子 / 编号 / 中文…" oninput="renderAtomPanel()" />
+        <div id="atomGroups"></div>
+        <div class="legend">
+          <div><span class="chip-st st-ok"></span> 绿 · 引擎 handler 已就绪</div>
+          <div><span class="chip-st st-alias"></span> 琥珀 · 需补 TYPE_ALIAS 别名</div>
+          <div><span class="chip-st st-new"></span> 红 · 引擎需新建</div>
+          <div style="margin-top:4px;opacity:.7">A-K 共 <b id="atomTotal">0</b> 原子 · 前端缺失 ≈54</div>
+        </div>
+      </div>
+
+    </div><!-- /LOWER ROW -->
+
+    </div><!-- /center-body -->
+
+  </div><!-- /CENTER -->
+</div><!-- /MAIN -->
+
+<script>
+  // 全局错误兜底：若脚本异常，顶部红条提示
+  window.addEventListener('error', e=>{
+    let bar=document.getElementById('errbar');
+    if(!bar){bar=document.createElement('div');bar.id='errbar';bar.style.cssText='position:fixed;top:0;left:0;right:0;background:#7a1f1f;color:#ffd;font:12px monospace;padding:6px 10px;z-index:9999';document.body.appendChild(bar);}
+    bar.textContent='JS错误: '+(e.message||e.error);
+  });
+  // ===================== 数据 =====================
+  const PHASES = [
+    { key:'WHEN', name:'WHEN 时机', desc:'触发闸门', grp:'A', atoms:[] },
+    { key:'IF',   name:'IF 条件',   desc:'前置判定', grp:'B', atoms:[] },
+    { key:'ROLL', name:'ROLL 掷骰', desc:'随机/分支', grp:'D', atoms:[] },
+    { key:'DO',   name:'DO 执行',   desc:'效果堆叠', grp:'F', atoms:[] },
+    { key:'AFTER',name:'AFTER 后效',desc:'结算后',   grp:'G', atoms:[] },
+    { key:'COST', name:'COST 代价', desc:'AP/冷却', grp:'E', atoms:[] },
+  ];
+  let lanes = JSON.parse(JSON.stringify(PHASES));
+  lanes[0].atoms.push({grp:'A',key:'manual',label:'A1 手动释放'});
+  lanes[1].atoms.push({grp:'B',key:'hp_compare',label:'B1 血量比较'});
+  lanes[4].atoms.push({grp:'F',key:'enter_stealth',label:'F3 进入隐匿'});
+  lanes[5].atoms.push({grp:'E',key:'ap_move',label:'E1 移动AP'});
+
+  let selectedLane = -1;
+
+  // ===================== 67 原子库（A-K 全量，含参数表单定义） =====================
+  // st: 'ok'=引擎就绪 / 'alias'=需补别名 / 'new'=需新建
+  // field.type: select(text|number|bool|json) ; opts: 'a|b|c' 用 | 分隔 ; fixed: 锁定不可编辑
+  function F(k,label,type,def,opts,unit,fixed){return {k,label,type,def,opts,unit,fixed:!!fixed};}
+  const ATOM_LIB = [
+    // ---- A 触发时机 (12) ----
+    {id:'A1',grp:'A',key:'on_attacked',label:'受击时',st:'ok',fields:[F('source','来袭类型','select','any','any 任意|melee 近战|ranged 远程')]},
+    {id:'A2',grp:'A',key:'on_damage_dealt',label:'造成伤害后',st:'ok',fields:[F('source','伤害来源','select','self','self 自身'),F('min_damage','最低伤害门槛','number',0)]},
+    {id:'A3',grp:'A',key:'post_melee_damage',label:'近战伤害结算后',st:'ok',fields:[F('attack_stat','攻击属性','select','melee','melee 近战')]},
+    {id:'A4',grp:'A',key:'on_kill',label:'击杀时',st:'ok',fields:[F('source','击杀者','select','self','self 自身')]},
+    {id:'A5',grp:'A',key:'on_attack_start',label:'攻击开始时',st:'ok',fields:[]},
+    {id:'A6',grp:'A',key:'on_target_selected',label:'目标选定时',st:'ok',fields:[F('gate','可否决选定','bool',false)]},
+    {id:'A7',grp:'A',key:'on_turn_start',label:'回合开始',st:'alias',fields:[F('faction','所属阵营','text','self 自身')]},
+    {id:'A8',grp:'A',key:'on_round_start',label:'轮次开始',st:'alias',fields:[F('from_round','生效起始轮','number',1)]},
+    {id:'A9',grp:'A',key:'on_ally_attacked',label:'友军受击时',st:'ok',fields:[F('radius','感知半径·格','number',99)]},
+    {id:'A10',grp:'A',key:'on_move_path',label:'移动路径计算时',st:'ok',fields:[]},
+    {id:'A11',grp:'A',key:'on_airdrop_received',label:'获得空投时',st:'ok',fields:[F('from_round','生效起始轮','number',2)]},
+    {id:'A12',grp:'A',key:'on_step_point',label:'踩点时',st:'ok',fields:[F('point_type','标记点类型','text','recon 侦察点')]},
+    {id:'A0',grp:'A',key:'manual',label:'手动释放',st:'ok',fields:[F('phase','可释放相位','select','any','any 任意|turn_start 回合开始|turn_end 回合结束')]},
+    // ---- B 条件门槛 (10) ----
+    {id:'B1',grp:'B',key:'in_range',label:'射程内',st:'ok',fields:[F('from','起点','select','self','self 自身'),F('to','终点','select','target','target 目标'),F('min_range','最小射程·格','number',1),F('max_range','最大射程·格','number',3)]},
+    {id:'B2',grp:'B',key:'mutual_in_range',label:'互在射程',st:'new',fields:[F('a','对比方A','select','self','self 自身'),F('b','对比方B','select','target','target 目标')]},
+    {id:'B3',grp:'B',key:'hp_compare',label:'HP 阈值',st:'ok',fields:[F('subject','判定对象','select','target','target 目标'),F('op','比较符','select','>','< 小于|<= 小于等于|> 大于|>= 大于等于|== 等于'),F('value','阈值','number',5),F('is_percent','按百分比','bool',false)]},
+    {id:'B4',grp:'B',key:'stat_compare',label:'属性对比',st:'new',fields:[F('a','对比方A','select','self','self 自身'),F('b','对比方B','select','target','target 目标'),F('stat','对比属性','select','melee','melee 近战值|shooting 射击值|mobility 机动值'),F('op','比较符','select','>','> 大于')]},
+    {id:'B5',grp:'B',key:'collinear_adjacent',label:'共线并列',st:'new',fields:[F('faction','阵营要求','select','same','same 同阵营'),F('count','并列单位数','number',3),F('distance','间隔·格','number',1)]},
+    {id:'B6',grp:'B',key:'terrain_match',label:'地形匹配',st:'ok',fields:[F('terrain','地形','select','plain','plain 平原|forest 森林|mountain 山地|water 水域|ruin 废墟|crystal 晶体|moon 月面')]},
+    {id:'B7',grp:'B',key:'damage_kind_match',label:'伤害种类匹配',st:'new',fields:[F('kind','伤害种类','select','kinetic','kinetic 实体系|beam 光束系')]},
+    {id:'B8',grp:'B',key:'has_not_acted',label:'未攻击过',st:'new',fields:[F('action','未执行动作','select','deal_damage','deal_damage 造成伤害|move 移动|attack 攻击')]},
+    {id:'B9',grp:'B',key:'not_in_scan',label:'不在扫描范围',st:'new',fields:[F('radius','敌方扫描半径·格','number',2)]},
+    {id:'B10',grp:'B',key:'limit_scope',label:'限次',st:'new',fields:[F('limit_scope','限次作用域','select','match','match 整局|faction 阵营|personal 个人|per_turn 每回合'),F('limit_count','可触发次数','number',1)]},
+    // ---- C 数值生成与判定 ROLL (7) ----
+    {id:'C1',grp:'C',key:'roll_none',label:'无判定',st:'ok',fields:[]},
+    {id:'C2',grp:'C',key:'roll_segments',label:'单数值阈值二分',st:'ok',fields:[F('method','生成方式','select','dice','dice 骰子|spinner 转盘|card 抽卡|rps 猜拳'),F('sides','骰面数','number',6),F('threshold','成功阈值','number',4)]},
+    {id:'C3',grp:'C',key:'roll_segments_m',label:'单数值多段',st:'ok',fields:[F('method','生成方式','select','dice','dice 骰子'),F('sides','骰面数','number',6),F('segment_count','分段数量','number',3)]},
+    {id:'C4',grp:'C',key:'duel_resolution',label:'对抗数值',st:'ok',fields:[F('a','对抗方A','select','self','self 自身'),F('b','对抗方B','select','target','target 目标'),F('compare','胜负比较','select','>','> 大者胜|>= 大于等于胜'),F('tie','平局处理','select','mutual_destruction','mutual_destruction 同归于尽|none 无事发生')]},
+    {id:'C5',grp:'C',key:'damage_bonus_dice',label:'数值参与运算',st:'ok',fields:[F('bind_to','结果绑定字段','text','flat_value 伤害数值'),F('base','基数','number',0),F('coefficient','系数','number',1)]},
+    {id:'C6',grp:'C',key:'roll_segments_color',label:'数值分色',st:'ok',fields:[F('palette','色板','text','red 红,black 黑'),F('mapping','点数→颜色映射','text','1-3:red;4-6:black')]},
+    {id:'C7',grp:'C',key:'roll_check_compare_to',label:'数值 vs 动态值',st:'ok',fields:[F('op','比较符','select','>=','>= 大于等于'),F('compare_to','动态比较对象','text','target.hp 目标剩余生命')]},
+    {id:'C0',grp:'C',key:'manual_roll',label:'手动掷骰',st:'ok',fields:[F('prompt','提示文案','text','请掷骰')]},
+    // ---- D 效果·伤害 DO (7) ----
+    {id:'D1',grp:'D',key:'direct_damage',label:'伤害加减值',st:'ok',fields:[F('damage_mode','伤害模式','select','flat','flat 固定值|override 覆盖|multiplier 倍率'),F('flat_value','伤害数值·负为减','number',10),F('fixed_rate_multiplier','伤害倍率','number',1),F('armor_pen','护甲穿透','number',0)]},
+    {id:'D2',grp:'D',key:'damage_reduction',label:'按 kind 减免',st:'ok',fields:[F('kind','伤害种类','select','kinetic','kinetic 实体系|beam 光束系'),F('flat_reduction','固定减免值','number',3),F('rate','减免系数','number',1)]},
+    {id:'D3',grp:'D',key:'direct_damage_split',label:'伤害均摊',st:'ok',fields:[F('total_damage','待均摊总伤害','number',10),F('split','均摊方式','select','equally','equally 平均均摊|weighted 加权均摊'),F('target_scope','作用范围','select','area','area 区域'),F('min_per_target','每目标最低伤害','number',0)]},
+    {id:'D4',grp:'D',key:'assist_choice',label:'伤害分担转移',st:'alias',fields:[F('from','转出方','select','target','target 目标'),F('to','承接方','select','ally','ally 友方'),F('ratio','转移比例','number',0.8)]},
+    {id:'D5',grp:'D',key:'instant_kill',label:'即死',st:'ok',fields:[F('condition_hp','触发生命门槛','number',5)]},
+    {id:'D6',grp:'D',key:'duel_resolution_k',label:'同归于尽',st:'ok',fields:[F('targets','同归对象','text','self 自身,enemy 敌方')]},
+    {id:'D7',grp:'D',key:'modify_stat_delay',label:'延迟易伤标记',st:'ok',fields:[F('target_stat','修改属性','text','DMG_TAKEN 受到伤害'),F('value','增减值','number',5),F('delay','延迟回合数','number',1),F('duration','持续回合数','number',1)]},
+    // ---- E 效果·资源 DO (3) ----
+    {id:'E1',grp:'E',key:'resource_recovery',label:'HP 回复',st:'alias',fields:[F('resource','回复资源','select','hp','hp 生命值|energy 能量|ap 行动点|shield 护盾'),F('amount','回复量','number',8),F('by','计算方式','select','flat','flat 固定值|stat_coeff 属性系数|terrain 地形系数'),F('coefficient','系数','number',1)]},
+    {id:'E2',grp:'E',key:'resource_recovery_d',label:'装备耐久回复',st:'ok',fields:[F('resource','回复资源','text','equipment_durability 装备耐久'),F('amount','回复量','number',1)]},
+    {id:'E3',grp:'E',key:'durability_consumption',label:'耐久扣减',st:'ok',fields:[F('value','扣减值','number',1),F('slot','装备槽位','select','weapon','weapon 武器|armor 防具')]},
+    // ---- F 效果·状态 DO (6) ----
+    {id:'F1',grp:'F',key:'modify_stat',label:'属性增减益',st:'ok',fields:[F('target_stat','修改属性','select','melee','melee 近战值|shooting 射击值|mobility 机动值|defense 防御值'),F('value','增减值','number',2),F('duration','持续回合数','number',2)]},
+    {id:'F2',grp:'F',key:'modify_stat_m',label:'机动差项修正',st:'ok',fields:[F('target_stat','修改属性','text','MOBILITY 机动值'),F('value','增减值','number',-2),F('stacks','叠加层数','number',1)]},
+    {id:'F3',grp:'F',key:'skip_mobility',label:'跳过机动判定',st:'ok',fields:[F('scope','生效范围','select','this_attack','this_attack 本次攻击|this_turn 本回合')]},
+    {id:'F4',grp:'F',key:'charge_layer',label:'充能层（N 次）',st:'ok',fields:[F('charge_layers','充能总层数','number',3),F('consume_per_use','每次消耗层数','number',1),F('on_event','消耗触发事件','text','on_damage_dealt 造成伤害后')]},
+    {id:'F5',grp:'F',key:'mutual_exclusion',label:'互斥组',st:'ok',fields:[F('mutex_group','互斥组名','text','g1'),F('priority','优先级','number',0)]},
+    {id:'F6',grp:'F',key:'permanent_disable',label:'永久失效',st:'ok',fields:[F('target_entry','目标词条ID','text',''),F('scope','失效范围','select','self','self 自身|entry 指定词条')]},
+    {id:'F0',grp:'F',key:'shield',label:'护盾',st:'ok',fields:[F('value','护盾值','number',5),F('duration','持续回合数','number',2)]},
+    // ---- G 效果·行动 DO/COST (8) ----
+    {id:'G1',grp:'G',key:'grant_extra_turn',label:'额外回合',st:'ok',fields:[F('count','额外回合数','number',1),F('no_chain','禁止连锁','bool',true)]},
+    {id:'G2',grp:'G',key:'forfeit_move',label:'放弃移动',st:'ok',fields:[F('requires_unmoved','需本回合未移动','bool',true)]},
+    {id:'G3',grp:'G',key:'action_debt',label:'预支行动',st:'ok',fields:[F('action','预支行动','select','attack','attack 攻击|move 移动'),F('debt_turns','欠账回合数','number',1)]},
+    {id:'G4',grp:'G',key:'action_debt_turn',label:'预支回合',st:'ok',fields:[F('skip_next_turn','跳过下回合','bool',true)]},
+    {id:'G5',grp:'G',key:'preempt',label:'抢占顶替',st:'ok',fields:[F('from','被抢占方','select','target','target 目标'),F('mode','抢占模式','select','takeover','takeover 顶替行动|first_strike 先制攻击')]},
+    {id:'G6',grp:'G',key:'order_rewrite',label:'行动序改写',st:'ok',fields:[F('unit','被改写单位','select','self','self 自身'),F('position','新排位序号','number',0)]},
+    {id:'G7',grp:'G',key:'grant_revoke_action',label:'授予/剥夺行动',st:'ok',fields:[F('mode','操作模式','select','grant','grant 授予|revoke 剥夺'),F('action','行动类型','select','move','move 移动|attack 攻击|both 二者皆是')]},
+    {id:'G8',grp:'G',key:'limit_no_chain',label:'防连锁',st:'ok',fields:[F('no_chain','禁止连锁','bool',true),F('cooldown','冷却回合数','number',1)]},
+    {id:'G0',grp:'G',key:'block_movement',label:'阻止移动',st:'ok',fields:[F('duration','持续回合数','number',1)]},
+    // ---- H 效果·空间 DO (6) ----
+    {id:'H1',grp:'H',key:'map_cannon',label:'地图炮（自身原点·定向）',st:'alias',fields:[F('origin','原点','text','self 发动者自身',null,null,true),F('direction','发动方向','select','0~5','0~5 六向之一|all 六向齐发'),F('shape','覆盖形状','select','line','line 直线|sector 扇形|cone 锥形|custom 自定义手绘'),F('length','延伸长度·格','number',3),F('width','展开宽度·格','number',1),F('mcShapes','六向手绘格','json',null),F('friendly_fire','波及友军','bool',false)]},
+    {id:'H2',grp:'H',key:'aoe',label:'AOE（落点在射程内）',st:'new',fields:[F('origin','原点','text','impact_point 射程内落点',null,null,true),F('cast_range','可选落点射程·格','number',3),F('shape','覆盖形状','select','circle','circle 圆形|ring 环形|line 直线|sector 扇形|cone 锥形|custom 自定义手绘'),F('spread','覆盖半径·格','number',2),F('direction','朝向','select','none','none 无朝向|0~5 六向之一'),F('inner_radius','内圈盲区·格','number',0),F('friendly_fire','波及友军','bool',false)]},
+    {id:'H3',grp:'H',key:'displace',label:'强制位移',st:'ok',fields:[F('mode','位移模式','select','push','push 推开|pull 拉近|teleport 传送'),F('distance','位移距离·格','number',2),F('to','指定落点坐标','text','')]},
+    {id:'H4',grp:'H',key:'block_movement_zoc',label:'共线阻挡',st:'ok',fields:[F('count','构成阻挡单位数','number',3),F('force_detour','强制绕行','bool',true)]},
+    {id:'H5',grp:'H',key:'scan_reveal',label:'区域揭示',st:'ok',fields:[F('radius','揭示半径·格','number',3),F('duration','持续回合数','number',1)]},
+    {id:'H6',grp:'H',key:'spawn_items',label:'生成地图实体',st:'ok',fields:[F('entity','生成物类型','select','weapon','weapon 武器|armor 防具|item 道具'),F('count','生成数量','number',1),F('at','生成坐标','text','random 随机')]},
+    // ---- I 效果·信息 DO (3 + 4 隐匿) ----
+    {id:'I1',grp:'I',key:'visibility',label:'可见性',st:'ok',fields:[F('state','可见状态','select','visible','visible 可见|hidden 隐藏'),F('duration','持续回合·0永久','number',0)]},
+    {id:'I2',grp:'I',key:'selectable',label:'可选中性',st:'ok',fields:[F('selectable','可被选中','bool',false),F('expiry','失效条件','select','on_attack','on_attack 攻击后失效|duration 按回合数失效')]},
+    {id:'I3',grp:'I',key:'scan_reveal_r',label:'扫描范围',st:'ok',fields:[F('radius','扫描半径·格','number',2),F('by','计算方式','select','flat','flat 固定值|stat_coeff 属性系数')]},
+    {id:'I0',grp:'I',key:'enter_stealth',label:'进入隐匿',st:'ok',fields:[F('duration','持续回合数','number',2)]},
+    {id:'I0b',grp:'I',key:'exit_stealth',label:'退出隐匿',st:'ok',fields:[F('trigger_on','退出触发条件','select','on_attack','on_attack 攻击后|on_move 移动后|manual 手动|immediate 立即')]},
+    {id:'I0c',grp:'I',key:'stealth_attack_bonus',label:'隐匿攻击加成',st:'ok',fields:[F('bonus','伤害加成值','number',3)]},
+    {id:'I0d',grp:'I',key:'stealth_evasion',label:'隐匿闪避',st:'ok',fields:[F('bonus','闪避加成值','number',2)]},
+    // ---- J 效果·所有权 DO (1 + 1) ----
+    {id:'J1',grp:'J',key:'plunder',label:'装备抢夺转移',st:'ok',fields:[F('item','抢夺物类型','select','weapon','weapon 武器|armor 防具'),F('to','归属方','select','self','self 自身'),F('threshold','抢夺成功阈值','number',4)]},
+    {id:'J0',grp:'J',key:'equipment_lock',label:'装备锁定',st:'ok',fields:[F('slot','锁定槽位','select','weapon','weapon 武器|armor 防具')]},
+    // ---- K 元能力 COST/META (4) ----
+    {id:'K1',grp:'K',key:'rewrite_entry',label:'词条改写词条',st:'new',fields:[F('unlock','解锁词条ID','text',''),F('prerequisite','前置词条ID','text',''),F('remove_requirement','解除前置约束','text','')]},
+    {id:'K2',grp:'K',key:'slot_occupancy',label:'多技能槽占用',st:'ok',fields:[F('slots','占用槽位数','number',2)]},
+    {id:'K3',grp:'K',key:'player_optional',label:'玩家可选发动',st:'new',fields:[F('player_optional','由玩家决定发动','bool',true),F('prompt','询问提示文案','text','')]},
+    {id:'K4',grp:'K',key:'interrupt_window',label:'打断响应窗口',st:'new',fields:[F('interrupt_window','响应窗口回合数','number',1)]},
+    // ---- 其他引擎已有未列 ----
+    {id:'X1',grp:'F',key:'height_advantage',label:'高地优势',st:'ok',fields:[F('bonus','高地加成值','number',1)]},
+    {id:'X2',grp:'F',key:'terrain_kind_modifier',label:'地形种类修正',st:'ok',fields:[F('terrain','地形','select','plain','plain 平原|forest 森林|mountain 山地|water 水域|ruin 废墟|crystal 晶体|moon 月面'),F('modifier','修正系数','number',1)]},
+    {id:'X3',grp:'C',key:'luck_resolution',label:'幸运判定',st:'ok',fields:[F('segments','分段映射表','json',null)]},
+    {id:'X4',grp:'F',key:'remove_buff',label:'移除 Buff',st:'ok',fields:[F('buff_id','要移除增益ID','text','')]},
+    {id:'X5',grp:'F',key:'custom',label:'自定义效果',st:'ok',fields:[F('payload','自定义载荷','json',null)]},
+  ];
+  // 分组顺序与中文标题
+  const GRP_META = [
+    {grp:'A',title:'A · 触发时机 WHEN',phase:'WHEN'},
+    {grp:'B',title:'B · 条件门槛 IF',phase:'IF'},
+    {grp:'C',title:'C · 数值生成与判定 ROLL',phase:'ROLL'},
+    {grp:'D',title:'D · 效果·伤害 DO',phase:'DO'},
+    {grp:'E',title:'E · 效果·资源 DO',phase:'DO'},
+    {grp:'F',title:'F · 效果·状态 DO',phase:'DO'},
+    {grp:'G',title:'G · 效果·行动 DO/COST',phase:'DO/COST'},
+    {grp:'H',title:'H · 效果·空间 DO',phase:'DO'},
+    {grp:'I',title:'I · 效果·信息 DO',phase:'DO'},
+    {grp:'J',title:'J · 效果·所有权 DO',phase:'DO'},
+    {grp:'K',title:'K · 元能力 COST/META',phase:'COST/META'},
+  ];
+  const ST_CLASS = {ok:'st-ok',alias:'st-alias',new:'st-new'};
+  // 按 id 查库
+  const ATOM_BY_ID = {}; ATOM_LIB.forEach(a=>ATOM_BY_ID[a.id]=a);
+
+  // ===================== 渲染原子面板（zone-c） =====================
+  function renderAtomPanel(){
+    const q=(document.getElementById('atomSearch').value||'').trim().toLowerCase();
+    const box=document.getElementById('atomGroups'); box.innerHTML='';
+    let shown=0;
+    GRP_META.forEach(gm=>{
+      const atoms=ATOM_LIB.filter(a=>a.grp===gm.grp);
+      const filtered=atoms.filter(a=>{
+        if(!q) return true;
+        return a.id.toLowerCase().includes(q)||a.label.toLowerCase().includes(q)||a.key.toLowerCase().includes(q);
+      });
+      if(!filtered.length) return;
+      shown+=filtered.length;
+      const grp=document.createElement('div'); grp.className='atom-group';
+      grp.innerHTML=`<div class="grp-title" onclick="this.parentElement.classList.toggle('collapsed')"><span class="caret">▼</span>${gm.title} <span style="opacity:.5">(${filtered.length})</span></div>`;
+      const items=document.createElement('div'); items.className='grp-items';
+      filtered.forEach(a=>{
+        const chip=document.createElement('div'); chip.className='atom-chip'; chip.draggable=true; chip.dataset.grp=a.grp; chip.dataset.key=a.key; chip.dataset.label=`${a.id} ${a.label}`;
+        chip.innerHTML=`<span class="chip-st ${ST_CLASS[a.st]}" title="${a.st==='ok'?'引擎就绪':a.st==='alias'?'需补别名':'需新建'}"></span><span class="chip-id">${a.id}</span><span class="chip-name">${a.label}</span>`;
+        chip.addEventListener('dragstart',e=>e.dataTransfer.setData('text/newatom',JSON.stringify({grp:a.grp,key:a.key,label:`${a.id} ${a.label}`,atomId:a.id})));
+        items.appendChild(chip);
+      });
+      grp.appendChild(items); box.appendChild(grp);
+    });
+    document.getElementById('atomCnt').textContent=shown;
+    document.getElementById('atomTotal').textContent=ATOM_LIB.length;
+  }
+
+  // 技能列表
+  const skills = [
+    {name:'隐匿',cat:'主动技能',active:true},
+    {name:'奇袭',cat:'主动技能'},
+    {name:'护盾',cat:'被动技能'},
+    {name:'扫描',cat:'反应技能'},
+    {name:'烟幕',cat:'主动技能'},
+    {name:'充能弹',cat:'主动技能'},
+  ];
+
+  // ===================== 全局侧边栏导航（原型演示） =====================
+  function navTo(el){
+    document.querySelectorAll('.sidebar .nav-item').forEach(n=>n.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // ===================== 词条库内部：技能列表 =====================
+  // 每个技能的六段预设（grp + key + label 三要素，与原子面板一致）
+  const SKILL_PRESET = {
+    '隐匿':[{grp:'A',key:'manual',label:'A1 手动释放'},{grp:'B',key:'hp_compare',label:'B1 血量比较'},{grp:'C',key:'self',label:'C1 自身'},{grp:'D',key:'none',label:'(无)'},{grp:'F',key:'enter_stealth',label:'F3 进入隐匿'},{grp:'E',key:'ap_move',label:'E1 移动AP'}],
+    '奇袭':[{grp:'A',key:'on_round',label:'A2 回合自启'},{grp:'B',key:'in_range',label:'B3 射程内'},{grp:'C',key:'enemy',label:'C2 敌方'},{grp:'D',key:'dice_2d6',label:'D2 2d6'},{grp:'F',key:'damage',label:'F1 伤害'},{grp:'E',key:'cooldown',label:'E2 冷却'}],
+    '护盾':[{grp:'A',key:'on_round',label:'A2 回合自启'},{grp:'B',key:'none',label:'(无)'},{grp:'C',key:'self',label:'C1 自身'},{grp:'D',key:'none',label:'(无)'},{grp:'F',key:'status',label:'F2 状态'},{grp:'E',key:'charge',label:'E3 充能'}],
+    '扫描':[{grp:'A',key:'manual',label:'A1 手动释放'},{grp:'B',key:'none',label:'(无)'},{grp:'C',key:'enemy',label:'C2 敌方'},{grp:'D',key:'dice_1d6',label:'D1 1d6'},{grp:'F',key:'displacement',label:'F4 位移'},{grp:'E',key:'none',label:'(无)'}],
+    '烟幕':[{grp:'A',key:'manual',label:'A1 手动释放'},{grp:'B',key:'terrain_match',label:'B2 地形匹配'},{grp:'C',key:'self',label:'C1 自身'},{grp:'D',key:'none',label:'(无)'},{grp:'F',key:'status',label:'F2 状态'},{grp:'E',key:'ap_move',label:'E1 移动AP'}],
+    '充能弹':[{grp:'A',key:'manual',label:'A1 手动释放'},{grp:'B',key:'none',label:'(无)'},{grp:'C',key:'enemy',label:'C2 敌方'},{grp:'D',key:'segment',label:'D3 分支区间'},{grp:'F',key:'damage',label:'F1 伤害'},{grp:'E',key:'charge',label:'E3 充能'}],
+  };
+  function loadSkill(name){
+    const preset=SKILL_PRESET[name]||SKILL_PRESET['隐匿'];
+    lanes.forEach((lane,i)=>{
+      lane.atoms=[];
+      const p=preset[i];
+      if(p && p.key!=='none') lane.atoms.push({grp:p.grp,key:p.key,label:p.label});
+      lane.nest=null;
+    });
+    selectedLane=-1;
+    renderLanes(); updateEntry(); drawCanvas();
+  }
+  function renderSkills(){
+    const el=document.getElementById('skillList'); el.innerHTML='';
+    skills.forEach((s,i)=>{
+      const d=document.createElement('div');
+      d.className='skill-item'+(s.active?' active':'');
+      d.innerHTML=`<div class="sk-name">${s.name}</div><div class="sk-cat">${s.cat}</div>`;
+      d.onclick=()=>{skills.forEach(x=>x.active=false);s.active=true;renderSkills();loadSkill(s.name);};
+      el.appendChild(d);
+    });
+  }
+
+  // ===================== 凯库勒式六段分子视图 =====================
+  // 把六段 WHEN→IF→WHO→ROLL→DO→COST 映射为苯环：顶点=段，键=执行流，
+  // 单键=顺序、双键=带分叉分支，支链=二段/嵌套。
+  const KEKULE_PHASES = ['WHEN','IF','WHO','ROLL','DO','COST'];
+  function hexagonPoints(cx, cy, r){
+    const pts=[];
+    for(let i=0;i<6;i++){
+      // 顶端起，顺时针：角度 -90 + 60*i
+      const ang=(-90 + 60*i) * Math.PI/180;
+      pts.push([cx + r*Math.cos(ang), cy + r*Math.sin(ang)]);
+    }
+    return pts; // [WHEN,IF,WHO,ROLL,DO,COST] 顺时针
+  }
+  function renderKekule(){
+    const svg=document.getElementById('kekuleSvg'); if(!svg) return;
+    const cx=320, cy=280, R=170; // 环半径缩小，留空间给取代基和支链
+    const verts=hexagonPoints(cx, cy, R);
+    const ring=lanes.slice(0,6);
+    let s='';
+
+    // ===== 1. 苯环骨架：交替单/双键（凯库勒式） =====
+    for(let i=0;i<6;i++){
+      const a=verts[i], b=verts[(i+1)%6];
+      const hasBranch = (ring[i]&&ring[i].branches&&ring[i].branches.length)||
+                        (ring[(i+1)%6]&&ring[(i+1)%6].branches&&ring[(i+1)%6].branches.length);
+      const dbl = hasBranch || (i%2===0);
+      if(dbl){
+        // 双键：主键 + 平行偏移副键（化学结构式标准画法）
+        const dx=b[0]-a[0], dy=b[1]-a[1];
+        const len=Math.hypot(dx,dy)||1;
+        const nx=-dy/len*4.5, ny=dx/len*4.5; // 法向偏移 4.5px
+        s+=`<line class="k-bond" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`;
+        s+=`<line class="k-bond double-inner" x1="${(a[0]+nx).toFixed(1)}" y1="${(a[1]+ny).toFixed(1)}" x2="${(b[0]+nx).toFixed(1)}" y2="${(b[1]+ny).toFixed(1)}"/>`;
+      } else {
+        s+=`<line class="k-bond single" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`;
+      }
+    }
+
+    // ===== 2. 顶点（碳原子）+ 段名 + 取代基（原子卡片） =====
+    ring.forEach((lane,i)=>{
+      const [x,y]=verts[i];
+      const empty=!lane||!lane.atoms.length;
+      // 碳原子小圆点（实心）
+      s+=`<circle class="k-carbon${empty?' empty':''}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7"/>`;
+      // 段名标签（紧贴碳原子上方）
+      s+=`<text class="k-phase-label" x="${x.toFixed(1)}" y="${(y-13).toFixed(1)}">${lane?lane.name.split(' ')[0]:KEKULE_PHASES[i]}</text>`;
+      // 取代基：从顶点向外辐射，像 OH/O 基团
+      const atoms=lane?lane.atoms:[];
+      atoms.forEach((at,idx)=>{
+        // 均匀分布在顶点外圈
+        const spreadAng=(-90+60*i)+(idx-(atoms.length-1)/2)*(atoms.length>1?28:0);
+        const rad=spreadAng*Math.PI/180;
+        const dist=38+idx*22; // 距离随序号递增避免重叠
+        const gx=x+dist*Math.cos(rad), gy=y+dist*Math.sin(rad);
+        // 键线（C→取代基单键）
+        s+=`<line class="k-sub-bond" x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${gx.toFixed(1)}" y2="${gy.toFixed(1)}"/>`;
+        // 取代基框（圆角矩形，像化学基团框）
+        const txt=(at.label||at.alias||at.key||at.type||'·').replace(/\s+/g,' ');
+        const pad=4, fs=9;
+        s+=`<rect class="k-group" x="${(gx-pad).toFixed(1)}" y="${(gy-fs-2).toFixed(1)}" width="${(txt.length*(fs*0.58)+pad*2).toFixed(1)}" height="${(fs+5).toFixed(1)}" rx="3"/>`;
+        s+=`<text class="k-group-t" x="${gx.toFixed(1)}" y="${gy.toFixed(1)}">${txt}</text>`;
+      });
+      if(!atoms.length){
+        // 空段提示：淡色虚线框 "H"
+        s+=`<rect class="k-group ghost" x="${(x-8).toFixed(1)}" y="${(y+12).toFixed(1)}" width="16" height="16" rx="3"/>`;
+        s+=`<text class="k-group-t ghost-t" x="${x.toFixed(1)}" y="${(y+23).toFixed(1)}">H</text>`;
+      }
+    });
+
+    // ===== 3. 支链（二段/嵌套分支）：从顶点延伸出子结构 =====
+    ring.forEach((lane,i)=>{
+      const [x,y]=verts[i];
+      const brs=lane?lane.branches:[];
+      (brs||[]).forEach((b,idx)=>{
+        const baseAng=(-90+60*i)*Math.PI/180;
+        // 支链方向：偏转 ±25° 避免与取代基重叠
+        const offAng=baseAng+(idx%2===0?35:-35)*Math.PI/180;
+        const jx=x+R*0.55*Math.cos(offAng), jy=y+R*0.55*Math.sin(offAng);
+        const ex=x+R*0.95*Math.cos(offAng), ey=y+R*0.95*Math.sin(offAng);
+        // 支链键（虚线楔形风格）
+        s+=`<line class="k-chain" x1="${jx.toFixed(1)}" y1="${jy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}"/>`;
+        // 支链末端：小六边形环（象征子段树）
+        const sr=18;
+        const sv=hexagonPoints(ex,ey,sr);
+        let sp='';
+        for(let si=0;si<6;si++){
+          const sa=sv[si], sb=sv[(si+1)%6];
+          sp+=`<line class="k-chain-ring" x1="${sa[0].toFixed(1)}" y1="${sa[1].toFixed(1)}" x2="${sb[0].toFixed(1)}" y2="${sb[1].toFixed(1)}"/>`;
+        }
+        s+=sp;
+        // 分支标签
+        const rangeTxt=(b.lower!=null||b.upper!=null)?(' '+(b.lower!=null?b.lower:'·')+'~'+(b.upper!=null?b.upper:'·')):'';
+        const lbl=(b.label||'BR')+rangeTxt;
+        s+=`<text class="k-chain-lbl" x="${ex.toFixed(1)}" y="${(ey+sr+12).toFixed(1)}">${lbl}</text>`;
+      });
+    });
+
+    svg.innerHTML=s;
+  }
+  let kekuleOn=false;
+  function toggleKekule(){
+    kekuleOn=!kekuleOn;
+    document.getElementById('kekuleView').style.display = kekuleOn?'block':'none';
+    document.getElementById('hexView').style.display = kekuleOn?'none':'block';
+    document.getElementById('battleView').style.display='none';
+    document.getElementById('kekuleToggle').style.background = kekuleOn?'rgba(255,176,0,.25)':'';
+    if(kekuleOn) renderKekule();
+  }
+
+  // ===================== D 六段编排（横向列布局） =====================
+  const lanesEl=document.getElementById('lanes');
+  function renderLanes(){
+    lanesEl.innerHTML='';
+    lanes.forEach((lane,i)=>{
+      const col=document.createElement('div'); col.className='lane-col';
+      const div=document.createElement('div');
+      div.className='lane'+(i===selectedLane?' selected':'');
+      div.draggable=true; div.dataset.idx=i;
+      const canBranch = (lane.grp==='B'||lane.grp==='C'); // IF / ROLL 非空必分叉
+      div.innerHTML=`<div class="lane-head" data-idx="${i}">
+          <span class="ord">${i+1}</span><span class="name">${lane.name}</span>
+          <span class="desc">${lane.desc}</span>
+          <button class="nest-btn" onclick="addNest(${i})">+ 嵌套</button></div>
+        <div class="lane-body" data-idx="${i}"></div>`;
+      const body=div.querySelector('.lane-body');
+      if(!lane.atoms.length) body.innerHTML='<span class="empty-tip">拖入原子…</span>';
+      lane.atoms.forEach((a,j)=>body.appendChild(makeAtomCard(a,i,j)));
+      if(canBranch){
+        const br=document.createElement('div'); br.className='branches';
+        (lane.branches||[]).forEach((b,k)=>br.appendChild(makeBranch(b,i,k)));
+        const add=document.createElement('button'); add.className='add-branch'; add.textContent='+ 新增分叉分支';
+        add.onclick=()=>{ lanes[i].branches=lanes[i].branches||[]; lanes[i].branches.push({lower:'',upper:'',label:'',atoms:[]}); renderLanes(); };
+        br.appendChild(add); body.appendChild(br);
+      }
+      if(lane.nest) renderNest(body,lane.nest,i,1);
+      div.querySelector('.lane-head').onclick=()=>selectLane(i);
+      col.appendChild(div);
+      lanesEl.appendChild(col);
+    });
+    bindLaneDnd();
+    if(kekuleOn) renderKekule();
+  }
+  function renderNest(parent,nest,laneIdx,depth){
+    const sub=document.createElement('div'); sub.className='subtree';
+    sub.innerHTML=`<div class="subtree-label">↳ 子树层 ${depth}（≤3）</div>`;
+    const wrap=document.createElement('div'); wrap.className='lane-body';
+    if(!nest.atoms||!nest.atoms.length) wrap.innerHTML='<span class="empty-tip">拖入原子…</span>';
+    (nest.atoms||[]).forEach((a,j)=>wrap.appendChild(makeAtomCard(a,laneIdx,j,nest)));
+    sub.appendChild(wrap); parent.appendChild(sub);
+  }
+  // ---- 分支容器渲染（IF / ROLL） ----
+  function makeBranch(b,laneIdx,brIdx){
+    const wrap=document.createElement('div'); wrap.className='branch'; wrap.draggable=false;
+    wrap.innerHTML=`<div class="branch-head">
+        <span class="br-cond">区间</span>
+        <input class="br-range" value="${b.lower||''}" placeholder="下" title="下界" onchange="lanes[${laneIdx}].branches[${brIdx}].lower=this.value;updateEntry();">
+        <span style="color:var(--txt-dim);font-size:10px">~</span>
+        <input class="br-range" value="${b.upper||''}" placeholder="上" title="上界" onchange="lanes[${laneIdx}].branches[${brIdx}].upper=this.value;updateEntry();">
+        <input class="br-label" value="${b.label||''}" placeholder="分支标签（如：命中 / 暴击 / 未中）" onchange="lanes[${laneIdx}].branches[${brIdx}].label=this.value;updateEntry();">
+        <button class="br-del" onclick="lanes[${laneIdx}].branches.splice(${brIdx},1);renderLanes();updateEntry();">✕</button>
+      </div>
+      <div class="branch-body" data-br="${brIdx}"></div>`;
+    const bb=wrap.querySelector('.branch-body');
+    if(!b.atoms||!b.atoms.length) bb.innerHTML='<span class="empty-tip">拖入独立子六段原子…</span>';
+    (b.atoms||[]).forEach((a,j)=>bb.appendChild(makeAtomCard(a,laneIdx,j,null,b,brIdx)));
+    return wrap;
+  }
+  // 参数表单：数字双模控件
+  function makeNumField(field,a,onchange){
+    const wrap=document.createElement('div'); wrap.className='numwrap';
+    const mode=document.createElement('span'); mode.className='num-mode'; mode.textContent='固定'; mode.title='点击切换：固定值 / 公式';
+    const inp=document.createElement('input'); inp.type='text'; inp.value=a.fields&&a.fields[field.k]!==undefined?a.fields[field.k]:field.def;
+    mode.onclick=()=>{ mode.classList.toggle('formula'); mode.textContent=mode.classList.contains('formula')?'公式':'固定';
+      inp.placeholder=mode.classList.contains('formula')?'如 melee × 1':'数字'; };
+    inp.onchange=onchange;
+    wrap.appendChild(mode); wrap.appendChild(inp);
+    return wrap;
+  }
+  function makeAtomCard(a,laneIdx,atomIdx,nest,branch,brIdx){
+    const card=document.createElement('div'); card.className='atom-card'; card.dataset.grp=a.grp; card.draggable=true;
+    const meta = a.atomId ? (ATOM_BY_ID[a.atomId]||{}) : (ATOM_LIB.find(x=>x.key===a.key)||{});
+    const fields = meta.fields||[];
+    card.innerHTML=`<span class="ac-head" style="padding:5px 7px;background:rgba(255,255,255,.03)"><span class="ac-title">${a.label||meta.label||a.key}</span><span class="ac-meta">${a.key}</span><button class="ac-del">✕</button></span>`;
+    // 参数表单
+    const params=document.createElement('div'); params.className='ac-params';
+    if(fields.length){
+      fields.forEach(f=>{
+        const row=document.createElement('div'); row.className='ac-field';
+        const lab=document.createElement('label'); lab.textContent=f.label; row.appendChild(lab);
+        const setVal=(v)=>{ a.fields=a.fields||{}; a.fields[f.k]=v; updateEntry(); };
+        if(f.type==='bool'){
+          const sel=document.createElement('select'); sel.innerHTML='<option value="true">是</option><option value="false">否</option>';
+          sel.value=(''+(a.fields&&a.fields[f.k]!==undefined?a.fields[f.k]:f.def));
+          sel.onchange=()=>setVal(sel.value==='true'); row.appendChild(sel);
+        } else if(f.type==='select'){
+          const sel=document.createElement('select');
+          (f.opts||'').split('|').forEach(o=>{const[val,txt]=o.split(' ');const op=document.createElement('option');op.value=val;op.textContent=txt||val;sel.appendChild(op);});
+          sel.value=(''+(a.fields&&a.fields[f.k]!==undefined?a.fields[f.k]:f.def));
+          sel.onchange=()=>setVal(sel.value); row.appendChild(sel);
+        } else if(f.type==='number'){
+          const nw=makeNumField(f,a,v=>setVal(v)); row.appendChild(nw);
+        } else { // text / json
+          const inp=document.createElement('input'); inp.type='text';
+          inp.value=(''+(a.fields&&a.fields[f.k]!==undefined?a.fields[f.k]:(f.def||'')));
+          if(f.type==='json') inp.placeholder='{…} JSON';
+          inp.onchange=()=>setVal(inp.value); row.appendChild(inp);
+        }
+        if(f.fixed){ row.querySelector('input,select')?.setAttribute('readonly','readonly'); row.style.opacity=.7; }
+        params.appendChild(row);
+      });
+    } else {
+      params.innerHTML='<div style="font-size:9px;color:var(--txt-dim);opacity:.7">无参数 · 纯事件锚点</div>';
+    }
+    card.appendChild(params);
+    // 分支删除
+    card.querySelector('.ac-del').onclick=(e)=>{e.stopPropagation();
+      if(branch){branch.atoms.splice(atomIdx,1);}
+      else if(nest)nest.atoms.splice(atomIdx,1);
+      else lanes[laneIdx].atoms.splice(atomIdx,1);
+      renderLanes(); updateEntry();};
+    card.ondragstart=(e)=>e.dataTransfer.setData('text/atom',JSON.stringify({a,laneIdx,atomIdx,fromNest:!!nest,fromBranch:!!branch}));
+    return card;
+  }
+  function addNest(i){ if(!lanes[i].nest) lanes[i].nest={atoms:[]}; renderLanes(); }
+  function selectLane(i){ selectedLane=i; renderLanes(); drawCanvas(); }
+
+  // 将拖动载荷落到指定目标（泳道 atoms / 分支 atoms）
+  function dropAtom(target, payload){
+    target.atoms=target.atoms||[];
+    target.atoms.push(payload);
+  }
+  function bindLaneDnd(){
+    document.querySelectorAll('.lane').forEach(lane=>{
+      const head=lane.querySelector('.lane-head');
+      head.addEventListener('dragstart',e=>e.dataTransfer.setData('text/lane',lane.dataset.idx));
+      lane.addEventListener('dragover',e=>{e.preventDefault();lane.classList.add('drag-over');});
+      lane.addEventListener('dragleave',()=>lane.classList.remove('drag-over'));
+      // 分支容器拖放
+      lane.querySelectorAll('.branch-body').forEach(bb=>{
+        bb.addEventListener('dragover',e=>{e.preventDefault();bb.classList.add('drag-over');});
+        bb.addEventListener('dragleave',()=>bb.classList.remove('drag-over'));
+        bb.addEventListener('drop',e=>{
+          e.preventDefault(); e.stopPropagation(); bb.classList.remove('drag-over');
+          const li=+lane.dataset.idx, bri=+bb.dataset.br;
+          const na=e.dataTransfer.getData('text/newatom');
+          const ma=e.dataTransfer.getData('text/atom');
+          lanes[li].branches=lanes[li].branches||[];
+          const target=lanes[li].branches[bri];
+          if(na) dropAtom(target, JSON.parse(na));
+          else if(ma){const m=JSON.parse(ma); if(m.fromBranch)lanes[m.laneIdx].branches[m.brIdx].atoms.splice(m.atomIdx,1); else if(m.fromNest)lanes[m.laneIdx].nest.atoms.splice(m.atomIdx,1); else lanes[m.laneIdx].atoms.splice(m.atomIdx,1); dropAtom(target, m.a);}
+          renderLanes(); updateEntry();
+        });
+      });
+      lane.addEventListener('drop',e=>{
+        e.preventDefault(); lane.classList.remove('drag-over');
+        const li=+lane.dataset.idx;
+        const na=e.dataTransfer.getData('text/newatom');
+        const ma=e.dataTransfer.getData('text/atom');
+        const ml=e.dataTransfer.getData('text/lane');
+        if(na) lanes[li].atoms.push(JSON.parse(na));
+        else if(ma){const m=JSON.parse(ma); if(m.fromBranch)lanes[m.laneIdx].branches[m.brIdx].atoms.splice(m.atomIdx,1); else if(m.fromNest)lanes[m.laneIdx].nest.atoms.splice(m.atomIdx,1); else lanes[m.laneIdx].atoms.splice(m.atomIdx,1); lanes[li].atoms.push(m.a);}
+        else if(ml!==''){const from=+ml; if(from!==li){const[x]=lanes.splice(from,1);lanes.splice(li,0,x);}}
+        renderLanes(); updateEntry();
+      });
+    });
+  }
+
+  // ===================== E 词条框（只读属性展示，半透明浮层） =====================
+  function updateEntry(){
+    const name=(lanes[0].atoms[0]&&lanes[0].atoms[0].label)||'未命名词条';
+    const catName={A:'主动触发',B:'条件判定',C:'主语选择',D:'掷骰',F:'效果执行',E:'代价管制',K:'元控制'};
+    const phaseLabels={WHEN:'时机 WHEN',IF:'条件 IF',WHO:'主语 WHO',ROLL:'掷骰 ROLL',DO:'执行 DO',COST:'代价 COST'};
+    const html=[];
+    html.push(`<div class="ec-row"><label>名称</label><span class="ec-val">${name}</span></div>`);
+    html.push(`<div class="ec-row"><label>分类</label><span class="ec-val">${catName[lanes[0].atoms[0]?lanes[0].atoms[0].grp:'']||'—'}</span></div>`);
+    html.push(`<div class="ec-row"><label>描述</label><span class="ec-val">六段编排：${lanes.map(l=>l.name.split(' ')[0]).join(' → ')}</span></div>`);
+    lanes.forEach((lane)=>{
+      html.push(`<div class="ec-phase">${phaseLabels[lane.key]||lane.key}</div>`);
+      if(!lane.atoms.length){ html.push('<span class="ec-chip" style="opacity:.5">（空）</span>'); }
+      lane.atoms.forEach(a=>html.push(`<span class="ec-chip">${a.label}</span>`));
+      // 分支展示
+      if(lane.branches&&lane.branches.length){
+        lane.branches.forEach(b=>{
+          const rg=[b.lower,b.upper].filter(x=>x!==''&&x!=null).join('~')||'*';
+          html.push(`<div class="ec-phase" style="color:var(--amber)">├ 分支 [${rg}] ${b.label||''}</div>`);
+          if(!b.atoms||!b.atoms.length) html.push('<span class="ec-chip" style="opacity:.5">（空）</span>');
+          (b.atoms||[]).forEach(a=>html.push(`<span class="ec-chip">${a.label}</span>`));
+        });
+      }
+      if(lane.nest&&lane.nest.atoms&&lane.nest.atoms.length){
+        html.push(`<div class="ec-phase" style="color:var(--amber)">↳ 子树层</div>`);
+        lane.nest.atoms.forEach(a=>html.push(`<span class="ec-chip">${a.label}</span>`));
+      }
+    });
+    const el=document.getElementById('entryCard');
+    if(el) el.innerHTML=html.join('');
+  }
+
+  // ===================== B 射程画布 400×400 =====================
+  let curLayer='range';
+  const GRID=17, CENTER=8, SIZE=14;
+  const canvas=document.getElementById('hexCanvas'), ctx=canvas.getContext('2d');
+  let mcShapes={right:[]}, mcDir='right', aoeCenter=null;
+  const DIRS=[['right',1,0],['rightup',1,-1],['leftup',-1,-1],['left',-1,0],['leftdown',-1,1],['rightdown',1,1]];
+
+  function setLayer(l){
+    curLayer=l;
+    document.querySelectorAll('.zone-a button').forEach(b=>b.classList.toggle('active',b.dataset.layer===l));
+    const isBattle = (l==='battle');
+    document.getElementById('hexView').style.display = isBattle?'none':'block';
+    document.getElementById('battleView').style.display = isBattle?'block':'none';
+    if(isBattle) setTimeout(resizeBattle,30); else drawCanvas();
+  }
+
+  function offToAx(c,r){ return {q:c-(r+(r&1))/2, r}; }
+  function hexDist(c1,r1,c2,r2){ const a=offToAx(c1,r1),b=offToAx(c2,r2); return (Math.abs(a.q-b.q)+Math.abs(a.q+a.r-b.q-b.r)+Math.abs(a.r-b.r))/2; }
+  function centerOf(col,row){ const w=SIZE*Math.sqrt(3), h=SIZE*1.5; return {x:w*col+(row&1?w/2:0), y:h*row+SIZE}; }
+  function drawHex(cx,cy,stroke,fill,lw,label){
+    const GAP=1,k=Math.max(.5,(SIZE*Math.sqrt(3)-GAP)/(SIZE*Math.sqrt(3))),r=SIZE*k;
+    ctx.beginPath();
+    for(let i=0;i<6;i++){const a=Math.PI/3*i-Math.PI/2;const x=cx+r*Math.cos(a),y=cy+r*Math.sin(a);i?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+    ctx.closePath();
+    if(fill&&fill!=='transparent'){ctx.fillStyle=fill;ctx.fill();}
+    if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||1;ctx.stroke();}
+    if(label!==null&&label!==undefined){ctx.fillStyle='#cdd6e3';ctx.font='8px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,cx,cy);}
+  }
+  function fitTransform(){
+    let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+    for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){const p=centerOf(c,r);minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}
+    const W=canvas.width,H=canvas.height,m=8,gw=(maxX-minX)||1,gh=(maxY-minY)||1,s=Math.min((W-m*2)/gw,(H-m*2)/gh);
+    return{s,offX:W/2-((minX+maxX)/2)*s,offY:H/2-((minY+maxY)/2)*s};
+  }
+  function drawCanvas(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const {s,offX,offY}=fitTransform();
+    const s0=+document.getElementById('rStart').value||1, e0=+document.getElementById('rEnd').value||3;
+    const shape=document.getElementById('shape').value, minR=s0>1?1:0;
+    const cc=centerOf(CENTER,CENTER);
+
+    // 背景格
+    for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){const p=centerOf(c,r);drawHex(offX+p.x*s,offY+p.y*s,'#2a2f3a','transparent',1,null);}
+    // 中心
+    drawHex(offX+cc.x*s,offY+cc.y*s,'#f5c542','rgba(245,197,66,.25)',2,'★');
+
+    // 盲区
+    if(['range','cond'].includes(curLayer)&&minR>0)
+      for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){if(hexDist(c,r,CENTER,CENTER)<=minR-1){const p=centerOf(c,r);drawHex(offX+p.x*s,offY+p.y*s,'rgba(150,60,60,.6)','rgba(120,40,40,.22)',1,null);}}
+
+    // 射程（circle / line 互斥）
+    if(['range','cond'].includes(curLayer)){
+      if(shape==='line' && curLayer==='range'){
+        const v=DIRS[0];
+        for(let st=s0;st<=e0;st++){const q=CENTER+v[1]*st,r=CENTER+v[2]*st;if(q>=0&&q<GRID&&r>=0&&r<GRID){const p=centerOf(q,r);drawHex(offX+p.x*s,offY+p.y*s,'#f5c542','rgba(245,197,66,.4)',2,String(st));}}
+      } else {
+        for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){const d=hexDist(c,r,CENTER,CENTER);if(d>=s0&&d<=e0){const p=centerOf(c,r);drawHex(offX+p.x*s,offY+p.y*s,'#3fae6a','rgba(80,200,120,.45)',1.5,String(d));}}
+      }
+    }
+
+    // AOE
+    if(curLayer==='aoe'){
+      for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){if(hexDist(c,r,CENTER,CENTER)>=s0&&hexDist(c,r,CENTER,CENTER)<=e0){const p=centerOf(c,r);drawHex(offX+p.x*s,offY+p.y*s,'#3fae6a','rgba(80,200,120,.18)',1.5,null);}}
+      if(aoeCenter){const sp=+document.getElementById('aoeSpread').value||1;for(let c=0;c<GRID;c++)for(let r=0;r<GRID;r++){if(hexDist(c,r,aoeCenter.col,aoeCenter.row)<=sp){const p=centerOf(c,r);drawHex(offX+p.x*s,offY+p.y*s,'#4aa3ff','rgba(74,163,255,.5)',2,null);}}}
+    }
+
+    // 地图炮
+    if(curLayer==='mapcannon')
+      for(const dir in mcShapes){const cells=mcShapes[dir]||[],isCur=dir===mcDir;for(const cell of cells){const p=centerOf(cell.q,cell.r);drawHex(offX+p.x*s,offY+p.y*s,isCur?'#f5c542':'#d6453c',isCur?'rgba(245,197,66,.55)':'rgba(214,69,60,.5)',2,null);}}
+  }
+
+  canvas.addEventListener('click',e=>{
+    const rect=canvas.getBoundingClientRect(),px=e.clientX-rect.left,py=e.clientY-rect.top;
+    const {s,offX,offY}=fitTransform();
+    const lx=(px-offX)/s,ly=(py-offY)/s,h=SIZE*1.5,w=SIZE*Math.sqrt(3);
+    const row=Math.round((ly-SIZE)/h),col=Math.round((lx-(row&1?w/2:0))/w);
+    if(col<0||col>=GRID||row<0||row>=GRID)return;
+    if(curLayer==='aoe'){aoeCenter={col,row};drawCanvas();}
+    else if(curLayer==='mapcannon'){const arr=mcShapes[mcDir]||(mcShapes[mcDir]=[]);const idx=arr.findIndex(c=>c.q===col&&c.r===row);if(idx>=0)arr.splice(idx,1);else arr.push({q:col,r:row});drawCanvas();}
+  });
+
+  // ===================== F 战场模拟 =====================
+  const bc=document.getElementById('battleCanvas'), bctx=bc.getContext('2d');
+  function resizeBattle(){const wrap=bc.parentElement;const w=Math.max(1,wrap.clientWidth||360),h=Math.max(1,wrap.clientHeight||240);if(bc.width!==w)bc.width=w;if(bc.height!==h)bc.height=h;drawBattle();}
+
+  const BC_COLS=9, BC_ROWS=7;
+  let manualTargets=[];   // 手动靶子坐标 [{x,y}]
+  let placeMode=false;     // 点击画布放置/清除靶子
+
+  // 射手位置（按下拉）
+  function shooterCell(){
+    const sp=document.getElementById('shooterPos').value;
+    return {left:[1,3],right:[7,3],top:[4,1],center:[4,3]}[sp]||[1,3];
+  }
+  // 随机生成 n 个靶子（与射手间隔≥2）
+  function randomTargets(n){
+    const sp=shooterCell();
+    const spots=[];
+    for(let r=0;r<BC_ROWS;r++)for(let c=0;c<BC_COLS;c++){
+      if(Math.abs(c-sp[0])+Math.abs(r-sp[1])<2) continue;
+      spots.push([c,r]);
+    }
+    const out=[];
+    for(let i=0;i<n&&spots.length;i++){ const idx=Math.floor(Math.random()*spots.length); out.push({x:spots[idx][0],y:spots[idx][1]}); spots.splice(idx,1); }
+    return out;
+  }
+  function genTargets(){
+    const n=Math.max(0,Math.min(12,+document.getElementById('targetCount').value||0));
+    manualTargets=randomTargets(n);
+  }
+  function buildUnits(){
+    const sp=shooterCell();
+    const units=[{x:sp[0],y:sp[1],color:'#5dd47f',label:'射手',isShooter:true}];
+    manualTargets.forEach((t,i)=>units.push({x:t.x,y:t.y,color:'#ff8a80',label:'靶'+(i+1),isShooter:false}));
+    return {cols:BC_COLS,rows:BC_ROWS,units};
+  }
+
+  function drawBattle(){
+    const W=bc.width,H=bc.height;bctx.clearRect(0,0,W,H);
+    const {cols,rows,units}=buildUnits();
+    const cellW=W/cols, cellH=H/rows;
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      bctx.strokeStyle='#2a2f3a';bctx.lineWidth=1;bctx.strokeRect(c*cellW,r*cellH,cellW,cellH);
+      bctx.fillStyle=(c+r)%2?'rgba(30,38,50,.5)':'rgba(20,26,34,.5)';
+      bctx.fillRect(c*cellW+1,r*cellH+1,cellW-2,cellH-2);
+    }
+    units.forEach(u=>{
+      const cx=u.x*cellW+cellW/2, cy=u.y*cellH+cellH/2;   // 棋子严格居中于格中心
+      bctx.fillStyle=u.color;bctx.beginPath();bctx.arc(cx,cy,Math.min(cellW,cellH)/3,0,Math.PI*2);bctx.fill();
+      if(u.hit){ bctx.strokeStyle='#f5c542';bctx.lineWidth=2;bctx.beginPath();bctx.arc(cx,cy,Math.min(cellW,cellH)/3+3,0,Math.PI*2);bctx.stroke(); }
+      if(u.stealth){ bctx.globalAlpha=.35;bctx.fillStyle=u.color;bctx.beginPath();bctx.arc(cx,cy,Math.min(cellW,cellH)/3,0,Math.PI*2);bctx.fill();bctx.globalAlpha=1; }
+      bctx.fillStyle='#fff';bctx.font='10px sans-serif';bctx.textAlign='center';bctx.textBaseline='middle';bctx.fillText(u.label,cx,cy);
+    });
+  }
+
+  // 手动放置/清除靶子
+  bc.addEventListener('click',e=>{
+    if(!placeMode) return;
+    const rect=bc.getBoundingClientRect();
+    const cellW=bc.width/BC_COLS, cellH=bc.height/BC_ROWS;
+    const c=Math.floor((e.clientX-rect.left)/cellW), r=Math.floor((e.clientY-rect.top)/cellH);
+    if(c<0||c>=BC_COLS||r<0||r>=BC_ROWS) return;
+    const sp=shooterCell();
+    if(c===sp[0]&&r===sp[1]) return; // 不能压在射手上
+    const idx=manualTargets.findIndex(t=>t.x===c&&t.y===r);
+    if(idx>=0) manualTargets.splice(idx,1); else manualTargets.push({x:c,y:r});
+    drawBattle();
+  });
+
+  function runTest(){
+    // 战场模拟子集：仅在前端战场画布展示命中效果，不输出 JSON
+    const {units}=buildUnits();
+    const doe=lanes[4].atoms.map(a=>a.key.toUpperCase());
+    const hasEffect=doe.length>0;
+    units.forEach(u=>{
+      if(u.isShooter) return;
+      u.hit=hasEffect;
+      if(doe.some(t=>t==='ENTER_STEALTH')) u.stealth=true;
+    });
+    drawBattle();
+  }
+
+  // ===================== INIT =====================
+  renderAtomPanel(); renderSkills(); renderLanes(); updateEntry();
+  try{ drawCanvas(); }catch(e){ console.warn('drawCanvas 跳过(无canvas):', e.message); }
+  genTargets(); // 初始化随机靶子
+  try{ new ResizeObserver(resizeBattle).observe(document.querySelector('.bs-canvas-wrap')); }catch(e){}
+  setTimeout(()=>{ try{resizeBattle();drawCanvas();}catch(e){} },50);
+  // 凯库勒式默认即渲染（原型视图，免去手动点按钮）
+  kekuleOn=true;
+  document.getElementById('kekuleView').style.display='block';
+  document.getElementById('hexView').style.display='none';
+  document.getElementById('kekuleToggle').style.background='rgba(255,176,0,.25)';
+  try{ renderKekule(); }catch(e){ console.error('renderKekule 失败:', e.message); }
+</script>
+</body>
+</html>

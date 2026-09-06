@@ -14,13 +14,20 @@
       "import": "./dist/hexMath.js",
       "require": "./dist/hexMath.cjs"
     },
+    "./contracts": {
+      "import": "./dist/contracts/index.js",
+      "require": "./dist/contracts/index.cjs"
+    },
     "./tokens": "./src/tokens.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {
     "build": "tsc -b --force && npm run build:cjs",
-    "build:cjs": "tsc --module commonjs --outDir dist/cjs --rootDir src src/hexMath.ts && node -e \"const fs=require('fs');const p='dist/cjs/hexMath.js';const s=fs.readFileSync(p,'utf8');fs.writeFileSync('dist/hexMath.cjs',s);fs.rmSync('dist/cjs',{recursive:true,force:true});\"",
+    "build:cjs": "tsc --module commonjs --esModuleInterop --outDir dist/cjs --rootDir src src/hexMath.ts src/contracts/index.ts && node -e \"const fs=require('fs');for(const f of ['hexMath','contracts/index']){const p='dist/cjs/'+f+'.js';if(fs.existsSync(p)){const s=fs.readFileSync(p,'utf8');fs.writeFileSync('dist/'+f+'.cjs',s);}}fs.rmSync('dist/cjs',{recursive:true,force:true});\"",
     "typecheck": "tsc -b --force"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

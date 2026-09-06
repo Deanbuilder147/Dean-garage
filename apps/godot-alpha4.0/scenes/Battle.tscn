@@ -1,0 +1,25 @@
+[gd_scene format=3 uid="uid://ckvchd3oyvwuy"]
+
+[ext_resource type="Script" uid="uid://cel0njoayy0e2" path="res://net/api_client.gd" id="1_api_client"]
+[ext_resource type="PackedScene" path="res://scenes/Battle3D.tscn" id="2_6grd4"]
+[ext_resource type="Script" uid="uid://i31wh1lyd8q3" path="res://render/hex_board.gd" id="2_hex_board"]
+
+[node name="root" type="Node2D" unique_id=969416422]
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=389242206]
+
+[node name="Node3D" type="Node3D" parent="Camera2D" unique_id=1453633513]
+
+[node name="root" parent="Camera2D" unique_id=2079686026 instance=ExtResource("2_6grd4")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 160.55191, 182.28532, 294.82263)
+
+[node name="ApiClient" type="Node" parent="." unique_id=415340714]
+script = ExtResource("1_api_client")
+
+[node name="HexBoard" type="Node2D" parent="." unique_id=182047335]
+script = ExtResource("2_hex_board")
+
+[node name="StatusLabel" type="Label" parent="." unique_id=554321019]
+offset_right = 600.0
+offset_bottom = 30.0
+text = "启动中…"

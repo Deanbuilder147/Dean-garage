@@ -1,0 +1,392 @@
+- generic [ref=e4]:
+  - complementary [ref=e29]:
+    - complementary [ref=e30]:
+      - button "收起侧边栏" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+      - generic [ref=e34]:
+        - generic "点击查看 / 修改账号信息" [ref=e35] [cursor=pointer]:
+          - generic [ref=e37]:
+            - paragraph [ref=e38]: "[ deantest ]"
+            - paragraph [ref=e39]: "军衔: Earth"
+        - navigation [ref=e40]:
+          - link "首页" [ref=e41] [cursor=pointer]:
+            - /url: /home
+            - img [ref=e42]
+            - generic [ref=e45]: 首页
+          - link "单位编辑器" [ref=e46] [cursor=pointer]:
+            - /url: /units
+            - img [ref=e47]
+            - generic [ref=e49]: 单位编辑器
+          - link "地图编辑器" [ref=e50] [cursor=pointer]:
+            - /url: /battlefield-edit
+            - img [ref=e51]
+            - generic [ref=e56]: 地图编辑器
+          - link "战术部署" [ref=e57] [cursor=pointer]:
+            - /url: /battlefields
+            - img [ref=e58]
+            - generic [ref=e62]: 战术部署
+          - link "词条库" [ref=e63] [cursor=pointer]:
+            - /url: /glossary-hub
+            - img [ref=e64]
+            - generic [ref=e66]: 词条库
+          - link "词条库·新" [active] [ref=e67] [cursor=pointer]:
+            - /url: /glossary-studio
+            - img [ref=e68]
+            - generic [ref=e70]: 词条库·新
+          - link "AI 素材工坊" [ref=e71] [cursor=pointer]:
+            - /url: /asset-gen
+            - img [ref=e72]
+            - generic [ref=e75]: AI 素材工坊
+          - link "问题反馈" [ref=e76] [cursor=pointer]:
+            - /url: /bug-report
+            - img [ref=e77]
+            - generic [ref=e81]: 问题反馈
+          - link "棋子库" [ref=e82] [cursor=pointer]:
+            - /url: /unit-library
+            - img [ref=e83]
+            - generic [ref=e85]: 棋子库
+          - link "我的投稿" [ref=e86] [cursor=pointer]:
+            - /url: /my-units
+            - img [ref=e87]
+            - generic [ref=e89]: 我的投稿
+          - generic [ref=e90]: 后台管理 / Admin
+          - link "后台管理" [ref=e91] [cursor=pointer]:
+            - /url: /admin-center
+            - img [ref=e92]
+            - generic [ref=e95]: 后台管理
+  - main [ref=e5]:
+    - generic [ref=e158]:
+      - generic [ref=e159]:
+        - complementary [ref=e160]:
+          - generic [ref=e161]:
+            - generic [ref=e162]:
+              - generic [ref=e163]: 词条列表
+              - button "＋ 新建技能" [ref=e164] [cursor=pointer]
+            - generic [ref=e165]:
+              - button "全部 / All" [ref=e166] [cursor=pointer]:
+                - generic [ref=e167]: 全部 / All
+              - button "技能 / Skill" [ref=e168] [cursor=pointer]:
+                - generic [ref=e169]: 技能 / Skill
+              - button "特殊 / Special" [ref=e170] [cursor=pointer]:
+                - generic [ref=e171]: 特殊 / Special
+              - button "阵营 / Faction" [ref=e172] [cursor=pointer]:
+                - generic [ref=e173]: 阵营 / Faction
+            - textbox "搜索词条名 / key…" [ref=e175]
+            - generic [ref=e176]:
+              - generic [ref=e177] [cursor=pointer]:
+                - generic [ref=e178]: 格挡
+                - generic [ref=e179]: block
+              - generic [ref=e180] [cursor=pointer]:
+                - generic [ref=e181]: 扫射
+                - generic [ref=e182]: sweep
+              - generic [ref=e183] [cursor=pointer]:
+                - generic [ref=e184]: 投掷
+                - generic [ref=e185]: throw
+              - generic [ref=e186] [cursor=pointer]:
+                - generic [ref=e187]: 斩杀
+                - generic [ref=e188]: execute
+              - generic [ref=e189] [cursor=pointer]:
+                - generic [ref=e190]: 决斗
+                - generic [ref=e191]: duel
+              - generic [ref=e192] [cursor=pointer]:
+                - generic [ref=e193]: 抢夺
+                - generic [ref=e194]: snatch
+              - generic [ref=e195] [cursor=pointer]:
+                - generic [ref=e196]: 专注射击
+                - generic [ref=e197]: focused_fire
+              - generic [ref=e198] [cursor=pointer]:
+                - generic [ref=e199]: 幸运
+                - generic [ref=e200]: lucky
+              - generic [ref=e201] [cursor=pointer]:
+                - generic [ref=e202]: 再动
+                - generic [ref=e203]: reactivate
+              - generic [ref=e204] [cursor=pointer]:
+                - generic [ref=e205]: 近战打击
+                - generic [ref=e206]: melee_strike
+                - generic "核心技能：受保护，不可删改" [ref=e208]: 🔒
+              - generic [ref=e209] [cursor=pointer]:
+                - generic [ref=e210]: 远程射击
+                - generic [ref=e211]: ranged_shot
+                - generic "核心技能：受保护，不可删改" [ref=e213]: 🔒
+              - generic [ref=e214] [cursor=pointer]:
+                - generic [ref=e215]: 护盾壁垒
+                - generic [ref=e216]: shield_wall
+                - generic "核心技能：受保护，不可删改" [ref=e218]: 🔒
+              - generic [ref=e219] [cursor=pointer]:
+                - generic [ref=e220]: 紧急修复
+                - generic [ref=e221]: repair
+                - generic "核心技能：受保护，不可删改" [ref=e223]: 🔒
+              - generic [ref=e224] [cursor=pointer]:
+                - generic [ref=e225]: 超载驱动
+                - generic [ref=e226]: overdrive
+                - generic "核心技能：受保护，不可删改" [ref=e228]: 🔒
+              - generic [ref=e229] [cursor=pointer]:
+                - generic [ref=e230]: 光束加农炮
+                - generic [ref=e231]: beam_cannon
+                - generic "核心技能：受保护，不可删改" [ref=e233]: 🔒
+        - generic [ref=e234]:
+          - button "六段式" [ref=e235] [cursor=pointer]
+          - button "射程" [ref=e236] [cursor=pointer]
+          - button "AOE" [ref=e237] [cursor=pointer]
+          - button "地图炮" [ref=e238] [cursor=pointer]
+          - button "战场模拟" [ref=e239] [cursor=pointer]
+        - generic [ref=e241]:
+          - generic [ref=e242]:
+            - generic [ref=e243]: 射程 / 攻击范围画布
+            - generic [ref=e244]: 👁 只读预览
+          - generic [ref=e247]:
+            - generic [ref=e248]: 自身/已绘格
+            - generic [ref=e250]: AOE
+            - generic [ref=e252]: 地图炮
+        - generic [ref=e255]:
+          - heading "E · 当前词条属性（只读）" [level=3] [ref=e256]
+          - generic [ref=e257]: ← 从左侧选择一个词条
+      - generic [ref=e258]:
+        - generic [ref=e259]:
+          - generic [ref=e260]:
+            - heading "D · 六段编排画布" [level=3] [ref=e261]
+            - button "✎ 保存 / 编辑" [ref=e263] [cursor=pointer]
+          - generic [ref=e264]: 六段式（WHEN/IF/WHO/ROLL/DO/COST）：拖拽段头可调整六段顺序；从右侧原子面板拖原子到本段泳道；点段头「＋ 子段」可在选中的段上挂一层子树（≤3）。点段选中，保存即写回词条。
+        - generic [ref=e266]:
+          - heading "C · 原子面板 81" [level=3] [ref=e267]
+          - textbox "🔍 搜索原子 / 编号 / 中文…" [ref=e268]
+          - generic [ref=e269]:
+            - generic [ref=e270]:
+              - generic [ref=e271] [cursor=pointer]:
+                - generic [ref=e272]: ▼
+                - text: A · 触发时机 WHEN
+                - generic [ref=e273]: (13)
+              - generic [ref=e274]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e275]:
+                  - generic [ref=e277]: A1 受击时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e278]:
+                  - generic [ref=e280]: A2 造成伤害后
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e281]:
+                  - generic [ref=e283]: A3 近战伤害结算后
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e284]:
+                  - generic [ref=e286]: A4 击杀时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e287]:
+                  - generic [ref=e289]: A5 攻击开始时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e290]:
+                  - generic [ref=e292]: A6 目标选定时
+                - generic "由调度层承接（WHEN 时机，非 effectExecutor handler）" [ref=e293]:
+                  - generic [ref=e295]: A7 回合开始
+                - generic "由调度层承接（WHEN 时机，非 effectExecutor handler）" [ref=e296]:
+                  - generic [ref=e298]: A8 轮次开始
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e299]:
+                  - generic [ref=e301]: A9 友军受击时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e302]:
+                  - generic [ref=e304]: A10 移动路径计算时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e305]:
+                  - generic [ref=e307]: A11 获得空投时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e308]:
+                  - generic [ref=e310]: A12 踩点时
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e311]:
+                  - generic [ref=e313]: 手动释放
+            - generic [ref=e314]:
+              - generic [ref=e315] [cursor=pointer]:
+                - generic [ref=e316]: ▼
+                - text: B · 条件门槛 IF
+                - generic [ref=e317]: (10)
+              - generic [ref=e318]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e319]:
+                  - generic [ref=e321]: B1 射程内
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e322]:
+                  - generic [ref=e324]: B2 互在射程
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e325]:
+                  - generic [ref=e327]: B3 HP 阈值
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e328]:
+                  - generic [ref=e330]: B4 属性对比
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e331]:
+                  - generic [ref=e333]: B5 共线并列
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e334]:
+                  - generic [ref=e336]: B6 地形匹配
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e337]:
+                  - generic [ref=e339]: B7 伤害种类匹配
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e340]:
+                  - generic [ref=e342]: B8 未攻击过
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e343]:
+                  - generic [ref=e345]: B9 不在扫描范围
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e346]:
+                  - generic [ref=e348]: B10 限次
+            - generic [ref=e349]:
+              - generic [ref=e350] [cursor=pointer]:
+                - generic [ref=e351]: ▼
+                - text: C · 数值生成与判定 ROLL
+                - generic [ref=e352]: (8)
+              - generic [ref=e353]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e354]:
+                  - generic [ref=e356]: C1 无判定
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e357]:
+                  - generic [ref=e359]: C2 单数值阈值二分
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e360]:
+                  - generic [ref=e362]: C3 单数值多段
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e363]:
+                  - generic [ref=e365]: C4 对抗数值
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e366]:
+                  - generic [ref=e368]: C5 数值参与运算
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e369]:
+                  - generic [ref=e371]: C6 数值分色
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e372]:
+                  - generic [ref=e374]: C7 数值 vs 动态值
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e375]:
+                  - generic [ref=e377]: 手动掷骰
+            - generic [ref=e378]:
+              - generic [ref=e379] [cursor=pointer]:
+                - generic [ref=e380]: ▼
+                - text: D · 效果·伤害 DO
+                - generic [ref=e381]: (7)
+              - generic [ref=e382]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e383]:
+                  - generic [ref=e385]: D1 伤害加减值
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e386]:
+                  - generic [ref=e388]: D2 按 kind 减免
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e389]:
+                  - generic [ref=e391]: D3 伤害均摊
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e392]:
+                  - generic [ref=e394]: D4 伤害分担转移
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e395]:
+                  - generic [ref=e397]: D5 即死
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e398]:
+                  - generic [ref=e400]: D6 同归于尽
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e401]:
+                  - generic [ref=e403]: D7 延迟易伤标记
+            - generic [ref=e404]:
+              - generic [ref=e405] [cursor=pointer]:
+                - generic [ref=e406]: ▼
+                - text: E · 效果·资源 DO
+                - generic [ref=e407]: (3)
+              - generic [ref=e408]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e409]:
+                  - generic [ref=e411]: E1 HP 回复
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e412]:
+                  - generic [ref=e414]: E2 装备耐久回复
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e415]:
+                  - generic [ref=e417]: E3 耐久扣减
+            - generic [ref=e418]:
+              - generic [ref=e419] [cursor=pointer]:
+                - generic [ref=e420]: ▼
+                - text: F · 效果·状态 DO
+                - generic [ref=e421]: (7)
+              - generic [ref=e422]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e423]:
+                  - generic [ref=e425]: F1 属性增减益
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e426]:
+                  - generic [ref=e428]: F2 机动差项修正
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e429]:
+                  - generic [ref=e431]: F3 跳过机动判定
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e432]:
+                  - generic [ref=e434]: F4 充能层（N 次）
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e435]:
+                  - generic [ref=e437]: F5 互斥组
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e438]:
+                  - generic [ref=e440]: F6 永久失效
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e441]:
+                  - generic [ref=e443]: 护盾
+            - generic [ref=e444]:
+              - generic [ref=e445] [cursor=pointer]:
+                - generic [ref=e446]: ▼
+                - text: G · 效果·行动 DO/COST
+                - generic [ref=e447]: (9)
+              - generic [ref=e448]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e449]:
+                  - generic [ref=e451]: G1 额外回合
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e452]:
+                  - generic [ref=e454]: G2 放弃移动
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e455]:
+                  - generic [ref=e457]: G3 预支行动
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e458]:
+                  - generic [ref=e460]: G4 预支回合
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e461]:
+                  - generic [ref=e463]: G5 抢占顶替
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e464]:
+                  - generic [ref=e466]: G6 行动序改写
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e467]:
+                  - generic [ref=e469]: G7 授予/剥夺行动
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e470]:
+                  - generic [ref=e472]: G8 防连锁
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e473]:
+                  - generic [ref=e475]: 阻止移动
+            - generic [ref=e476]:
+              - generic [ref=e477] [cursor=pointer]:
+                - generic [ref=e478]: ▼
+                - text: H · 效果·空间 DO
+                - generic [ref=e479]: (6)
+              - generic [ref=e480]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e481]:
+                  - generic [ref=e483]: H1 地图炮（自身原点·定向）
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e484]:
+                  - generic [ref=e486]: H2 AOE（落点在射程内）
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e487]:
+                  - generic [ref=e489]: H3 强制位移
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e490]:
+                  - generic [ref=e492]: H4 共线阻挡
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e493]:
+                  - generic [ref=e495]: H5 区域揭示
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e496]:
+                  - generic [ref=e498]: H6 生成地图实体
+            - generic [ref=e499]:
+              - generic [ref=e500] [cursor=pointer]:
+                - generic [ref=e501]: ▼
+                - text: I · 效果·信息 DO
+                - generic [ref=e502]: (7)
+              - generic [ref=e503]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e504]:
+                  - generic [ref=e506]: I1 可见性
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e507]:
+                  - generic [ref=e509]: I2 可选中性
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e510]:
+                  - generic [ref=e512]: I3 扫描范围
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e513]:
+                  - generic [ref=e515]: 进入隐匿
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e516]:
+                  - generic [ref=e518]: 退出隐匿
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e519]:
+                  - generic [ref=e521]: 隐匿攻击加成
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e522]:
+                  - generic [ref=e524]: 隐匿闪避
+            - generic [ref=e525]:
+              - generic [ref=e526] [cursor=pointer]:
+                - generic [ref=e527]: ▼
+                - text: J · 效果·所有权 DO
+                - generic [ref=e528]: (2)
+              - generic [ref=e529]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e530]:
+                  - generic [ref=e532]: J1 装备抢夺转移
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e533]:
+                  - generic [ref=e535]: 装备锁定
+            - generic [ref=e536]:
+              - generic [ref=e537] [cursor=pointer]:
+                - generic [ref=e538]: ▼
+                - text: K · 元能力 COST/META
+                - generic [ref=e539]: (4)
+              - generic [ref=e540]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e541]:
+                  - generic [ref=e543]: K1 词条改写词条
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e544]:
+                  - generic [ref=e546]: K2 多技能槽占用
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e547]:
+                  - generic [ref=e549]: K3 玩家可选发动
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e550]:
+                  - generic [ref=e552]: K4 打断响应窗口
+            - generic [ref=e553]:
+              - generic [ref=e554] [cursor=pointer]:
+                - generic [ref=e555]: ▼
+                - text: 其他 · 引擎已有未列
+                - generic [ref=e556]: (5)
+              - generic [ref=e557]:
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e558]:
+                  - generic [ref=e560]: 高地优势
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e561]:
+                  - generic [ref=e563]: 地形种类修正
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e564]:
+                  - generic [ref=e566]: 幸运判定
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e567]:
+                  - generic [ref=e569]: 移除 Buff
+                - generic "引擎已就绪（handler / 段树求值器已接通）" [ref=e570]:
+                  - generic [ref=e572]: 自定义效果
+          - generic [ref=e573]:
+            - generic [ref=e574]: 绿 · 引擎 handler 已就绪
+            - generic [ref=e575]: 琥珀 · 需补 TYPE_ALIAS 别名
+            - generic [ref=e576]: 红 · 引擎需新建
+            - generic [ref=e577]: A-K 共 81 原子 · 前端缺失 ≈54
