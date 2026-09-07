@@ -154,6 +154,7 @@ function collectNodes(){
   const sk=getSkill();
   const nodes=[];
   const occ=new Map();
+  const K=(q,r)=>q+','+r;
   nodes.push({type:'center',x:0,y:0});
   PHASES.forEach(p=>{ const c=cellXY(p.q,p.r); occ.set(K(p.q,p.r),true); nodes.push({type:'phase',phase:p,q:p.q,r:p.r,x:c.x,y:c.y,replaced:false}); });
   const rollReplace = !!(sk.roll && sk.roll.segments.length);
