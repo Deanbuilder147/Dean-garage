@@ -52,6 +52,7 @@ const routes = [
   //   严禁替换/覆盖现有词条库页面（/glossary、/glossary-studio、/glossary-studio-v2、/glossary-carousel），
   //   以下两条为新增路由，与原有页面共存，可独立测试编辑。
   { path: '/glossary-forge-prism', component: () => import('./views/GlossaryForgePrismView.vue'), meta: { requiresAuth: true, title: '词条锻造·棱柱工坊' } },
+  { path: '/glossary-forge-crystal', component: () => import('./views/GlossaryForgeCrystalView.vue'), meta: { requiresAuth: true, title: '词条锻造·晶体工坊' } },
   { path: '/glossary-forge-blueprint', component: () => import('./views/GlossaryForgeBlueprintView.vue'), meta: { requiresAuth: true, title: '词条锻造·蓝图' } },
   { path: '/dice-config', component: DiceConfigView, meta: { requiresAuth: true, requiresRole: ['admin', 'dominator'] } },
   { path: '/size-config', component: () => import('./views/SizeConfigView.vue'), meta: { requiresAuth: true, requiresRole: ['admin', 'dominator'] } },
