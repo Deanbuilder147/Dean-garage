@@ -25,7 +25,7 @@
         <div id="skillWarn" class="hb-warn"></div>
         <div id="popAnchor"></div>
       </section>
-      <aside class="hb-col">
+      <aside class="hb-col hb-col-right">
         <h3>技能说明书 <em style="font-style:normal;font-size:10px;opacity:.7">实时</em></h3>
         <div class="hb-readout" id="readout"></div>
 
@@ -108,7 +108,11 @@
 .hb-center-score{font-size:9.5px;text-anchor:middle;fill:var(--gold-2);pointer-events:none;}
 .hb-addhex{font-size:16px;font-weight:800;text-anchor:middle;fill:var(--gold-2);pointer-events:none;}
 .hb-flowlabel{font-size:10px;font-weight:700;text-anchor:middle;fill:#cfe6ff;pointer-events:none;}
-.hb-readout{font-size:10px;color:#9fb0c4;line-height:1.6;background:#0e1824;border:1px solid #2b3a4a;border-radius:8px;padding:9px;margin-top:8px;white-space:pre-wrap;}
+.hb-readout{font-size:10px;color:#9fb0c4;line-height:1.6;background:#0e1824;border:1px solid #2b3a4a;border-radius:8px;padding:9px;margin-top:8px;white-space:pre-wrap;flex:1 1 auto;min-height:0;max-height:300px;overflow-y:auto;}
+.hb-col-right{position:sticky;top:14px;max-height:calc(100vh - 28px);overflow-y:auto;display:flex;flex-direction:column;}
+.hb-col-right::-webkit-scrollbar,.hb-readout::-webkit-scrollbar{width:8px;}
+.hb-col-right::-webkit-scrollbar-thumb,.hb-readout::-webkit-scrollbar-thumb{background:rgba(255,176,0,.35);border-radius:4px;}
+.hb-col-right::-webkit-scrollbar-track,.hb-readout::-webkit-scrollbar-track{background:transparent;}
 .hb-pop{position:absolute;z-index:80;width:240px;background:#0e1824;border:1px solid rgba(255,176,0,.55);border-radius:12px;padding:10px;box-shadow:0 14px 36px rgba(0,0,0,.55);}
 .hb-pop.purple{border-color:rgba(160,107,255,.6);}
 .hb-pop:after{content:'';position:absolute;width:12px;height:12px;background:#0e1824;border-left:1px solid rgba(255,176,0,.55);border-bottom:1px solid rgba(255,176,0,.55);transform:rotate(45deg);}
