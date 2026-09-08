@@ -24,6 +24,45 @@
         <p class="hb-hint">外圈=六段流向（WHEN→IF→ROLL→DO→AFTER→COST）· 中心=蜂巢 · 点相位高亮 / 点原子或枝尾「＋」增改 · 两指拖拽=平移、捏合=缩放</p>
         <div id="skillWarn" class="hb-warn"></div>
         <div id="popAnchor"></div>
+
+        <!-- 右下角：射程 / 攻击范围绘制层 -->
+        <div class="hb-range" v-show="rangeOpen">
+          <div class="hb-range-hd">
+            射程 / 命中范围 <em>Range / Hit Area</em>
+            <button class="hb-range-x" @click="rangeOpen=false" title="收起">▾</button>
+          </div>
+          <div class="hb-range-ctl">
+            <div class="hb-row">
+              <label>射程上限</label><b>{{ rangeMax }}</b>
+              <input type="range" min="1" max="9" v-model.number="rangeMax" />
+            </div>
+            <div class="hb-modes">
+              <button v-for="m in HIT_AREA_MODES" :key="m.value"
+                      :class="{on:hitMode===m.value}" @click="hitMode=m.value">{{ m.label }}</button>
+            </div>
+            <template v-if="hitMode==='aoe'">
+              <div class="hb-row"><label>覆盖半径</label>
+                <input type="number" min="0" v-model.number="aoeSpread" /></div>
+              <div class="hb-row"><label>内圈盲区</label>
+                <input type="number" min="0" v-model.number="aoeInner" /></div>
+              <p class="hb-tip">在网格点选落点（青色=射程可达，金色=命中范围）</p>
+            </template>
+            <template v-else-if="hitMode==='map_cannon'">
+              <div class="hb-dirs">
+                <button v-for="d in MC_DIRS" :key="d.key"
+                        :class="{on:activeDir===d.key}" @click="activeDir=d.key">{{ d.label }}</button>
+              </div>
+              <p class="hb-tip">点格增删（金色=已覆盖，高亮=当前方向）</p>
+            </template>
+            <template v-else><p class="hb-tip">单体命中，不产生范围。</p></template>
+          </div>
+          <div class="hb-range-grid">
+            <HexHitGrid skin="prism" :mode="hitMode" :aoe-center="aoeCenter" :aoe-spread="aoeSpread"
+              :aoe-inner="aoeInner" :mc-directions="mcDirections" :active-dir="activeDir"
+              :range-max="rangeMax" :reachable="hitMode==='aoe'" @pick="onHitPick" />
+          </div>
+        </div>
+        <button v-show="!rangeOpen" class="hb-range-open" @click="rangeOpen=true" title="射程 / 攻击范围">⊞ 范围</button>
       </section>
       <aside class="hb-col">
         <h3>技能说明书 <em style="font-style:normal;font-size:10px;opacity:.7">实时</em></h3>
@@ -94,11 +133,58 @@
 .hb-warn b{color:#fff;}
 .hb-warn button{margin-top:8px;font-size:10.5px;padding:4px 9px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,138,0,.6);background:rgba(255,138,0,.18);color:#ffd9a8;}
 .hb-warn button:hover{background:rgba(255,138,0,.3);}
+/* ---- 右下角：射程 / 攻击范围绘制层 ---- */
+.hb-range{position:absolute;right:8px;bottom:8px;width:300px;background:rgba(10,18,32,.92);border:1px solid rgba(255,176,0,.4);border-radius:12px;padding:9px 10px;z-index:7;box-shadow:0 12px 30px rgba(0,0,0,.5);backdrop-filter:blur(3px);}
+.hb-range-hd{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gold);font-weight:700;margin-bottom:7px;}
+.hb-range-hd em{font-style:normal;font-size:9px;color:var(--gold-2);opacity:.7;}
+.hb-range-hd .hb-range-x{margin-left:auto;background:none;border:1px solid rgba(255,176,0,.4);color:#ffd597;border-radius:6px;width:20px;height:20px;cursor:pointer;font-size:10px;line-height:1;}
+.hb-range-ctl{display:flex;flex-direction:column;gap:6px;margin-bottom:7px;}
+.hb-row{display:flex;align-items:center;gap:7px;font-size:11px;color:#9fb0c4;}
+.hb-row label{flex:none;}
+.hb-row b{color:#fff;}
+.hb-row input[type=range]{flex:1;min-width:0;}
+.hb-row input[type=number]{width:52px;background:#0a1322;border:1px solid #2b3a4a;border-radius:5px;color:#dfeaf5;font-size:11px;padding:2px 4px;}
+.hb-modes,.hb-dirs{display:flex;gap:4px;flex-wrap:wrap;}
+.hb-modes button,.hb-dirs button{flex:1;min-width:40px;font-size:10.5px;padding:4px 5px;border-radius:7px;cursor:pointer;border:1px solid #2b3a4a;background:#13243b;color:#cfe6ff;}
+.hb-modes button.on,.hb-dirs button.on{border-color:var(--gold);background:rgba(255,176,0,.18);color:#fff;}
+.hb-range-grid{border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;background:#08111f;}
+.hb-tip{font-size:10px;color:#8aa0b4;line-height:1.5;margin:4px 0 0;}
+.hb-range-open{position:absolute;right:8px;bottom:8px;z-index:7;font-size:11px;padding:6px 10px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,176,0,.45);background:rgba(10,18,32,.9);color:#ffd597;}
+.hb-range-open:hover{border-color:var(--gold);}
 </style>
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import HexHitGrid from '../components/glossary-forge/HexHitGrid.vue'
+import { HIT_AREA_MODES } from '../battle/glossary/hitAreaModel.js'
 const root = ref(null)
 let cleanup = () => {}
+
+// ---- 右下角：射程 / 攻击范围绘制层（复用 HexHitGrid，尖顶朝向与六边形棋盘一致）----
+const rangeMax = ref(5)
+const hitMode = ref('aoe')            // none | aoe | map_cannon
+const aoeCenter = ref({ q: 0, r: 0 })
+const aoeSpread = ref(1)
+const aoeInner = ref(0)
+const mcDirections = ref({ right: [] })
+const activeDir = ref('right')
+const rangeOpen = ref(true)
+const MC_DIRS = [
+  { key: 'right', label: '正右' }, { key: 'rightdown', label: '右下' },
+  { key: 'leftdown', label: '左下' }, { key: 'left', label: '正左' },
+  { key: 'leftup', label: '左上' }, { key: 'rightup', label: '右上' }
+]
+function onHitPick(rel) {
+  if (hitMode.value === 'aoe') {
+    aoeCenter.value = { q: rel.q, r: rel.r }
+  } else if (hitMode.value === 'map_cannon') {
+    const list = mcDirections.value[activeDir.value] || []
+    const key = rel.q + ',' + rel.r
+    const idx = list.findIndex(c => c.q + ',' + c.r === key)
+    if (idx >= 0) list.splice(idx, 1)
+    else list.push({ q: rel.q, r: rel.r })
+    mcDirections.value = { ...mcDirections.value, [activeDir.value]: [...list] }
+  }
+}
 onMounted(() => {
 const S = 38;
 const ORDER = ['WHEN','IF','ROLL','DO','AFTER','COST'];
