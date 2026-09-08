@@ -146,7 +146,8 @@ const anchor=document.getElementById('popAnchor');
 let baseVB={x:0,y:0,w:360,h:400};
 let curVB={x:0,y:0,w:360,h:400};
 const view={z:1, cx:0, cy:0};
-function cellXY(q,r){ return { x:1.5*S*q, y:Math.sqrt(3)*S*(r+q/2) }; }
+// 尖顶(pointy-top)轴向→像素，与地图编辑器 hexUtils.pointyTopCenter / drawHexPath 同一套朝向约定
+function cellXY(q,r){ return { x:Math.sqrt(3)*S*(q + r/2), y:1.5*S*r }; }
 function hexPoints(cx,cy,s){ const p=[]; for(let i=0;i<6;i++){ const a=Math.PI/180*(60*i-90); p.push((cx+s*Math.cos(a)).toFixed(1)+','+(cy+s*Math.sin(a)).toFixed(1)); } return p.join(' '); }
 function short(s,n=4){ s=String(s); return s.length>n? s.slice(0,n-1)+'…': s; }
 function getSkill(){ return SKILLS[curKey]; }
