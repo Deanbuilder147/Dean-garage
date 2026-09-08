@@ -92,8 +92,8 @@
 .hb-entry.on{background:rgba(255,176,0,.18);border-color:var(--gold);}
 .hb-gem{width:11px;height:13px;flex:none;background:linear-gradient(150deg,var(--gold),#8a5e00);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);}
 .hb-name{font-size:11.5px;flex:1;}
-.hb-board-wrap{display:flex;flex-direction:column;align-items:center;position:relative;}
-.hb-board{width:100%;max-width:680px;}
+.hb-board-wrap{display:flex;flex-direction:column;align-items:center;position:relative;min-height:720px;}
+.hb-board{width:100%;max-width:680px;height:600px;}
 .hb-hex{cursor:pointer;transition:filter .18s;}
 .hb-hex:hover .hb-hexfill{filter:brightness(1.18);}
 .hb-hex.sel .hb-hexfill{stroke:#fff;stroke-width:3;}
