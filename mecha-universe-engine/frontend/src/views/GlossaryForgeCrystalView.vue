@@ -24,8 +24,12 @@
         <p class="hb-hint">外圈=六段流向（WHEN→IF→ROLL→DO→AFTER→COST）· 中心=蜂巢 · 点相位高亮 / 点原子或枝尾「＋」增改 · 两指拖拽=平移、捏合=缩放</p>
         <div id="skillWarn" class="hb-warn"></div>
         <div id="popAnchor"></div>
+      </section>
+      <aside class="hb-col">
+        <h3>技能说明书 <em style="font-style:normal;font-size:10px;opacity:.7">实时</em></h3>
+        <div class="hb-readout" id="readout"></div>
 
-        <!-- 右下角：射程 / 攻击范围绘制层 -->
+        <!-- 射程 / 攻击范围绘制层（右栏，避免遮挡棋盘） -->
         <div class="hb-range" v-show="rangeOpen">
           <div class="hb-range-hd">
             射程 / 命中范围 <em>Range / Hit Area</em>
@@ -63,10 +67,6 @@
           </div>
         </div>
         <button v-show="!rangeOpen" class="hb-range-open" @click="rangeOpen=true" title="射程 / 攻击范围">⊞ 范围</button>
-      </section>
-      <aside class="hb-col">
-        <h3>技能说明书 <em style="font-style:normal;font-size:10px;opacity:.7">实时</em></h3>
-        <div class="hb-readout" id="readout"></div>
       </aside>
     </div>
   </div>
@@ -134,7 +134,7 @@
 .hb-warn button{margin-top:8px;font-size:10.5px;padding:4px 9px;border-radius:7px;cursor:pointer;border:1px solid rgba(255,138,0,.6);background:rgba(255,138,0,.18);color:#ffd9a8;}
 .hb-warn button:hover{background:rgba(255,138,0,.3);}
 /* ---- 右下角：射程 / 攻击范围绘制层 ---- */
-.hb-range{position:absolute;right:8px;bottom:8px;width:300px;background:rgba(10,18,32,.92);border:1px solid rgba(255,176,0,.4);border-radius:12px;padding:9px 10px;z-index:7;box-shadow:0 12px 30px rgba(0,0,0,.5);backdrop-filter:blur(3px);}
+.hb-range{margin-top:12px;background:rgba(10,18,32,.92);border:1px solid rgba(255,176,0,.4);border-radius:12px;padding:9px 10px;box-shadow:0 12px 30px rgba(0,0,0,.5);backdrop-filter:blur(3px);}
 .hb-range-hd{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gold);font-weight:700;margin-bottom:7px;}
 .hb-range-hd em{font-style:normal;font-size:9px;color:var(--gold-2);opacity:.7;}
 .hb-range-hd .hb-range-x{margin-left:auto;background:none;border:1px solid rgba(255,176,0,.4);color:#ffd597;border-radius:6px;width:20px;height:20px;cursor:pointer;font-size:10px;line-height:1;}
@@ -148,8 +148,9 @@
 .hb-modes button,.hb-dirs button{flex:1;min-width:40px;font-size:10.5px;padding:4px 5px;border-radius:7px;cursor:pointer;border:1px solid #2b3a4a;background:#13243b;color:#cfe6ff;}
 .hb-modes button.on,.hb-dirs button.on{border-color:var(--gold);background:rgba(255,176,0,.18);color:#fff;}
 .hb-range-grid{border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;background:#08111f;}
+.hb-range-grid svg{width:100%;height:auto;display:block;}
 .hb-tip{font-size:10px;color:#8aa0b4;line-height:1.5;margin:4px 0 0;}
-.hb-range-open{position:absolute;right:8px;bottom:8px;z-index:7;font-size:11px;padding:6px 10px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,176,0,.45);background:rgba(10,18,32,.9);color:#ffd597;}
+.hb-range-open{display:block;width:100%;margin-top:12px;font-size:11px;padding:6px 10px;border-radius:9px;cursor:pointer;border:1px solid rgba(255,176,0,.45);background:rgba(10,18,32,.9);color:#ffd597;}
 .hb-range-open:hover{border-color:var(--gold);}
 </style>
 <script setup>
